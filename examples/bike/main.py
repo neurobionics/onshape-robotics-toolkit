@@ -21,10 +21,10 @@ variables = client.get_variables(doc.did, doc.wid, elements["variables"].id)
 
 variables["wheelDiameter"].expression = "300 mm"
 variables["wheelThickness"].expression = "71 mm"
-variables["forkAngle"].expression = "30 deg"
+variables["forkAngle"].expression = "20 deg"
 
 client.set_variables(doc.did, doc.wid, elements["variables"].id, variables)
-assembly = client.get_assembly(doc.did, doc.wtype, doc.wid, elements["assembly"].id)
+assembly, _ = client.get_assembly(doc.did, doc.wtype, doc.wid, elements["assembly"].id)
 
 occurences = get_occurences(assembly)
 instances = get_instances(assembly)

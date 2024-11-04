@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import stl
+from networkx import DiGraph, Graph
 
 from onshape_api.connect import Client
 from onshape_api.log import LOGGER
@@ -51,12 +52,16 @@ def generate_names(max_length: int) -> list[str]:
     return random.sample(words, max_length)
 
 
-def show_graph(graph: nx.Graph) -> None:
+def get_random_color() -> tuple[float, float, float, float]:
+    return random.SystemRandom().choice(list(COLORS)).value
+
+
+def show_graph(graph: Graph) -> None:
     nx.draw_circular(graph, with_labels=True)
     plt.show()
 
 
-def convert_to_digraph(graph: nx.Graph) -> tuple[nx.DiGraph, str]:
+def convert_to_digraph(graph: Graph) -> tuple[DiGraph, str]:
     _centrality = nx.closeness_centrality(graph)
     _root_node = max(_centrality, key=_centrality.get)
     _graph = nx.bfs_tree(graph, _root_node)
@@ -69,8 +74,8 @@ def create_graph(
     parts: dict[str, Part],
     mates: dict[str, MateFeatureData],
     directed: bool = True,
-) -> Union[nx.Graph, tuple[nx.DiGraph, str]]:
-    graph = nx.Graph()
+) -> Union[Graph, tuple[DiGraph, str]]:
+    graph: Graph = Graph()
 
     for occurence in occurences:
         if instances[occurence].type == InstanceType.PART:
@@ -161,7 +166,7 @@ def get_robot_link(
         visual=VisualLink(
             origin=_origin,
             geometry=MeshGeometry(_mesh_path),
-            material=Material.from_color(name=f"{name}_material", color=random.SystemRandom().choice(list(COLORS))),
+            material=Material.from_color(name=f"{name}_material", color=get_random_color()),
         ),
         inertial=InertialLink(
             origin=Origin(
@@ -228,14 +233,14 @@ def get_robot_joint(
 
 
 def get_urdf_components(
-    graph: Union[nx.Graph, nx.DiGraph],
+    graph: Union[Graph, DiGraph],
     workspaceId: str,
     parts: dict[str, Part],
     mass_properties: dict[str, MassModel],
     mates: dict[str, MateFeatureData],
     client: Client,
 ) -> tuple[list[Link], list[Union[RevoluteJoint, FixedJoint]]]:
-    if not isinstance(graph, nx.DiGraph):
+    if not isinstance(graph, DiGraph):
         graph, root_node = convert_to_digraph(graph)
 
     joints: list[Union[RevoluteJoint, FixedJoint]] = []
@@ -287,3 +292,7 @@ def get_urdf_components(
         links.append(_link)
 
     return links, joints
+
+
+if __name__ == "__main__":
+    print(get_random_color())

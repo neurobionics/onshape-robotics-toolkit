@@ -90,13 +90,13 @@ class MassModel(BaseModel):
 
         return reference @ self.inertia_matrix @ reference.T
 
-    def center_of_mass_wrt(self, reference: np.matrix) -> np.ndarray:
+    def center_of_mass_wrt(self, reference: np.matrix) -> tuple[float, float, float]:
         if reference.shape != (4, 4):
             raise ValueError("Reference frame must be a 4x4 matrix")
 
         com = np.matrix([*list(self.center_of_mass), 1.0])
         com_wrt = (reference * com.T)[:3]
-        return np.array([com_wrt[0, 0], com_wrt[1, 0], com_wrt[2, 0]])
+        return (com_wrt[0, 0], com_wrt[1, 0], com_wrt[2, 0])
 
 
 if __name__ == "__main__":

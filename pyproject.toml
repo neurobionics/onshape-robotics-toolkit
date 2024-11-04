@@ -30,6 +30,7 @@ deptry = "^0.16.2"
 mypy = "^1.5.1"
 pre-commit = "^3.4.0"
 tox = "^4.11.1"
+types-networkx = "^3.3.0.20241020"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.4.2"

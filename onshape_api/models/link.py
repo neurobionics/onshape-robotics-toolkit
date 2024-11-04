@@ -102,7 +102,7 @@ class Material:
         return material
 
     @classmethod
-    def from_color(cls, name: str, color: COLORS) -> "Material":
+    def from_color(cls, name: str, color: tuple[float, float, float, float]) -> "Material":
         return cls(name, color)
 
 
