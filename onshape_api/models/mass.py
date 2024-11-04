@@ -53,11 +53,11 @@ class MassModel(BaseModel):
     mass: list[float]
     centroid: list[float]
     inertia: list[float]
-    principalInertia: list[float, float, float]
+    principalInertia: list[float]
     principalAxes: list[PrincipalAxis]
 
     @field_validator("principalAxes")
-    def check_principal_axes(cls, v):
+    def check_principal_axes(cls, v: list[PrincipalAxis]) -> list[PrincipalAxis]:
         if len(v) != 3:
             raise ValueError("Principal axes must have 3 elements")
         return v
@@ -92,7 +92,7 @@ class MassModel(BaseModel):
 
     def center_of_mass_wrt(self, reference: np.matrix) -> np.ndarray:
         if reference.shape != (4, 4):
-            raise ValueError("Reference frame must be a 3x3 matrix")
+            raise ValueError("Reference frame must be a 4x4 matrix")
 
         com = np.matrix([*list(self.center_of_mass), 1.0])
         com_wrt = (reference * com.T)[:3]

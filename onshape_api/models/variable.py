@@ -10,7 +10,7 @@ Data model for Onshape's Variable:
 """
 
 from enum import Enum
-from typing import Union
+from typing import Union, Optional
 
 from pydantic import BaseModel, field_validator
 
@@ -36,11 +36,11 @@ class Variable(BaseModel):
         }
     """
 
-    type: str
+    type: VARIABLE_TYPE
     name: str
-    value: Union[str, None] = None
-    description: str = None
-    expression: str = None
+    value: Optional[str] = None
+    description: Optional[str] = None
+    expression: Optional[str] = None
 
     @field_validator("name")
     def validate_name(cls, value: str) -> str:
@@ -50,7 +50,7 @@ class Variable(BaseModel):
         return value
 
     @field_validator("type")
-    def validate_type(cls, value: str) -> str:
+    def validate_type(cls, value: VARIABLE_TYPE) -> VARIABLE_TYPE:
         if value not in VARIABLE_TYPE.__members__.values():
             raise ValueError(f"Invalid variable type: {value}")
 

@@ -23,6 +23,7 @@ Data model for Onshape's Element:
 """
 
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, field_validator
 
@@ -39,15 +40,15 @@ class ELEMENT_TYPE(str, Enum):
 class Element(BaseModel):
     id: str
     name: str
-    elementType: str
+    elementType: ELEMENT_TYPE
     microversionId: str
 
     @field_validator("elementType")
-    def validate_type(cls, value: str) -> str:
+    def validate_type(cls, value: str) -> ELEMENT_TYPE:
         if value not in ELEMENT_TYPE.__members__.values():
             raise ValueError(f"Invalid element type: {value}")
 
-        return value
+        return ELEMENT_TYPE(value)
 
     @field_validator("id")
     def validate_id(cls, value: str) -> str:
@@ -65,7 +66,7 @@ class Element(BaseModel):
 
 
 if __name__ == "__main__":
-    element_json = {
+    element_json: dict[str, Any] = {
         "name": "wheelAndFork",
         "id": "0b0c209535554345432581fe",
         "type": "Part Studio",

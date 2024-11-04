@@ -49,7 +49,7 @@ class Occurrence(BaseModel):
     path: list[str]
 
     @field_validator("transform")
-    def check_transform(cls, v):
+    def check_transform(cls, v: list[float]) -> list[float]:
         if len(v) != 16:
             raise ValueError("Transform must have 16 values")
 
@@ -75,14 +75,14 @@ class IDBase(BaseModel):
     documentMicroversion: str
 
     @field_validator("documentId", "elementId", "documentMicroversion")
-    def check_ids(cls, v):
+    def check_ids(cls, v: str) -> str:
         if len(v) != 24:
             raise ValueError("DocumentId must have 24 characters")
 
         return v
 
     @property
-    def uid(self):
+    def uid(self) -> str:
         return generate_uid([self.documentId, self.documentMicroversion, self.elementId, self.fullConfiguration])
 
 
@@ -107,7 +107,7 @@ class Part(IDBase):
     bodyType: str
 
     @property
-    def uid(self):
+    def uid(self) -> str:
         return generate_uid([
             self.documentId,
             self.documentMicroversion,
@@ -144,14 +144,14 @@ class PartInstance(IDBase):
     partId: str
 
     @field_validator("type")
-    def check_type(cls, v):
+    def check_type(cls, v: InstanceType) -> InstanceType:
         if v != InstanceType.PART:
             raise ValueError("Type must be Part")
 
         return v
 
     @property
-    def uid(self):
+    def uid(self) -> str:
         return generate_uid([
             self.documentId,
             self.documentMicroversion,
@@ -184,7 +184,7 @@ class AssemblyInstance(IDBase):
     suppressed: bool
 
     @field_validator("type")
-    def check_type(cls, v):
+    def check_type(cls, v: InstanceType) -> InstanceType:
         if v != InstanceType.ASSEMBLY:
             raise ValueError("Type must be Assembly")
 
@@ -211,7 +211,7 @@ class MatedCS(BaseModel):
     origin: list[float]
 
     @field_validator("xAxis", "yAxis", "zAxis", "origin")
-    def check_vectors(cls, v):
+    def check_vectors(cls, v: list[float]) -> list[float]:
         if len(v) != 3:
             raise ValueError("Vectors must have 3 values")
 
@@ -332,7 +332,7 @@ class MateFeature(BaseModel):
     #     return v
 
     @field_validator("featureType")
-    def check_featureType(cls, v):
+    def check_featureType(cls, v: str) -> str:
         if v != AssemblyFeatureType.MATE:
             raise ValueError("FeatureType must be Mate")
 
@@ -349,7 +349,7 @@ class SubAssembly(IDBase):
     features: list[MateFeature]
 
     @property
-    def uid(self):
+    def uid(self) -> str:
         return generate_uid([self.documentId, self.documentMicroversion, self.elementId, self.fullConfiguration])
 
 

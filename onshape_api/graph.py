@@ -1,7 +1,7 @@
 import io
 import os
 import random
-from typing import Optional, Union
+from typing import Optional, Union, Dict, Tuple, List
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -39,7 +39,7 @@ SCRIPT_DIR = os.path.dirname(__file__)
 CURRENT_DIR = os.getcwd()
 
 
-def generate_names(max_length: int) -> list[str]:
+def generate_names(max_length: int) -> List[str]:
     words_file_path = os.path.join(SCRIPT_DIR, "words.txt")
 
     with open(words_file_path) as file:
@@ -51,12 +51,12 @@ def generate_names(max_length: int) -> list[str]:
     return random.sample(words, max_length)
 
 
-def show_graph(graph: nx.Graph):
+def show_graph(graph: nx.Graph) -> None:
     nx.draw_circular(graph, with_labels=True)
     plt.show()
 
 
-def convert_to_digraph(graph: nx.Graph) -> nx.DiGraph:
+def convert_to_digraph(graph: nx.Graph) -> Tuple[nx.DiGraph, str]:
     _centrality = nx.closeness_centrality(graph)
     _root_node = max(_centrality, key=_centrality.get)
     _graph = nx.bfs_tree(graph, _root_node)
@@ -64,12 +64,12 @@ def convert_to_digraph(graph: nx.Graph) -> nx.DiGraph:
 
 
 def create_graph(
-    occurences: dict[str, Occurrence],
-    instances: dict[str, Instance],
-    parts: dict[str, Part],
-    mates: dict[str, MateFeatureData],
+    occurences: Dict[str, Occurrence],
+    instances: Dict[str, Instance],
+    parts: Dict[str, Part],
+    mates: Dict[str, MateFeatureData],
     directed: bool = True,
-):
+) -> Union[nx.Graph, Tuple[nx.DiGraph, str]]:
     graph = nx.Graph()
 
     for occurence in occurences:
@@ -90,14 +90,14 @@ def create_graph(
             LOGGER.warning(f"Mate {mate} not found")
 
     if directed:
-        graph = convert_to_digraph(graph)
+        graph, root_node = convert_to_digraph(graph)
 
     LOGGER.info(f"Graph created with {len(graph.nodes)} nodes and {len(graph.edges)} edges")
 
     return graph
 
 
-def download_stl_mesh(did, wid, eid, partID, client: Client, transform: np.ndarray, file_name: str) -> str:
+def download_stl_mesh(did: str, wid: str, eid: str, partID: str, client: Client, transform: np.ndarray, file_name: str) -> str:
     try:
         with io.BytesIO() as buffer:
             LOGGER.info(f"Downloading mesh for {file_name}...")
@@ -128,7 +128,7 @@ def get_robot_link(
     workspaceId: str,
     client: Client,
     mate: Optional[Union[MateFeatureData, None]] = None,
-):
+) -> Tuple[Link, np.matrix]:
     LOGGER.info(f"Creating robot link for {name}")
 
     if mate is None:
@@ -190,7 +190,7 @@ def get_robot_joint(
     child: str,
     mate: MateFeatureData,
     stl_to_parent_tf: np.matrix,
-):
+) -> Union[RevoluteJoint, FixedJoint]:
     LOGGER.info(f"Creating robot joint from {parent} to {child}")
 
     parent_to_mate_tf = mate.matedEntities[1].matedCS.part_to_mate_tf
@@ -228,20 +228,20 @@ def get_robot_joint(
 def get_urdf_components(
     graph: Union[nx.Graph, nx.DiGraph],
     workspaceId: str,
-    parts: dict[str, Part],
-    mass_properties: dict[str, MassModel],
-    mates: dict[str, MateFeatureData],
+    parts: Dict[str, Part],
+    mass_properties: Dict[str, MassModel],
+    mates: Dict[str, MateFeatureData],
     client: Client,
-):
+) -> Tuple[List[Link], List[Union[RevoluteJoint, FixedJoint]]]:
     if not isinstance(graph, nx.DiGraph):
         graph, root_node = convert_to_digraph(graph)
 
-    joints = []
-    links = []
+    joints: List[Union[RevoluteJoint, FixedJoint]] = []
+    links: List[Link] = []
 
     _readable_names = generate_names(len(graph.nodes))
     _readable_names_mapping = dict(zip(graph.nodes, _readable_names))
-    _stl_to_link_tf_mapping = {}
+    _stl_to_link_tf_mapping: Dict[str, np.matrix] = {}
 
     LOGGER.info(f"Processing root node: {_readable_names_mapping[root_node]}")
 

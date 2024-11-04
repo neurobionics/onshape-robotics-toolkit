@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Union, cast
+from typing import Union, cast, Tuple
 
 import regex as re
 from pydantic import BaseModel, field_validator
@@ -16,7 +16,7 @@ class WORKSPACE_TYPE(str, Enum):
 DOCUMENT_PATTERN = r"https://cad.onshape.com/documents/([\w\d]+)/(w|v|m)/([\w\d]+)/e/([\w\d]+)"
 
 
-def parse_url(url: str) -> str:
+def parse_url(url: str) -> Tuple[str, WORKSPACE_TYPE, str, str]:
     pattern = re.match(
         DOCUMENT_PATTERN,
         url,
@@ -36,7 +36,7 @@ def parse_url(url: str) -> str:
 class Document(BaseModel):
     url: Union[str, None]
     did: str
-    wtype: str
+    wtype: WORKSPACE_TYPE
     wid: str
     eid: str
 
@@ -49,7 +49,7 @@ class Document(BaseModel):
         return value
 
     @field_validator("wtype")
-    def check_wtype(cls, value: str) -> str:
+    def check_wtype(cls, value: WORKSPACE_TYPE) -> WORKSPACE_TYPE:
         if not value:
             raise ValueError("Workspace type cannot be empty, please check the URL")
 

@@ -6,7 +6,7 @@ import os
 import secrets
 import string
 from enum import Enum
-from typing import BinaryIO
+from typing import Any, BinaryIO, Optional, Union
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import requests
@@ -32,7 +32,7 @@ class HTTP(str, Enum):
     DELETE = "delete"
 
 
-def load_env_variables(env):
+def load_env_variables(env: str) -> tuple[str, str]:
     """
     Load environment variables from the specified .env file.
 
@@ -61,7 +61,7 @@ def load_env_variables(env):
     return access_key, secret_key
 
 
-def make_nonce():
+def make_nonce() -> str:
     """
     Generate a unique ID for the request, 25 chars in length
 
@@ -85,7 +85,7 @@ class Client:
         - logging (bool, default=True): Turn logging on or off
     """
 
-    def __init__(self, env="./.env", log_file="./onshape.log", log_level=1):
+    def __init__(self, env: str = "./.env", log_file: str = "./onshape.log", log_level: int = 1) -> None:
         """
         Instantiates an instance of the Onshape class. Reads credentials from a .env file.
 
@@ -96,13 +96,13 @@ class Client:
             - env (str, default='./.env'): Environment file location
         """
 
-        self._url = BASE_URL
+        self._url: str = BASE_URL
         self._access_key, self._secret_key = load_env_variables(env)
         LOGGER.set_file_name(log_file)
         LOGGER.set_stream_level(LOG_LEVEL[log_level])
         LOGGER.info(f"Onshape API initialized with env file: {env}")
 
-    def get_document(self, did):
+    def get_document(self, did: str) -> DocumentMetaData:
         """
         Get details for a specified document.
 
@@ -116,7 +116,7 @@ class Client:
 
         return DocumentMetaData.model_validate(_request_json)
 
-    def get_elements(self, did, wtype, wid):
+    def get_elements(self, did: str, wtype: str, wid: str) -> dict[str, Element]:
         """
         Get list of elements in a document.
 
@@ -138,7 +138,7 @@ class Client:
 
         return {element["name"]: Element.model_validate(element) for element in _elements_json}
 
-    def get_features_from_partstudio(self, did, wid, eid):
+    def get_features_from_partstudio(self, did: str, wid: str, eid: str) -> requests.Response:
         """
         Gets the feature list for specified document / workspace / part studio.
 
@@ -156,7 +156,7 @@ class Client:
             "/api/partstudios/d/" + did + "/w/" + wid + "/e/" + eid + "/features",
         )
 
-    def get_features_from_assembly(self, did, wtype, wid, eid):
+    def get_features_from_assembly(self, did: str, wtype: str, wid: str, eid: str) -> dict[str, Any]:
         """
         Gets the feature list for specified document / workspace / part studio.
 
@@ -173,7 +173,7 @@ class Client:
             "get", "/api/assemblies/d/" + did + "/" + wtype + "/" + wid + "/e/" + eid + "/features"
         ).json()
 
-    def get_variables(self, did, wid, eid):
+    def get_variables(self, did: str, wid: str, eid: str) -> dict[str, Variable]:
         """
         Get list of variables in a variable studio.
 
@@ -194,7 +194,7 @@ class Client:
 
         return {variable["name"]: Variable.model_validate(variable) for variable in _variables_json[0]["variables"]}
 
-    def set_variables(self, did, wid, eid, variables):
+    def set_variables(self, did: str, wid: str, eid: str, variables: dict[str, Variable]) -> requests.Response:
         """
         Set variables in a variable studio.
 
@@ -219,7 +219,7 @@ class Client:
             body=payload,
         )
 
-    def create_assembly(self, did, wid, name="My Assembly"):
+    def create_assembly(self, did: str, wid: str, name: str = "My Assembly") -> requests.Response:
         """
         Creates a new assembly element in the specified document / workspace.
 
@@ -236,7 +236,9 @@ class Client:
 
         return self.request(HTTP.POST, "/api/assemblies/d/" + did + "/w/" + wid, body=payload)
 
-    def get_assembly(self, did, wtype, wid, eid, configuration="default"):
+    def get_assembly(
+        self, did: str, wtype: str, wid: str, eid: str, configuration: str = "default"
+    ) -> tuple[Assembly, dict[str, Any]]:
         _request_path = "/api/assemblies/d/" + did + "/" + wtype + "/" + wid + "/e/" + eid
         _assembly_json = self.request(
             HTTP.GET,
@@ -251,10 +253,10 @@ class Client:
 
         return Assembly.model_validate(_assembly_json), _assembly_json
 
-    def get_parts(self, did, wid, eid):
+    def get_parts(self, did: str, wid: str, eid: str) -> None:
         pass
 
-    def download_stl(self, did, wid, eid, partID, buffer: BinaryIO):
+    def download_stl(self, did: str, wid: str, eid: str, partID: str, buffer: BinaryIO) -> None:
         """
         Exports STL export from a part studio and saves it to a file.
 
@@ -288,7 +290,7 @@ class Client:
         else:
             LOGGER.info(f"Failed to download STL file: {response.status_code} - {response.text}")
 
-    def get_mass_properties(self, did, wid, eid, partID):
+    def get_mass_properties(self, did: str, wid: str, eid: str, partID: str) -> MassModel:
         """
         Get mass properties for a part in a part studio.
 
@@ -306,7 +308,16 @@ class Client:
 
         return MassModel.model_validate(_resonse_json["bodies"][partID])
 
-    def request(self, method, path, query=None, headers=None, body=None, base_url=None, log_response=True):
+    def request(
+        self,
+        method: Union[HTTP, str],
+        path: str,
+        query: Optional[dict[str, Any]] = None,
+        headers: Optional[dict[str, str]] = None,
+        body: Optional[dict[str, Any]] = None,
+        base_url: Optional[str] = None,
+        log_response: bool = True,
+    ) -> requests.Response:
         """
         Issues a request to Onshape
 
@@ -347,10 +358,12 @@ class Client:
 
         return res
 
-    def _build_url(self, base_url, path, query):
+    def _build_url(self, base_url: str, path: str, query: dict[str, Any]) -> str:
         return base_url + path + "?" + urlencode(query)
 
-    def _send_request(self, method, url, headers, body):
+    def _send_request(
+        self, method: Union[HTTP, str], url: str, headers: dict[str, str], body: Optional[dict[str, Any]]
+    ) -> requests.Response:
         return requests.request(
             method,
             url,
@@ -361,7 +374,9 @@ class Client:
             timeout=10,  # Specify an appropriate timeout value in seconds
         )
 
-    def _handle_redirect(self, res, method, headers, log_response=True):
+    def _handle_redirect(
+        self, res: requests.Response, method: Union[HTTP, str], headers: dict[str, str], log_response: bool = True
+    ) -> requests.Response:
         location = urlparse(res.headers["Location"])
         querystring = parse_qs(location.query)
 
@@ -374,13 +389,21 @@ class Client:
             method, location.path, query=new_query, headers=headers, base_url=new_base_url, log_response=log_response
         )
 
-    def _log_response(self, res):
+    def _log_response(self, res: requests.Response) -> None:
         if not 200 <= res.status_code <= 206:
             LOGGER.debug(f"Request failed, details: {res.text}")
         else:
             LOGGER.debug(f"Request succeeded, details: {res.text}")
 
-    def _make_auth(self, method, date, nonce, path, query=None, ctype="application/json"):
+    def _make_auth(
+        self,
+        method: Union[HTTP, str],
+        date: str,
+        nonce: str,
+        path: str,
+        query: Optional[dict[str, Any]] = None,
+        ctype: str = "application/json",
+    ) -> str:
         """
         Create the request signature to authenticate
 
@@ -412,7 +435,13 @@ class Client:
 
         return auth
 
-    def _make_headers(self, method, path, query=None, headers=None):
+    def _make_headers(
+        self,
+        method: Union[HTTP, str],
+        path: str,
+        query: Optional[dict[str, Any]] = None,
+        headers: Optional[dict[str, str]] = None,
+    ) -> dict[str, str]:
         """
         Creates a headers object to sign the request
 
