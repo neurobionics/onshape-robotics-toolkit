@@ -53,4 +53,4 @@ def transform_inertia_matrix(inertia_matrix: np.matrix, rotation: np.matrix) -> 
     Returns:
         - np.matrix: Transformed inertia matrix
     """
-    return rotation @ inertia_matrix @ rotation.T
+    return np.matrix(rotation @ inertia_matrix @ rotation.T)

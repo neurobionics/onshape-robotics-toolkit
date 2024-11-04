@@ -31,6 +31,8 @@ mypy = "^1.5.1"
 pre-commit = "^3.4.0"
 tox = "^4.11.1"
 types-networkx = "^3.3.0.20241020"
+types-requests = "^2.32.0.20241016"
+pandas-stubs = "^2.2.3.241009"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.4.2"

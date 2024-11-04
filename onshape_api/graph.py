@@ -53,7 +53,8 @@ def generate_names(max_length: int) -> list[str]:
 
 
 def get_random_color() -> tuple[float, float, float, float]:
-    return random.SystemRandom().choice(list(COLORS)).value
+    _color: COLORS = random.SystemRandom().choice(list(COLORS))  # nosec
+    return tuple(_color.value)
 
 
 def show_graph(graph: Graph) -> None:
