@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Union, cast, Tuple
+from typing import Union, cast
 
 import regex as re
 from pydantic import BaseModel, field_validator
@@ -16,7 +16,7 @@ class WORKSPACE_TYPE(str, Enum):
 DOCUMENT_PATTERN = r"https://cad.onshape.com/documents/([\w\d]+)/(w|v|m)/([\w\d]+)/e/([\w\d]+)"
 
 
-def parse_url(url: str) -> Tuple[str, WORKSPACE_TYPE, str, str]:
+def parse_url(url: str) -> tuple[str, WORKSPACE_TYPE, str, str]:
     pattern = re.match(
         DOCUMENT_PATTERN,
         url,

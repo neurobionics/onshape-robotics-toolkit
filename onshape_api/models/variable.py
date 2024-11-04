@@ -10,7 +10,7 @@ Data model for Onshape's Variable:
 """
 
 from enum import Enum
-from typing import Union, Optional
+from typing import Optional
 
 from pydantic import BaseModel, field_validator
 

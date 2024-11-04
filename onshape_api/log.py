@@ -31,7 +31,7 @@ from collections import deque
 from datetime import datetime
 from enum import Enum
 from logging.handlers import RotatingFileHandler
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 __all__ = ["LOGGER", "LOG_LEVEL", "Logger"]
 
@@ -214,7 +214,9 @@ class Logger(logging.Logger):
     def __enter__(self) -> "Logger":
         return self
 
-    def __exit__(self, exc_type: Optional[type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[Any]) -> None:
+    def __exit__(
+        self, exc_type: Optional[type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[Any]
+    ) -> None:
         self.flush_buffer()
         self.close()
 
