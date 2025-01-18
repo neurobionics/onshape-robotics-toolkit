@@ -29,7 +29,7 @@ import lxml.etree as ET
 import numpy as np
 import requests
 import stl
-from dotenv import load_dotenv
+import dotenv
 
 from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.mesh import transform_mesh
@@ -69,12 +69,14 @@ class HTTP(str, Enum):
     DELETE = "delete"
 
 
-def load_env_variables(env: str) -> tuple[str, str]:
-    """
-    Load access and secret keys required for Onshape API requests from a .env file.
+def load_env_variables(env: str | None) -> tuple[str, str]:
+    """Load access and secret keys required for Onshape API requests.
 
     Args:
-        env: Path to the environment file containing the access and secret keys
+        env: Path to the environment file containing the access and secret keys. If
+          `None`, the environment variables are loaded from the system environment
+          with `os.getenv`. If `not None`, the environment variables are loaded from
+          the file with `dotenv.get_key`.
 
     Returns:
         tuple[str, str]: Access and secret keys
@@ -87,20 +89,37 @@ def load_env_variables(env: str) -> tuple[str, str]:
         >>> load_env_variables(".env")
         ('asdagflkdfjsdlfkdfjlsdf', 'asdkkjdnknsdgkjsdguoiuosdg')
     """
+    def load_keys_from_environment() -> tuple[str, str]:
+        access_key = os.getenv("ACCESS_KEY")
+        secret_key = os.getenv("SECRET_KEY")
 
-    if not os.path.isfile(env):
-        raise FileNotFoundError(f"{env} file not found")
+        missing_keys = set()
+        if not access_key:
+            missing_keys.add("ACCESS_KEY")
+        if not secret_key:
+            missing_keys.add("SECRET_KEY")
+        if missing_keys:
+            raise ValueError(f"Missing environment variables: {', '.join(missing_keys)}")
+        return access_key, secret_key
 
-    load_dotenv(env)
+    def load_keys_from_dotenv(env) -> tuple[str, str] | None:
+        if not os.path.isfile(env):
+            raise FileNotFoundError(f"'{env}' file not found")
+        access_key = dotenv.get_key(env, "ACCESS_KEY")
+        secret_key = dotenv.get_key(env, "SECRET_KEY")
+        missing_keys = set()
+        if not access_key:
+            missing_keys.add("ACCESS_KEY")
+        if not secret_key:
+            missing_keys.add("SECRET_KEY")
+        if missing_keys:
+            raise ValueError(f"Missing dotenv variables: {', '.join(missing_keys)}")
+        return access_key, secret_key
 
-    access_key = os.getenv("ACCESS_KEY")
-    secret_key = os.getenv("SECRET_KEY")
-
-    if not access_key or not secret_key:
-        missing_vars = [var for var in ["ACCESS_KEY", "SECRET_KEY"] if not os.getenv(var)]
-        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
-    return access_key, secret_key
+    if env is not None:
+        return load_keys_from_dotenv(env)
+    else:
+        return load_keys_from_environment()
 
 
 def make_nonce() -> str:
@@ -147,7 +166,7 @@ class Client:
         >>> document_meta_data = client.get_document_metadata("document_id")
     """
 
-    def __init__(self, env: str = "./.env", base_url: str = BASE_URL):
+    def __init__(self, env: str | None = "./.env", base_url: str = BASE_URL):
         """
         Initialize the Onshape API client.
 
