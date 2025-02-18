@@ -62,7 +62,7 @@ The documentation is available at [https://neurobionics.github.io/onshape-roboti
 
 ## Acknowledgements
 
-This repository was created to facilitate an internal project at [the AI Institute](https://theaiinstitute.com/); it was developed by [Senthur Ayyappan](https://senthurayyappan.github.io/) and [Elliott Rouse](https://neurobionics.robotics.umich.edu/). We'd also like to acknowledge considerable support and guidance from Ben Bokser, Daniel Gonzalez, Surya Singh, Sangbae Kim, and Stelian Coros at the AI Institute.
+This repository was created to facilitate an internal project at [the AI Institute](https://theaiinstitute.com/); it was developed by [Senthur Ayyappan](https://senthurayyappan.github.io/) and [Elliott Rouse](https://neurobionics.robotics.umich.edu/). We'd also like to acknowledge considerable support and guidance from Ben Bokser, [Daniel Gonzalez](https://dgonzrobotics.com/), [Surya Singh](https://scholar.google.com/citations?user=ZDzQGPQAAAAJ&hl=en&oi=sra), Sangbae Kim, and Stelian Coros at the AI Institute.
 
 ## Contributing
 

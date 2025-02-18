@@ -551,7 +551,16 @@ class RevoluteJoint(BaseJoint):
         mimic_element = element.find("mimic")
         mimic = JointMimic.from_xml(mimic_element) if mimic_element is not None else None
 
-        return cls(name, parent, child, origin, limits, axis, dynamics, mimic)
+        return cls(
+            name=name,
+            parent=parent,
+            child=child,
+            origin=origin,
+            axis=axis,
+            limits=limits,
+            dynamics=dynamics,
+            mimic=mimic,
+        )
 
     @property
     def joint_type(self) -> str:

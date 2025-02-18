@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "onshape-robotics-toolkit"
-version = "0.1.6"
+version = "0.1.10"
 description = "A python library to facilitate interaction with Onshape's REST API"
 authors = ["Senthur Ayyappan <senthurayyappan@gmail.com>"]
 repository = "https://github.com/neurobionics/onshape-robotics-toolkit"

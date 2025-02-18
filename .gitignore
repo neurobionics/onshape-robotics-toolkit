@@ -193,6 +193,7 @@ examples/simulation/scenes
 examples/simulation/**/*.csv
 examples/simulation/**/*.html
 
+
 tests/**/*.urdf
 tests/**/*.stl
 tests/**/*.png

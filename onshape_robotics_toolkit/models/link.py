@@ -434,6 +434,15 @@ class Inertia:
         """
         return cls(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
+    @property
+    def to_matrix(self) -> np.array:
+        return np.array([
+            [self.ixx, self.ixy, self.ixz],
+            [self.ixy, self.iyy, self.iyz],
+            [self.ixz, self.iyz, self.izz]
+        ])
+
+
 
 @dataclass
 class Material:
@@ -602,6 +611,77 @@ class InertialLink:
         self.origin.to_mjcf(inertial)
         self.inertia.to_mjcf(inertial)
 
+    # Adding a method to transform (rotate and translate) an Inertia Matrix
+    def transform(self, tf_matrix: np.matrix, inplace: bool = False) -> Union["InertialLink", None]:
+        """
+        Apply a transformation matrix to the Inertial Properties of the a link.
+
+        Args:
+            matrix: The transformation matrix to apply to the origin.
+            inplace: Whether to apply the transformation in place.
+
+        Returns:
+            An updated Inertial Link with the transformation applied to both:
+            * the inertia tensor (giving a transformed "inertia tensor prime" = [ixx', iyy', izz', ixy', ixz', iyz'])
+            * AND to the origin too (via the Origin class's transform logic [~line 100])
+
+        Examples {@}:
+            >>> origin = Origin(xyz=(1.0, 2.0, 3.0), rpy=(0.0, 0.0, 0.0))
+            >>> matrix = np.eye(4)
+            >>> inertial.transform(matrix)
+
+        Analysis and References:
+            The essence is to convert the Inertia tensor to a matrix and then transform the matrix via the equation
+            I_prime = R·I·Transpose[R] + m(||d||^2·I - d·Transpose[d]) 
+            Then we put the components into the resultant Inertial Link
+            An analysis (on 100k runs) suggests that this is 3× faster than a direct approach on the tensor elements likely because numpy's libraries are optimized for matrix operations.
+            Ref: https://chatgpt.com/share/6781b6ac-772c-8006-b1a9-7f2dc3e3ef4d
+        """
+        # Extract the rotation matrix R and translation vector d from T
+        R = tf_matrix[:3, :3]  # Top-left 3x3 block is the rotation matrix
+        p = tf_matrix[:3, 3]   # Top-right 3x1 block is the translation vector
+
+        # Unpack the inertia tensor components
+        # Example is ixx=1.0, iyy=2.0, izz=3.0, ixy=0.0, ixz=0.0, iyz=0.
+
+        # Construct the original inertia matrix
+        inertia_matrix = self.inertia.to_matrix
+
+        # Rotate the inertia matrix
+        I_rot = R @ inertia_matrix @ R.T
+
+        # Compute the parallel axis theorem adjustment
+        parallel_axis_adjustment = self.mass * (np.dot(p, p) * np.eye(3) - np.outer(p, p))
+
+        # Final transformed inertia matrix
+        I_transformed = I_rot + parallel_axis_adjustment
+
+        # Extract the components of the transformed inertia tensor
+        ixx_prime = I_transformed[0, 0]
+        iyy_prime = I_transformed[1, 1]
+        izz_prime = I_transformed[2, 2]
+        ixy_prime = I_transformed[0, 1]
+        ixz_prime = I_transformed[0, 2]
+        iyz_prime = I_transformed[1, 2]
+
+        # Transform the Origin (Don't replace the original in case the user keeps the inplace flag false)
+        Origin_prime = self.origin.transform(tf_matrix)
+
+        # Update values and (if requested) put the extracted values into a new_InertialLink
+        if inplace:
+            # mass stays the same :-) ==> self.mass = new_InertialLink.mass
+            self.inertia.ixx = ixx_prime
+            self.inertia.iyy = iyy_prime
+            self.inertia.izz = izz_prime
+            self.inertia.ixy = ixy_prime
+            self.inertia.ixz = ixz_prime
+            self.inertia.iyz = iyz_prime
+            self.origin = Origin_prime
+            return None
+        else:
+            new_InertialLink = InertialLink(mass=self.mass, inertia=Inertia(ixx_prime, iyy_prime, izz_prime, ixy_prime, ixz_prime, iyz_prime), origin=Origin_prime)
+            return new_InertialLink
+
     @classmethod
     def from_xml(cls, xml: ET.Element) -> "InertialLink":
         """
@@ -661,7 +741,7 @@ class VisualLink:
         <Element 'visual' at 0x7f8b3c0b4c70>
     """
 
-    name: str
+    name: Union[str, None]
     origin: Origin
     geometry: BaseGeometry
     material: Material
@@ -700,7 +780,8 @@ class VisualLink:
             <Element 'visual' at 0x7f8b3c0b4c70>
         """
         visual = ET.Element("visual") if root is None else ET.SubElement(root, "visual")
-        visual.set("name", self.name)
+        if self.name:
+            visual.set("name", self.name)
         self.origin.to_xml(visual)
         self.geometry.to_xml(visual)
         self.material.to_xml(visual)
@@ -722,7 +803,8 @@ class VisualLink:
             <Element 'visual' at 0x7f8b3c0b4c70>
         """
         visual = root if root.tag == "geom" else ET.SubElement(root, "geom")
-        visual.set("name", self.name)
+        if self.name:
+            visual.set("name", self.name)
         # TODO: Parent body uses visual origin, these share the same?
         self.origin.to_mjcf(visual)
 
@@ -754,7 +836,6 @@ class VisualLink:
             VisualLink(name='visual', origin=None, geometry=None, material=None)
         """
         name = xml.get("name")
-
         origin_element = xml.find("origin")
         origin = Origin.from_xml(origin_element) if origin_element is not None else None
 
@@ -784,7 +865,7 @@ class CollisionLink:
         <Element 'collision' at 0x7f8b3c0b4c70>
     """
 
-    name: str
+    name: Union[str, None]
     origin: Origin
     geometry: BaseGeometry
 
@@ -824,7 +905,8 @@ class CollisionLink:
             <Element 'collision' at 0x7f8b3c0b4c70>
         """
         collision = ET.Element("collision") if root is None else ET.SubElement(root, "collision")
-        collision.set("name", self.name)
+        if self.name:
+            collision.set("name", self.name)
         self.origin.to_xml(collision)
         self.geometry.to_xml(collision)
         return collision
@@ -858,7 +940,8 @@ class CollisionLink:
             <Element 'collision' at 0x7f8b3c0b4c70>
         """
         collision = root if root.tag == "geom" else ET.SubElement(root, "geom")
-        collision.set("name", self.name)
+        if self.name:
+            collision.set("name", self.name)
         collision.set("contype", "1")
         collision.set("conaffinity", "1")
         self.origin.to_mjcf(collision)

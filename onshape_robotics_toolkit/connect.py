@@ -22,14 +22,14 @@ import secrets
 import string
 import time
 from enum import Enum
-from typing import Any, BinaryIO, Optional
+from typing import Any, BinaryIO, Optional, Union
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import dotenv
 import lxml.etree as ET
 import numpy as np
 import requests
 import stl
-from dotenv import load_dotenv
 
 from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.mesh import transform_mesh
@@ -38,10 +38,15 @@ from onshape_robotics_toolkit.models.document import BASE_URL, Document, Documen
 from onshape_robotics_toolkit.models.element import Element
 from onshape_robotics_toolkit.models.mass import MassProperties
 from onshape_robotics_toolkit.models.variable import Variable
-from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
+from onshape_robotics_toolkit.utilities.helpers import (
+    get_sanitized_name,
+    load_key_from_dotenv,
+    load_key_from_environment,
+)
 
 CURRENT_DIR = os.getcwd()
 MESHES_DIR = "meshes"
+ONSHAPE_KEY_NAMES = ["ONSHAPE_ACCESS_KEY", "ONSHAPE_SECRET_KEY"]
 
 __all__ = ["HTTP", "Client"]
 
@@ -69,12 +74,14 @@ class HTTP(str, Enum):
     DELETE = "delete"
 
 
-def load_env_variables(env: str) -> tuple[str, str]:
-    """
-    Load access and secret keys required for Onshape API requests from a .env file.
+def load_env_variables(env: Union[str, None]) -> tuple[str, str]:
+    """Load access and secret keys required for Onshape API requests.
 
     Args:
-        env: Path to the environment file containing the access and secret keys
+        env: Path to the environment file containing the access and secret keys. If
+          `None`, the environment variables are loaded from the system environment
+          with `os.getenv`. If `not None`, the environment variables are loaded from
+          the file with `dotenv.get_key`.
 
     Returns:
         tuple[str, str]: Access and secret keys
@@ -88,19 +95,10 @@ def load_env_variables(env: str) -> tuple[str, str]:
         ('asdagflkdfjsdlfkdfjlsdf', 'asdkkjdnknsdgkjsdguoiuosdg')
     """
 
-    if not os.path.isfile(env):
-        raise FileNotFoundError(f"{env} file not found")
-
-    load_dotenv(env)
-
-    access_key = os.getenv("ACCESS_KEY")
-    secret_key = os.getenv("SECRET_KEY")
-
-    if not access_key or not secret_key:
-        missing_vars = [var for var in ["ACCESS_KEY", "SECRET_KEY"] if not os.getenv(var)]
-        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-
-    return access_key, secret_key
+    if env is not None:
+        return tuple(load_key_from_dotenv(env, key) for key in ONSHAPE_KEY_NAMES)
+    else:
+        return tuple(load_key_from_environment(key) for key in ONSHAPE_KEY_NAMES)
 
 
 def make_nonce() -> str:
@@ -147,7 +145,7 @@ class Client:
         >>> document_meta_data = client.get_document_metadata("document_id")
     """
 
-    def __init__(self, env: str = "./.env", base_url: str = BASE_URL):
+    def __init__(self, env: Union[str, None] = None, base_url: str = BASE_URL):
         """
         Initialize the Onshape API client.
 

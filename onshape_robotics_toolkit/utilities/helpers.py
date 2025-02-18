@@ -17,6 +17,7 @@ import random
 import re
 from xml.sax.saxutils import escape
 
+import dotenv
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,6 +37,20 @@ class CustomJSONEncoder(json.JSONEncoder):
             return list(obj)  # Convert set to list
         return super().default(obj)
 
+def load_key_from_environment(key_to_load: str) -> str:
+    key = os.getenv(key_to_load)
+
+    if not key:
+        raise ValueError(f"Missing environment variable: {key_to_load}")
+    return key
+
+def load_key_from_dotenv(env: str, key_to_load: str) -> str:
+    if not os.path.isfile(env):
+        raise FileNotFoundError(f"'{env}' file not found")
+    key = dotenv.get_key(env, key_to_load)
+    if not key:
+        raise ValueError(f"Missing dotenv variable: {key_to_load}")
+    return key
 
 def save_model_as_json(model: BaseModel, file_path: str, indent: int = 4) -> None:
     """
@@ -278,34 +293,46 @@ def make_unique_name(name: str, existing_names: set[str]) -> str:
     return f"{name}-{count}"
 
 
-def get_sanitized_name(name: str, replace_with: str = "_") -> str:
+def get_sanitized_name(name: str, replace_with: str = "_", remove_onshape_tags: bool = False) -> str:
     """
     Sanitize a name by removing special characters, preserving only the specified
     replacement character, and replacing spaces with it. Ensures no consecutive
     replacement characters in the result.
+    Optionally preserves a trailing " <n>" tag where n is a number.
 
     Args:
-        name: Name to sanitize
-        replace_with: Character to replace spaces and other special characters with (default is '_')
+        name (str): Name to sanitize.
+        replace_with (str): Character to replace spaces and other special characters with (default is '_').
+        remove_onshape_tags (bool): If True, removes a trailing " <n>" tag where n is a number. Default is False.
 
     Returns:
-        Sanitized name
+        str: Sanitized name.
 
     Examples:
-        >>> get_sanitized_name("wheel1 <3>", '-')
+        >>> get_sanitized_name("wheel1 <3>")
+        "wheel1_3"
+
+        >>> get_sanitized_name("wheel1 <3>", remove_onshape_tags=True)
+        "wheel1"
+
+        >>> get_sanitized_name("wheel1 <3>", replace_with='-', remove_onshape_tags=False)
         "wheel1-3"
-        >>> get_sanitized_name("Hello  World!", '_')
-        "Hello_World"
-        >>> get_sanitized_name("my--robot!!", '-')
-        "my-robot"
-        >>> get_sanitized_name("bad__name__", '_')
-        "bad_name"
     """
 
     if replace_with not in "-_":
         raise ValueError("replace_with must be either '-' or '_'")
 
-    sanitized_name = "".join(char if char.isalnum() or char in "_ " else "" for char in name)
+    tag = ""
+    if remove_onshape_tags:
+        # Regular expression to detect a trailing " <n>" where n is one or more digits
+        tag_pattern = re.compile(r"\s<\d+>$")
+        match = tag_pattern.search(name)
+        if match:
+            tag = match.group()  # e.g., " <3>"
+            if tag:
+                name = name[: match.start()]
+
+    sanitized_name = "".join(char if char.isalnum() or char in "-_ " else "" for char in name)
     sanitized_name = sanitized_name.replace(" ", replace_with)
     sanitized_name = re.sub(f"{re.escape(replace_with)}{{2,}}", replace_with, sanitized_name)
 
@@ -333,4 +360,5 @@ def save_gif(frames, filename="sim.gif", framerate=60):
 
 
 if __name__ == "__main__":
-    LOGGER.info(get_sanitized_name(get_sanitized_name("Part 3 <1>")))
+    LOGGER.info(get_sanitized_name("Part 3 <1>", remove_onshape_tags=True))
+    
