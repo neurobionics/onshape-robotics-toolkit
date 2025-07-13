@@ -47,12 +47,12 @@ You can install `onshape-robotics-toolkit` using `pip`, which is the easiest way
 pip install onshape-robotics-toolkit
 ```
 
-If you want to install from source, you'll need to install [`poetry`](https://python-poetry.org/docs/) and [`git`](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) first. Then, you can clone the repository and install the package.
+If you want to install from source, you'll need to install [`uv`](https://docs.astral.sh/uv/getting-started/installation/) and [`git`](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) first. Then, you can clone the repository and install the package.
 
 ```sh
 git clone https://github.com/neurobionics/onshape-robotics-toolkit.git
 cd onshape-robotics-toolkit
-poetry install
+uv sync
 ```
 
 ## Contributing

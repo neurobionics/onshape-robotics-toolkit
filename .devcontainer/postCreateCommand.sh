@@ -1,7 +1,7 @@
 #! /usr/bin/env bash
 
 # Install Dependencies
-poetry install --with dev
+uv sync --dev
 
 # Install pre-commit hooks
-poetry run pre-commit install --install-hooks
+uv run pre-commit install --install-hooks

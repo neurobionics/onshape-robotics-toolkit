@@ -26,7 +26,11 @@ build: clean-build ## Build wheel file using uv
 
 .PHONY: clean-build
 clean-build: ## clean build artifacts
-	@rm -rf dist
+	@if exist dist rmdir /s /q dist
+
+.PHONY: version
+version: ## Update the project version
+	@uv version $VERSION
 
 .PHONY: publish
 publish: ## publish a release to pypi.

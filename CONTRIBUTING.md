@@ -45,7 +45,7 @@ If you are proposing a new feature:
 # Get Started!
 
 Ready to contribute? Here's how to set up `onshape-robotics-toolkit` for local development.
-Please note this documentation assumes you already have `poetry` and `Git` installed and ready to go.
+Please note this documentation assumes you already have `uv` and `Git` installed and ready to go.
 
 1. Fork the `onshape-robotics-toolkit` repo on GitHub.
 
@@ -71,14 +71,13 @@ pyenv local <x.y.z>
 Then, install and activate the environment with:
 
 ```bash
-poetry install
-poetry shell
+uv sync --dev
 ```
 
 4. Install pre-commit to run linters/formatters at commit time:
 
 ```bash
-poetry run pre-commit install
+uv run pre-commit install
 ```
 
 5. Create a branch for local development:
