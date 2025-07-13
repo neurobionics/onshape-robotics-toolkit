@@ -5,7 +5,6 @@ subassemblies, instances, and mates, and generate a hierarchical representation 
 """
 
 import asyncio
-import os
 from typing import Optional, Union
 
 import numpy as np

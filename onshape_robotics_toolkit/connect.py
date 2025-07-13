@@ -25,7 +25,6 @@ from enum import Enum
 from typing import Any, BinaryIO, Optional, Union
 from urllib.parse import parse_qs, urlencode, urlparse
 
-import dotenv
 import lxml.etree as ET
 import numpy as np
 import requests

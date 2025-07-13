@@ -1,0 +1,6 @@
+[project]
+name = "onshape-robotics-toolkit"
+version = "0.2.0"
+
+[venv]
+python = "3.10"

@@ -37,12 +37,14 @@ class CustomJSONEncoder(json.JSONEncoder):
             return list(obj)  # Convert set to list
         return super().default(obj)
 
+
 def load_key_from_environment(key_to_load: str) -> str:
     key = os.getenv(key_to_load)
 
     if not key:
         raise ValueError(f"Missing environment variable: {key_to_load}")
     return key
+
 
 def load_key_from_dotenv(env: str, key_to_load: str) -> str:
     if not os.path.isfile(env):
@@ -51,6 +53,7 @@ def load_key_from_dotenv(env: str, key_to_load: str) -> str:
     if not key:
         raise ValueError(f"Missing dotenv variable: {key_to_load}")
     return key
+
 
 def save_model_as_json(model: BaseModel, file_path: str, indent: int = 4) -> None:
     """
@@ -361,4 +364,3 @@ def save_gif(frames, filename="sim.gif", framerate=60):
 
 if __name__ == "__main__":
     LOGGER.info(get_sanitized_name("Part 3 <1>", remove_onshape_tags=True))
-    

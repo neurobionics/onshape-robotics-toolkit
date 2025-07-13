@@ -1,19 +1,19 @@
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 import numpy as np
 
 
 class PIDController:
     def __init__(
-            self,
-            kp: float,
-            ki: float,
-            kd: float,
-            dt: float,
-            min_output: Optional[float] = None,
-            max_output: Optional[float] = None,
-            feed_forward_offset: float = 0.0,
-            derivative_filter_alpha: float = 0.0,
+        self,
+        kp: float,
+        ki: float,
+        kd: float,
+        dt: float,
+        min_output: Optional[float] = None,
+        max_output: Optional[float] = None,
+        feed_forward_offset: float = 0.0,
+        derivative_filter_alpha: float = 0.0,
     ):
         """
         A basic PID controller with optional derivative filtering and anti-windup.
@@ -46,7 +46,7 @@ class PIDController:
 
         self.feed_forward_offset: float = feed_forward_offset
 
-    def update(self, error: float, return_all_terms: bool=False) -> Union[float, Tuple[float, float, float, float]]:
+    def update(self, error: float, return_all_terms: bool = False) -> Union[float, tuple[float, float, float, float]]:
         """
         Compute the PID output for the given error signal.
 
