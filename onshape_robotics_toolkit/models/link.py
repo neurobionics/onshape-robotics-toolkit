@@ -681,7 +681,7 @@ class InertialLink:
         Apply a transformation matrix to the Inertial Properties of the a link.
 
         Args:
-            matrix: The transformation matrix to apply to the origin.
+            tf_matrix: The transformation matrix to apply to the origin.
             inplace: Whether to apply the transformation in place.
 
         Returns:

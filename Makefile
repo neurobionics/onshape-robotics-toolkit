@@ -1,7 +1,7 @@
 .PHONY: install
 install: ## Install the uv environment and install the pre-commit hooks
 	@echo "🚀 Creating virtual environment using uv"
-	@uv sync --dev
+	@uv sync --dev --extra docs
 	@uv run pre-commit install
 	@echo "To activate the virtual environment, run: uv venv && ./venv/Scripts/activate (Windows) or source ./venv/bin/activate (Unix)"
 

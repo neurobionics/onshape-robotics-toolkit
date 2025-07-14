@@ -78,9 +78,9 @@ def load_env_variables(env: Union[str, None]) -> tuple[str, str]:
 
     Args:
         env: Path to the environment file containing the access and secret keys. If
-          `None`, the environment variables are loaded from the system environment
-          with `os.getenv`. If `not None`, the environment variables are loaded from
-          the file with `dotenv.get_key`.
+            `None`, the environment variables are loaded from the system environment
+            with `os.getenv`. If `not None`, the environment variables are loaded from
+            the file with `dotenv.get_key`.
 
     Returns:
         tuple[str, str]: Access and secret keys
@@ -199,26 +199,8 @@ class Client:
         res = self.request(HTTP.GET, "/api/documents/" + did)
 
         if res.status_code == 404:
-            """
-            404: Document not found
-                {
-                    "message": "Not found.",
-                    "code": 0,
-                    "status": 404,
-                    "moreInfoUrl": ""
-                }
-            """
             raise ValueError(f"Document does not exist: {did}")
         elif res.status_code == 403:
-            """
-            403: Forbidden
-                {
-                    "message": "Forbidden",
-                    "code": 0,
-                    "status": 403,
-                    "moreInfoUrl": ""
-                }
-            """
             raise ValueError(f"Access forbidden for document: {did}")
 
         document = DocumentMetaData.model_validate(res.json())
