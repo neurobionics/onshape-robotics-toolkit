@@ -62,7 +62,7 @@ cd onshape-robotics-toolkit
 Then, install and activate the environment with:
 
 ```sh
-uv sync --dev
+uv sync --dev --extra docs
 ```
 
 Please ensure that uv is installed on your system. If not, you can install it by following the instructions [here](https://docs.astral.sh/uv/getting-started/installation/).
