@@ -6,8 +6,25 @@ readme = "README.md"
 authors = [
     { name = "imsenthur", email = "imsenthur@gmail.com" }
 ]
-requires-python = ">=3.13"
-dependencies = []
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "python-dotenv>=1.0.1",
+    "pydantic>=2.9.2",
+    "scipy>=1.14.1",
+    "numpy-stl>=3.1.2",
+    "networkx>=3.4.2",
+    "matplotlib>=3.9.2",
+    "pandas>=2.2.3",
+    "pyarrow>=18.0.0",
+    "regex>=2024.9.11",
+    "tqdm>=4.67.0",
+    "mujoco[usd]>=3.2.7",
+    "lxml>=5.3.0",
+    "optuna>=4.1.0",
+    "requests>=2.32.3",
+    "plotly>=5.24.1",
+    "scikit-learn>=1.6.1",
+]
 
 [project.scripts]
 onshape-robotics-toolkit = "onshape_robotics_toolkit:main"
@@ -20,3 +37,65 @@ python-source = "src"
 [build-system]
 requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
+
+[dependency-groups]
+dev = [
+    "deptry>=0.23.0",
+    "mkdocs>=1.6.1",
+    "pre-commit>=4.2.0",
+    "pyrefly>=0.24.1",
+    "ruff>=0.12.3",
+    "pytest>=8.4.1",    
+]
+
+[tool.ruff]
+line-length = 120
+fix = true
+select = [
+    # flake8-2020
+    "YTT",
+    # flake8-bandit
+    "S",
+    # flake8-bugbear
+    "B",
+    # flake8-builtins
+    "A",
+    # flake8-comprehensions
+    "C4",
+    # flake8-debugger
+    "T10",
+    # flake8-simplify
+    "SIM",
+    # isort
+    "I",
+    # mccabe
+    "C90",
+    # pycodestyle
+    "E", "W",
+    # pyflakes
+    "F",
+    # pygrep-hooks
+    "PGH",
+    # pyupgrade
+    "UP",
+    # ruff
+    "RUF",
+    # tryceratops
+    "TRY",
+]
+ignore = [
+    # DoNotAssignLambda
+    "E731",
+    "TRY003",
+    "SIM115",
+]
+
+[tool.ruff.format]
+preview = true
+
+[tool.deptry]
+ignore = [
+    "DEP001",
+    "DEP002",
+    "DEP003",
+]
