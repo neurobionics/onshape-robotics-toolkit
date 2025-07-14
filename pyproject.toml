@@ -1,0 +1,22 @@
+[project]
+name = "onshape-robotics-toolkit"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "imsenthur", email = "imsenthur@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.scripts]
+onshape-robotics-toolkit = "onshape_robotics_toolkit:main"
+
+[tool.maturin]
+module-name = "onshape_robotics_toolkit._core"
+python-packages = ["onshape_robotics_toolkit"]
+python-source = "src"
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
