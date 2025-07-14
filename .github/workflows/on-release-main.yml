@@ -3,7 +3,6 @@ name: release-main
 on:
   release:
     types: [published]
-    branches: [main]
 
 jobs:
   publish:
@@ -13,7 +12,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up the environment
-        uses: ./.github/actions/setup-poetry-env
+        uses: ./.github/actions/setup-uv-env
 
       - name: Export tag
         id: vars
@@ -22,7 +21,7 @@ jobs:
       - name: Build and publish
         run: |
           source .venv/bin/activate
-          poetry version $RELEASE_VERSION
+          make version VERSION=$RELEASE_VERSION
           make build-and-publish
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
@@ -36,7 +35,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up the environment
-        uses: ./.github/actions/setup-poetry-env
+        uses: ./.github/actions/setup-uv-env
 
       - name: Deploy documentation
-        run: poetry run mkdocs gh-deploy --force
+        run: uv run mkdocs gh-deploy --force

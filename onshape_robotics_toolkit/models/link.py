@@ -119,7 +119,7 @@ class Origin:
             inplace (bool): If True, modifies the current origin. If False, returns a new Origin.
 
         Returns:
-            Union[Origin, None]: If inplace is False, returns a new transformed Origin. 
+            Union[Origin, None]: If inplace is False, returns a new transformed Origin.
                                If inplace is True, returns None and modifies current Origin.
 
         Examples:
@@ -482,7 +482,7 @@ class Inertia:
         return np.array([
             [self.ixx, self.ixy, self.ixz],
             [self.ixy, self.iyy, self.iyz],
-            [self.ixz, self.iyz, self.izz]
+            [self.ixz, self.iyz, self.izz],
         ])
 
 
@@ -681,7 +681,7 @@ class InertialLink:
         Apply a transformation matrix to the Inertial Properties of the a link.
 
         Args:
-            matrix: The transformation matrix to apply to the origin.
+            tf_matrix: The transformation matrix to apply to the origin.
             inplace: Whether to apply the transformation in place.
 
         Returns:
@@ -696,14 +696,16 @@ class InertialLink:
 
         Analysis and References:
             The essence is to convert the Inertia tensor to a matrix and then transform the matrix via the equation
-            I_prime = R·I·Transpose[R] + m(||d||^2·I - d·Transpose[d]) 
+            I_prime = R·I·Transpose[R] + m(||d||^2·I - d·Transpose[d])
             Then we put the components into the resultant Inertial Link
-            An analysis (on 100k runs) suggests that this is 3× faster than a direct approach on the tensor elements likely because numpy's libraries are optimized for matrix operations.
+            An analysis (on 100k runs) suggests that this is 3 x faster than a direct approach on the tensor elements
+            likely because numpy's libraries are optimized for matrix operations.
+            (https://chatgpt.com/share/6781b6ac-772c-8006-b1a9-7f2dc3e3ef4d)
             Ref: https://chatgpt.com/share/6781b6ac-772c-8006-b1a9-7f2dc3e3ef4d
         """
 
         R = tf_matrix[:3, :3]  # Top-left 3x3 block is the rotation matrix
-        p = tf_matrix[:3, 3]   # Top-right 3x1 block is the translation vector
+        p = tf_matrix[:3, 3]  # Top-right 3x1 block is the translation vector
 
         inertia_matrix = self.inertia.to_matrix
         I_rot = R @ inertia_matrix @ R.T
@@ -736,7 +738,11 @@ class InertialLink:
             self.origin = Origin_prime
             return None
         else:
-            new_InertialLink = InertialLink(mass=self.mass, inertia=Inertia(ixx_prime, iyy_prime, izz_prime, ixy_prime, ixz_prime, iyz_prime), origin=Origin_prime)
+            new_InertialLink = InertialLink(
+                mass=self.mass,
+                inertia=Inertia(ixx_prime, iyy_prime, izz_prime, ixy_prime, ixz_prime, iyz_prime),
+                origin=Origin_prime,
+            )
             return new_InertialLink
 
     @classmethod

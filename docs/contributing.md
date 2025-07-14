@@ -42,7 +42,7 @@ If you are proposing a new feature:
 
 ## Get Started!
 
-Ready to contribute? Here's how to set up `onshape-robotics-toolkit` for local development. Please note this documentation assumes you already have `poetry` and `Git` installed and ready to go.
+Ready to contribute? Here's how to set up `onshape-robotics-toolkit` for local development. Please note this documentation assumes you already have `uv` and `Git` installed and ready to go.
 
 Fork the `onshape-robotics-toolkit` repo on GitHub.
 
@@ -62,16 +62,15 @@ cd onshape-robotics-toolkit
 Then, install and activate the environment with:
 
 ```sh
-poetry install
-poetry shell
+uv sync --dev --extra docs
 ```
 
-Please ensure that poetry is installed on your system. If not, you can install it by following the instructions [here](https://python-poetry.org/docs/).
+Please ensure that uv is installed on your system. If not, you can install it by following the instructions [here](https://docs.astral.sh/uv/getting-started/installation/).
 
 Install pre-commit to run linters/formatters at commit time:
 
 ```sh
-poetry run pre-commit install
+uv run pre-commit install
 ```
 
 Create a branch for local development:

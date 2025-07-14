@@ -43,13 +43,13 @@ BETA_WEIGHT = 25.0
 SIMULATION_DURATION = 120  # seconds to run each trial
 VIBRATION_PENALTY = 1e-3
 
-TARGET_VALUE = 50.0 # Exit control optimation if balanced for this long
-PERTURBATION_INCREASE = 0.125 # Amount of Newtons to increase perturbation by each time
-PERTURBATION_START = 5 # Time delay before perturbations begin
-PERTURBATION_REST = 7 # Time delay between perturbations
+TARGET_VALUE = 50.0  # Exit control optimation if balanced for this long
+PERTURBATION_INCREASE = 0.125  # Amount of Newtons to increase perturbation by each time
+PERTURBATION_START = 5  # Time delay before perturbations begin
+PERTURBATION_REST = 7  # Time delay between perturbations
 
 MAX_ANGLE = np.deg2rad(60)
-MAX_DISTANCE_FROM_BALL = 0.3 # meters
+MAX_DISTANCE_FROM_BALL = 0.3  # meters
 
 # PID parameters for roll, pitch, and yaw
 KP = 13.4
@@ -62,39 +62,50 @@ DERIVATIVE_FILTER_ALPHA = 0.1
 TORQUE_LIMIT_HIGH = 10.0
 TORQUE_LIMIT_LOW = -10.0
 
+
 def get_theta(data, degrees=False):
     rot = Rotation.from_quat(data.qpos[3:7], scalar_first=True)
     theta = rot.as_euler("XYZ", degrees=degrees)
     return theta[0], theta[1], theta[2]
 
+
 def get_psi(data):
     return data.qpos[7], data.qpos[8], data.qpos[9]
+
 
 def get_phi(data, degrees=False):
     rot = Rotation.from_quat(data.qpos[13:17], scalar_first=True)
     phi = rot.as_euler("XYZ", degrees=degrees)
     return phi[0], phi[1], phi[2]
 
+
 def get_bot_pos(data):
     return data.qpos[0], data.qpos[1], data.qpos[2]
+
 
 def get_ball_pos(data):
     return data.qpos[10], data.qpos[11], data.qpos[12]
 
+
 def get_bot_vel(data):
     return data.qvel[0], data.qvel[1], data.qvel[2]
+
 
 def get_dtheta(data):
     return data.qvel[3], data.qvel[4], data.qvel[5]
 
+
 def get_dpsi(data):
     return data.qvel[6], data.qvel[7], data.qvel[8]
+
 
 def get_ball_vel(data):
     return data.qvel[9], data.qvel[10], data.qvel[11]
 
+
 def get_dphi(data):
     return data.qvel[12], data.qvel[13], data.qvel[14]
+
 
 def get_states(data):
     theta = get_theta(data)
@@ -119,14 +130,18 @@ def get_states(data):
 def apply_ball_torque(data, torque):
     data.qfrc_applied[12:15] = torque
 
+
 def apply_ball_force(data, force):
     data.qfrc_applied[9:12] = force
+
 
 def apply_wheel_torque(data, torque):
     data.qfrc_applied[6:9] = torque
 
+
 def get_wheel_torque(data):
     return data.qfrc_smooth[6], data.qfrc_smooth[7], data.qfrc_smooth[8]
+
 
 def exit_condition(data):
     _roll, _pitch, _yaw = get_theta(data)
@@ -161,9 +176,10 @@ def control(data, roll_pid, pitch_pid, variables: dict[str, float]):
     data.ctrl[1] = t2
     data.ctrl[2] = t3
 
+
 def apply_perturbation(data, count):
     direction = np.random.rand(3)
-    direction[2] = 0 # Only apply force in the x-y plane
+    direction[2] = 0  # Only apply force in the x-y plane
 
     force = direction * count * PERTURBATION_INCREASE
     LOGGER.info(f"Applying perturbation {count}: {force}")
@@ -172,10 +188,10 @@ def apply_perturbation(data, count):
 
 def find_best_pid_params(trial, model, data, viewer, variables, usd_output_dir):
     # Suggest values for the PID gains
-    kp = trial.suggest_float('kp', low=5, high=25.0, step=0.1)
-    ki = trial.suggest_float('ki', low=0.0, high=15.0, step=0.1)
-    kd = trial.suggest_float('kd', low=0.0, high=1.0, step=0.01)
-    ff = trial.suggest_float('ff', low=0.01, high=1.01, step=0.05)
+    kp = trial.suggest_float("kp", low=5, high=25.0, step=0.1)
+    ki = trial.suggest_float("ki", low=0.0, high=15.0, step=0.1)
+    kd = trial.suggest_float("kd", low=0.0, high=1.0, step=0.01)
+    ff = trial.suggest_float("ff", low=0.01, high=1.01, step=0.05)
 
     LOGGER.info(f"KP: {kp}, KI: {ki}, KD: {kd}, FF: {ff}")
 
@@ -189,7 +205,7 @@ def find_best_pid_params(trial, model, data, viewer, variables, usd_output_dir):
         kp=kp,
         ki=ki,
         kd=kd,
-        dt=1.0/FREQUENCY,
+        dt=1.0 / FREQUENCY,
         min_output=TORQUE_LIMIT_LOW,
         max_output=TORQUE_LIMIT_HIGH,
         feed_forward_offset=ff,
@@ -199,7 +215,7 @@ def find_best_pid_params(trial, model, data, viewer, variables, usd_output_dir):
         kp=kp,
         ki=ki,
         kd=kd,
-        dt=1.0/FREQUENCY,
+        dt=1.0 / FREQUENCY,
         min_output=TORQUE_LIMIT_LOW,
         max_output=TORQUE_LIMIT_HIGH,
         feed_forward_offset=ff,
@@ -265,11 +281,13 @@ def find_best_pid_params(trial, model, data, viewer, variables, usd_output_dir):
 
     return objective_value
 
+
 def stop_when_target_reached(study, trial):
     if trial.value is not None and trial.value >= TARGET_VALUE:
         study.stop()
 
-def find_best_design_variables(trial):
+
+def find_best_design_variables(trial):  # noqa: C901
     # reset global PID error values
     wheel_diameter = trial.suggest_float("wheel_diameter", WHEEL_DIAMETER_BOUNDS[0], WHEEL_DIAMETER_BOUNDS[1])
     spacer_height = trial.suggest_float("spacer_height", SPACER_HEIGHT_BOUNDS[0], SPACER_HEIGHT_BOUNDS[1])
@@ -342,7 +360,7 @@ def find_best_design_variables(trial):
         kp=kp,
         ki=ki,
         kd=kd,
-        dt=1.0/FREQUENCY,
+        dt=1.0 / FREQUENCY,
         min_output=TORQUE_LIMIT_LOW,
         max_output=TORQUE_LIMIT_HIGH,
         feed_forward_offset=ff,
@@ -352,7 +370,7 @@ def find_best_design_variables(trial):
         kp=kp,
         ki=ki,
         kd=kd,
-        dt=1.0/FREQUENCY,
+        dt=1.0 / FREQUENCY,
         min_output=TORQUE_LIMIT_LOW,
         max_output=TORQUE_LIMIT_HIGH,
         feed_forward_offset=ff,
@@ -379,7 +397,7 @@ def find_best_design_variables(trial):
     cumulative_vibration = 0.0
     steps = 0
 
-    #while data.time < SIMULATION_DURATION and viewer.is_running():
+    # while data.time < SIMULATION_DURATION and viewer.is_running():
     while data.time < SIMULATION_DURATION:
         mujoco.mj_step(model, data)
 
@@ -417,7 +435,7 @@ def find_best_design_variables(trial):
         if USE_MUJOCO_VIEWER:
             viewer.sync()
         elif viewer.is_running():
-                viewer.close()
+            viewer.close()
 
     time_on_ball = data.time  # Time the ball stayed on top
     average_distance = cumulative_distance / steps if steps > 0 else 0.0
@@ -431,7 +449,6 @@ def find_best_design_variables(trial):
         f"Average Vibration: {average_vibration}, "
         f"Objective: {objective_value}"
     )
-
 
     if viewer.is_running():
         viewer.close()
@@ -480,11 +497,11 @@ if __name__ == "__main__":
         all_params = {
             **study.best_trial.params,
             "pid": {
-                "kp": study.best_trial.user_attrs['kp'],
-                "ki": study.best_trial.user_attrs['ki'],
-                "kd": study.best_trial.user_attrs['kd'],
-                "ff": study.best_trial.user_attrs['ff']
-            }
+                "kp": study.best_trial.user_attrs["kp"],
+                "ki": study.best_trial.user_attrs["ki"],
+                "kd": study.best_trial.user_attrs["kd"],
+                "ff": study.best_trial.user_attrs["ff"],
+            },
         }
         json.dump(all_params, f)
 
@@ -505,4 +522,3 @@ if __name__ == "__main__":
 
     parallel_coordinate_plot = optuna.visualization.plot_parallel_coordinate(study)
     plotly.io.write_html(parallel_coordinate_plot, os.path.join(output_dir, "parallel_coordinate.html"))
-

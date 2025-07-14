@@ -1,7 +1,5 @@
 In this tutorial, we'll explore how to edit an Onshape CAD assembly by modifying its variables in the Variable Studio and exporting the resulting assembly to a URDF file using the `onshape-robotics-toolkit` Python library.
 
-> 💡 The complete source code for this tutorial can be found in [`examples/edit/main.py`](../../examples/edit/main.py).
-
 <img src="bike-header.gif" alt="Bike Header" style="width: 100%;">
 
 ---
