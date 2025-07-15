@@ -1,28 +1,23 @@
 .PHONY: install
 install: ## Install the uv environment and install the pre-commit hooks
-	@echo "🚀 Creating virtual environment using uv"
+	@uv venv
 	@uv sync --dev
+	@uv run maturin develop --release
 	@uv run pre-commit install
-	@echo "To activate the virtual environment, run: uv venv && ./venv/Scripts/activate (Windows) or source ./venv/bin/activate (Unix)"
 
 .PHONY: check
 check: ## Run code quality tools.
-	@echo "🚀 Linting code: Running pre-commit"
 	@uv run pre-commit run -a
-	@echo "🚀 Static type checking: Running mypy"
 	@uv run ruff check .
-	@echo "🚀 Checking for obsolete dependencies: Running deptry"
 	@uv run deptry .
 
 .PHONY: test
 test: ## Test the code with pytest
-	@echo "🚀 Testing code: Running pytest"
 	@uv run pytest --cov --cov-config=pyproject.toml --cov-report=xml
 
 .PHONY: build
 build: clean-build ## Build wheel file using uv
-	@echo "🚀 Creating wheel file"
-	@uv build
+	@uv run maturin develop --release
 
 .PHONY: clean-build
 clean-build: ## clean build artifacts
@@ -34,9 +29,7 @@ version: ## Update the project version
 
 .PHONY: publish
 publish: ## publish a release to pypi.
-	@echo "🚀 Publishing: Dry run."
 	@uv publish --dry-run
-	@echo "🚀 Publishing."
 	@uv publish
 
 .PHONY: build-and-publish
