@@ -1,5 +1,4 @@
 use pyo3::prelude::*;
-use reqwest::blocking::Client;
 
 #[pyclass]
 pub struct OnshapeClient {
