@@ -30,7 +30,7 @@ dependencies = [
 onshape-robotics-toolkit = "onshape_robotics_toolkit:main"
 
 [tool.maturin]
-module-name = "onshape_robotics_toolkit._core"
+module-name = "onshape_robotics_toolkit.native"
 python-packages = ["onshape_robotics_toolkit"]
 python-source = "src"
 

@@ -1,15 +1,23 @@
 use pyo3::prelude::*;
+use rand::{thread_rng, Rng};
+use rand::distributions::Alphanumeric;
+
+mod client;
 
 #[pyfunction]
-fn hello_from_bin() -> String {
-    "Hello from onshape-robotics-toolkit!".to_string()
+fn generate_nonce() -> String {
+    let mut rng = thread_rng();
+    let nonce: String = rng
+        .sample_iter(&Alphanumeric)
+        .take(25)
+        .map(char::from)
+        .collect();
+    nonce
 }
 
-/// A Python module implemented in Rust. The name of this function must match
-/// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
-/// import the module.
 #[pymodule]
-fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(hello_from_bin, m)?)?;
+fn native(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(generate_nonce, m)?)?;
+    m.add_class::<client::OnshapeClient>()?;
     Ok(())
 }

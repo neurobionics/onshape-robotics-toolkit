@@ -894,7 +894,6 @@ dependencies = [
     { name = "plotly" },
     { name = "pyarrow" },
     { name = "pydantic" },
-    { name = "pytest" },
     { name = "python-dotenv" },
     { name = "regex" },
     { name = "requests" },
@@ -910,6 +909,7 @@ dev = [
     { name = "mkdocs" },
     { name = "pre-commit" },
     { name = "pyrefly" },
+    { name = "pytest" },
     { name = "ruff" },
 ]
 
@@ -925,7 +925,6 @@ requires-dist = [
     { name = "plotly", specifier = ">=5.24.1" },
     { name = "pyarrow", specifier = ">=18.0.0" },
     { name = "pydantic", specifier = ">=2.9.2" },
-    { name = "pytest", specifier = ">=8.4.1" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "regex", specifier = ">=2024.9.11" },
     { name = "requests", specifier = ">=2.32.3" },
@@ -940,6 +939,7 @@ dev = [
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "pre-commit", specifier = ">=4.2.0" },
     { name = "pyrefly", specifier = ">=0.24.1" },
+    { name = "pytest", specifier = ">=8.4.1" },
     { name = "ruff", specifier = ">=0.12.3" },
 ]
 
