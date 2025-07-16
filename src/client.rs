@@ -262,6 +262,13 @@ impl OnshapeClient {
         let endpoint = GetDocumentMetadata { did };
         let document: DocumentMetaData = Query::query(&endpoint, self)
             .map_err(|e| match e {
+                ApiError::Server(msg) if msg.contains("Not Found (404)") => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Document does not exist: {}", did))
+                }
+                ApiError::Auth(msg) if msg.contains("Unauthorized") || msg.contains("Forbidden") => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Access forbidden for document: {}", did))
+                }
+                // Fallback for old error patterns
                 ApiError::Server(msg) if msg.contains("404") => {
                     pyo3::exceptions::PyValueError::new_err(format!("Document does not exist: {}", did))
                 }
@@ -397,6 +404,13 @@ impl OnshapeClient {
 
         let mut assembly: Assembly = Query::query(&endpoint, self)
             .map_err(|e| match e {
+                ApiError::Server(msg) if msg.contains("Not Found (404)") => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Assembly not found: {}", did))
+                }
+                ApiError::Auth(msg) if msg.contains("Unauthorized") || msg.contains("Forbidden") => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Unauthorized access to document: {}", did))
+                }
+                // Fallback for old error patterns
                 ApiError::Server(msg) if msg.contains("404") => {
                     pyo3::exceptions::PyValueError::new_err(format!("Assembly not found: {}", did))
                 }
@@ -498,6 +512,10 @@ impl OnshapeClient {
 
         let mass_props: MassProperties = Query::query(&endpoint, self)
             .map_err(|e| match e {
+                ApiError::Server(msg) if msg.contains("Not Found (404)") => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Assembly does not have a mass property"))
+                }
+                // Fallback for old error patterns
                 ApiError::Server(msg) if msg.contains("404") => {
                     pyo3::exceptions::PyValueError::new_err(format!("Assembly does not have a mass property"))
                 }
@@ -541,6 +559,24 @@ impl OnshapeClient {
 
         let response: serde_json::Value = Query::query(&endpoint, self)
             .map_err(|e| match e {
+                ApiError::Server(msg) if msg.contains("Not Found (404)") => {
+                    pyo3::exceptions::PyValueError::new_err(
+                        format!("Part does not have a material assigned or the part is not found")
+                    )
+                }
+                ApiError::Server(msg) if msg.contains("Too Many Requests (429)") => {
+                    // Extract retry information from the enhanced error message
+                    if msg.contains("retry after") {
+                        let retry_msg = msg.split("retry after").nth(1)
+                            .and_then(|s| s.split_whitespace().next())
+                            .map(|s| format!("Too many requests, please retry after {} seconds", s))
+                            .unwrap_or_else(|| "Too many requests, please retry later".to_string());
+                        pyo3::exceptions::PyValueError::new_err(retry_msg)
+                    } else {
+                        pyo3::exceptions::PyValueError::new_err("Too many requests, please retry later")
+                    }
+                }
+                // Fallback for old error patterns
                 ApiError::Server(msg) if msg.contains("404") => {
                     pyo3::exceptions::PyValueError::new_err(
                         format!("Part does not have a material assigned or the part is not found")

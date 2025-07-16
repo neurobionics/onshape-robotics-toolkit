@@ -123,13 +123,41 @@ where
         let response = client.rest(request)?;
 
         let status = response.status();
+        let headers = response.headers().clone();
         let body = response.into_body();
 
         if !status.is_success() {
             let error_msg = String::from_utf8_lossy(&body);
+            let retry_after = crate::error::extract_retry_after(&headers);
+
             return match status.as_u16() {
-                401 | 403 => Err(ApiError::Auth(error_msg.to_string())),
-                _ => Err(ApiError::Server(format!("{}: {}", status, error_msg))),
+                401 => Err(ApiError::Auth(format!("Unauthorized: {}", error_msg))),
+                403 => Err(ApiError::Auth(format!("Forbidden: {}", error_msg))),
+                400 => Err(ApiError::Server(format!("Bad Request (400): {}", error_msg))),
+                404 => Err(ApiError::Server(format!("Not Found (404): {}", error_msg))),
+                405 => Err(ApiError::Server(format!("Method Not Allowed (405): {}", error_msg))),
+                406 => Err(ApiError::Server(format!("Not Acceptable (406): {}", error_msg))),
+                409 => Err(ApiError::Server(format!("Conflict (409): {}", error_msg))),
+                415 => Err(ApiError::Server(format!("Unsupported Media Type (415): {}", error_msg))),
+                429 => {
+                    if let Some(seconds) = retry_after {
+                        Err(ApiError::Server(format!("Too Many Requests (429): retry after {} seconds - {}", seconds, error_msg)))
+                    } else {
+                        Err(ApiError::Server(format!("Too Many Requests (429): {}", error_msg)))
+                    }
+                },
+                499 => Err(ApiError::Server(format!("Timeout (499): {}", error_msg))),
+                500 => Err(ApiError::Server(format!("Internal Server Error (500): {}", error_msg))),
+                503 => {
+                    if let Some(seconds) = retry_after {
+                        Err(ApiError::Server(format!("Service Unavailable (503): retry after {} seconds - {}", seconds, error_msg)))
+                    } else {
+                        Err(ApiError::Server(format!("Service Unavailable (503): {}", error_msg)))
+                    }
+                },
+                307 => Err(ApiError::Server(format!("Temporary Redirect (307): {}", error_msg))),
+                _ if (500..600).contains(&status.as_u16()) => Err(ApiError::Server(format!("Server Error ({}): {}", status, error_msg))),
+                _ => Err(ApiError::Server(format!("HTTP Error ({}): {}", status, error_msg))),
             };
         }
 
@@ -183,13 +211,41 @@ where
         let response = client.rest(request).await?;
 
         let status = response.status();
+        let headers = response.headers().clone();
         let body = response.into_body();
 
         if !status.is_success() {
             let error_msg = String::from_utf8_lossy(&body);
+            let retry_after = crate::error::extract_retry_after(&headers);
+
             return match status.as_u16() {
-                401 | 403 => Err(ApiError::Auth(error_msg.to_string())),
-                _ => Err(ApiError::Server(format!("{}: {}", status, error_msg))),
+                401 => Err(ApiError::Auth(format!("Unauthorized: {}", error_msg))),
+                403 => Err(ApiError::Auth(format!("Forbidden: {}", error_msg))),
+                400 => Err(ApiError::Server(format!("Bad Request (400): {}", error_msg))),
+                404 => Err(ApiError::Server(format!("Not Found (404): {}", error_msg))),
+                405 => Err(ApiError::Server(format!("Method Not Allowed (405): {}", error_msg))),
+                406 => Err(ApiError::Server(format!("Not Acceptable (406): {}", error_msg))),
+                409 => Err(ApiError::Server(format!("Conflict (409): {}", error_msg))),
+                415 => Err(ApiError::Server(format!("Unsupported Media Type (415): {}", error_msg))),
+                429 => {
+                    if let Some(seconds) = retry_after {
+                        Err(ApiError::Server(format!("Too Many Requests (429): retry after {} seconds - {}", seconds, error_msg)))
+                    } else {
+                        Err(ApiError::Server(format!("Too Many Requests (429): {}", error_msg)))
+                    }
+                },
+                499 => Err(ApiError::Server(format!("Timeout (499): {}", error_msg))),
+                500 => Err(ApiError::Server(format!("Internal Server Error (500): {}", error_msg))),
+                503 => {
+                    if let Some(seconds) = retry_after {
+                        Err(ApiError::Server(format!("Service Unavailable (503): retry after {} seconds - {}", seconds, error_msg)))
+                    } else {
+                        Err(ApiError::Server(format!("Service Unavailable (503): {}", error_msg)))
+                    }
+                },
+                307 => Err(ApiError::Server(format!("Temporary Redirect (307): {}", error_msg))),
+                _ if (500..600).contains(&status.as_u16()) => Err(ApiError::Server(format!("Server Error ({}): {}", status, error_msg))),
+                _ => Err(ApiError::Server(format!("HTTP Error ({}): {}", status, error_msg))),
             };
         }
 
@@ -281,13 +337,41 @@ where
     let response = client.rest(request)?;
 
     let status = response.status();
+    let headers = response.headers().clone();
     let body = response.into_body();
 
     if !status.is_success() {
         let error_msg = String::from_utf8_lossy(&body);
+        let retry_after = crate::error::extract_retry_after(&headers);
+
         return match status.as_u16() {
-            401 | 403 => Err(ApiError::Auth(error_msg.to_string())),
-            _ => Err(ApiError::Server(format!("{}: {}", status, error_msg))),
+            401 => Err(ApiError::Auth(format!("Unauthorized: {}", error_msg))),
+            403 => Err(ApiError::Auth(format!("Forbidden: {}", error_msg))),
+            400 => Err(ApiError::Server(format!("Bad Request (400): {}", error_msg))),
+            404 => Err(ApiError::Server(format!("Not Found (404): {}", error_msg))),
+            405 => Err(ApiError::Server(format!("Method Not Allowed (405): {}", error_msg))),
+            406 => Err(ApiError::Server(format!("Not Acceptable (406): {}", error_msg))),
+            409 => Err(ApiError::Server(format!("Conflict (409): {}", error_msg))),
+            415 => Err(ApiError::Server(format!("Unsupported Media Type (415): {}", error_msg))),
+            429 => {
+                if let Some(seconds) = retry_after {
+                    Err(ApiError::Server(format!("Too Many Requests (429): retry after {} seconds - {}", seconds, error_msg)))
+                } else {
+                    Err(ApiError::Server(format!("Too Many Requests (429): {}", error_msg)))
+                }
+            },
+            499 => Err(ApiError::Server(format!("Timeout (499): {}", error_msg))),
+            500 => Err(ApiError::Server(format!("Internal Server Error (500): {}", error_msg))),
+            503 => {
+                if let Some(seconds) = retry_after {
+                    Err(ApiError::Server(format!("Service Unavailable (503): retry after {} seconds - {}", seconds, error_msg)))
+                } else {
+                    Err(ApiError::Server(format!("Service Unavailable (503): {}", error_msg)))
+                }
+            },
+            307 => Err(ApiError::Server(format!("Temporary Redirect (307): {}", error_msg))),
+            _ if (500..600).contains(&status.as_u16()) => Err(ApiError::Server(format!("Server Error ({}): {}", status, error_msg))),
+            _ => Err(ApiError::Server(format!("HTTP Error ({}): {}", status, error_msg))),
         };
     }
 
@@ -352,13 +436,41 @@ where
     let response = client.rest(request).await?;
 
     let status = response.status();
+    let headers = response.headers().clone();
     let body = response.into_body();
 
     if !status.is_success() {
         let error_msg = String::from_utf8_lossy(&body);
+        let retry_after = crate::error::extract_retry_after(&headers);
+
         return match status.as_u16() {
-            401 | 403 => Err(ApiError::Auth(error_msg.to_string())),
-            _ => Err(ApiError::Server(format!("{}: {}", status, error_msg))),
+            401 => Err(ApiError::Auth(format!("Unauthorized: {}", error_msg))),
+            403 => Err(ApiError::Auth(format!("Forbidden: {}", error_msg))),
+            400 => Err(ApiError::Server(format!("Bad Request (400): {}", error_msg))),
+            404 => Err(ApiError::Server(format!("Not Found (404): {}", error_msg))),
+            405 => Err(ApiError::Server(format!("Method Not Allowed (405): {}", error_msg))),
+            406 => Err(ApiError::Server(format!("Not Acceptable (406): {}", error_msg))),
+            409 => Err(ApiError::Server(format!("Conflict (409): {}", error_msg))),
+            415 => Err(ApiError::Server(format!("Unsupported Media Type (415): {}", error_msg))),
+            429 => {
+                if let Some(seconds) = retry_after {
+                    Err(ApiError::Server(format!("Too Many Requests (429): retry after {} seconds - {}", seconds, error_msg)))
+                } else {
+                    Err(ApiError::Server(format!("Too Many Requests (429): {}", error_msg)))
+                }
+            },
+            499 => Err(ApiError::Server(format!("Timeout (499): {}", error_msg))),
+            500 => Err(ApiError::Server(format!("Internal Server Error (500): {}", error_msg))),
+            503 => {
+                if let Some(seconds) = retry_after {
+                    Err(ApiError::Server(format!("Service Unavailable (503): retry after {} seconds - {}", seconds, error_msg)))
+                } else {
+                    Err(ApiError::Server(format!("Service Unavailable (503): {}", error_msg)))
+                }
+            },
+            307 => Err(ApiError::Server(format!("Temporary Redirect (307): {}", error_msg))),
+            _ if (500..600).contains(&status.as_u16()) => Err(ApiError::Server(format!("Server Error ({}): {}", status, error_msg))),
+            _ => Err(ApiError::Server(format!("HTTP Error ({}): {}", status, error_msg))),
         };
     }
 
