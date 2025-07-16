@@ -381,6 +381,7 @@ impl OnshapeClient {
     ///
     /// Raises:
     ///     RuntimeError: If the request fails
+    #[pyo3(signature = (did, wtype, wid, eid, configuration=None))]
     pub fn get_assembly(
         &self,
         did: &str,
@@ -451,6 +452,7 @@ impl OnshapeClient {
     ///
     /// Raises:
     ///     RuntimeError: If the request fails
+    #[pyo3(signature = (did, wtype, wid, eid, configuration=None, with_mass_properties=None))]
     pub fn get_root_assembly(
         &self,
         did: &str,
