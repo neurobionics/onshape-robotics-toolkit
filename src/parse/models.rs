@@ -597,3 +597,50 @@ impl Assembly {
         self.part_studio_features.iter().map(|f| f.to_string()).collect()
     }
 }
+
+// Conversion from client model to parse model
+impl From<crate::model::RootAssembly> for RootAssembly {
+    fn from(root: crate::model::RootAssembly) -> Self {
+        // Convert JSON instances to typed instances
+        let instances: Vec<Instance> = root.instances
+            .into_iter()
+            .filter_map(|json| serde_json::from_value(json).ok())
+            .collect();
+
+        // Convert JSON patterns to typed patterns
+        let patterns: Vec<serde_json::Value> = root.patterns;
+
+        // Convert JSON features to typed features
+        let features: Vec<AssemblyFeature> = root.features
+            .into_iter()
+            .filter_map(|json| serde_json::from_value(json).ok())
+            .collect();
+
+        // Convert JSON occurrences to typed occurrences
+        let occurrences: Vec<Occurrence> = root.occurrences
+            .into_iter()
+            .filter_map(|json| serde_json::from_value(json).ok())
+            .collect();
+
+        // Create the SubAssembly part
+        let sub_assembly = SubAssembly {
+            base: IdBase {
+                full_configuration: root.full_configuration,
+                configuration: root.configuration,
+                document_id: root.document_id,
+                element_id: root.element_id,
+                document_microversion: root.document_microversion,
+            },
+            instances,
+            patterns,
+            features,
+        };
+
+        RootAssembly {
+            sub_assembly,
+            occurrences,
+            mass_property: root.mass_property,
+            document_meta_data: root.document_meta_data,
+        }
+    }
+}
