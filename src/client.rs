@@ -15,10 +15,13 @@ use reqwest::Client as ReqwestClient;
 use sha2::Sha256;
 use url::Url;
 
-use crate::endpoint::{AsyncClient, Client, Query};
-use crate::endpoints::{GetElements, ElementsMap};
+use crate::endpoint::{AsyncClient, Client, Query, Endpoint};
+use crate::endpoints::{
+    GetElements, ElementsMap, GetDocumentMetadata, GetVariables, SetVariables, VariableUpdate,
+    GetAssembly, GetPartMassProperties, GetAssemblyMassProperties, DownloadPartStl
+};
 use crate::error::{ApiError, OnshapeError};
-use crate::model::Element;
+use crate::model::{Element, DocumentMetaData, Variable, Assembly, RootAssembly, MassProperties};
 use crate::utils::generate_nonce;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -239,6 +242,399 @@ impl OnshapeClient {
             })?;
 
         Ok(elements_map.into())
+    }
+
+    /// Get document metadata for a specified document
+    ///
+    /// Args:
+    ///     did: The unique identifier of the document
+    ///
+    /// Returns:
+    ///     DocumentMetaData object containing document information
+    ///
+    /// Raises:
+    ///     ValueError: If the document is not found or access is forbidden
+    pub fn get_document_metadata(&self, did: &str) -> PyResult<DocumentMetaData> {
+        if did.len() != 24 {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!("Invalid document ID: {}", did)));
+        }
+
+        let endpoint = GetDocumentMetadata { did };
+        let document: DocumentMetaData = Query::query(&endpoint, self)
+            .map_err(|e| match e {
+                ApiError::Server(msg) if msg.contains("404") => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Document does not exist: {}", did))
+                }
+                ApiError::Auth(_) => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Access forbidden for document: {}", did))
+                }
+                ApiError::Server(msg) if msg.contains("403") => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Access forbidden for document: {}", did))
+                }
+                _ => pyo3::exceptions::PyRuntimeError::new_err(format!("API error: {}", e))
+            })?;
+
+        Ok(document)
+    }
+
+    /// Get a list of variables in a variable studio within a document
+    ///
+    /// Args:
+    ///     did: The unique identifier of the document
+    ///     wid: The unique identifier of the workspace
+    ///     eid: The unique identifier of the variable studio
+    ///
+    /// Returns:
+    ///     A dictionary mapping variable names to Variable objects
+    ///
+    /// Raises:
+    ///     RuntimeError: If the request fails
+    pub fn get_variables(
+        &self,
+        did: &str,
+        wid: &str,
+        eid: &str
+    ) -> PyResult<HashMap<String, Variable>> {
+        let endpoint = GetVariables { did, wid, eid };
+
+        // The API returns an array with an object containing a "variables" array
+        let response: Vec<serde_json::Value> = Query::query(&endpoint, self)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("API error: {}", e)))?;
+
+        if response.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        // Parse the variables from the response
+        let variables = response[0]["variables"].as_array()
+            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Invalid variables response format"))?;
+
+        let mut variables_map = HashMap::new();
+        for var_value in variables {
+            let variable: Variable = serde_json::from_value(var_value.clone())
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to parse variable: {}", e)))?;
+            variables_map.insert(variable.name.clone(), variable);
+        }
+
+        Ok(variables_map)
+    }
+
+    /// Set values for variables of a variable studio in a document
+    ///
+    /// Args:
+    ///     did: The unique identifier of the document
+    ///     wid: The unique identifier of the workspace
+    ///     eid: The unique identifier of the variable studio
+    ///     variables: A dictionary of variable name and expression pairs
+    ///
+    /// Returns:
+    ///     True if successful
+    ///
+    /// Raises:
+    ///     RuntimeError: If the request fails
+    pub fn set_variables(
+        &self,
+        did: &str,
+        wid: &str,
+        eid: &str,
+        variables: HashMap<String, String>
+    ) -> PyResult<bool> {
+        let variable_updates: Vec<VariableUpdate> = variables
+            .iter()
+            .map(|(name, expression)| VariableUpdate {
+                name: name.as_str(),
+                expression: expression.as_str(),
+            })
+            .collect();
+
+        let endpoint = SetVariables {
+            did,
+            wid,
+            eid,
+            variables: variable_updates,
+        };
+
+        let _: serde_json::Value = Query::query(&endpoint, self)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("API error: {}", e)))?;
+
+        Ok(true)
+    }
+
+    /// Get assembly data for a specified document / workspace / assembly
+    ///
+    /// Args:
+    ///     did: The unique identifier of the document
+    ///     wtype: The type of workspace (w, v, or m)
+    ///     wid: The unique identifier of the workspace
+    ///     eid: The unique identifier of the assembly
+    ///     configuration: The configuration of the assembly (default: "default")
+    ///
+    /// Returns:
+    ///     Assembly object containing the assembly data
+    ///
+    /// Raises:
+    ///     RuntimeError: If the request fails
+    pub fn get_assembly(
+        &self,
+        did: &str,
+        wtype: &str,
+        wid: &str,
+        eid: &str,
+        configuration: Option<&str>
+    ) -> PyResult<Assembly> {
+        let config = configuration.unwrap_or("default");
+
+        let endpoint = GetAssembly {
+            did,
+            wtype,
+            wid,
+            eid,
+            configuration: config,
+            include_mate_features: true,
+            include_mate_connectors: true,
+            include_non_solids: false,
+        };
+
+        let mut assembly: Assembly = Query::query(&endpoint, self)
+            .map_err(|e| match e {
+                ApiError::Server(msg) if msg.contains("404") => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Assembly not found: {}", did))
+                }
+                ApiError::Auth(_) => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Unauthorized access to document: {}", did))
+                }
+                ApiError::Server(msg) if msg.contains("401") || msg.contains("403") => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Unauthorized access to document: {}", did))
+                }
+                _ => pyo3::exceptions::PyRuntimeError::new_err(format!("API error: {}", e))
+            })?;
+
+        // Set document information
+        assembly.document = Some(crate::model::Document {
+            did: did.to_string(),
+            wtype: wtype.to_string(),
+            wid: wid.to_string(),
+            eid: eid.to_string(),
+            name: None,
+            url: None,
+        });
+
+        Ok(assembly)
+    }
+
+    /// Get root assembly data for a specified document / workspace / element
+    ///
+    /// Args:
+    ///     did: The unique identifier of the document
+    ///     wtype: The type of workspace (w, v, or m)
+    ///     wid: The unique identifier of the workspace
+    ///     eid: The unique identifier of the element
+    ///     configuration: The configuration of the assembly (default: "default")
+    ///     with_mass_properties: Whether to include mass properties (default: false)
+    ///
+    /// Returns:
+    ///     RootAssembly object containing the root assembly data
+    ///
+    /// Raises:
+    ///     RuntimeError: If the request fails
+    pub fn get_root_assembly(
+        &self,
+        did: &str,
+        wtype: &str,
+        wid: &str,
+        eid: &str,
+        configuration: Option<&str>,
+        with_mass_properties: Option<bool>
+    ) -> PyResult<RootAssembly> {
+        let assembly = self.get_assembly(did, wtype, wid, eid, configuration)?;
+        let mut root_assembly = assembly.root_assembly;
+
+        if with_mass_properties.unwrap_or(false) {
+            match self.get_assembly_mass_properties(did, wtype, wid, eid) {
+                Ok(mass_props) => {
+                    root_assembly.mass_property = Some(mass_props);
+                }
+                Err(_) => {
+                    // Mass properties are optional, so we don't fail if they're not available
+                }
+            }
+        }
+
+        // Add document metadata
+        match self.get_document_metadata(did) {
+            Ok(doc_meta) => {
+                root_assembly.document_meta_data = Some(doc_meta);
+            }
+            Err(_) => {
+                // Document metadata is optional, so we don't fail if it's not available
+            }
+        }
+
+        Ok(root_assembly)
+    }
+
+    /// Get mass properties of a rigid assembly in a document
+    ///
+    /// Args:
+    ///     did: The unique identifier of the document
+    ///     wtype: The type of workspace (w, v, or m)
+    ///     wid: The unique identifier of the workspace
+    ///     eid: The unique identifier of the rigid assembly
+    ///
+    /// Returns:
+    ///     MassProperties object containing the mass properties of the assembly
+    ///
+    /// Raises:
+    ///     ValueError: If the assembly does not have mass properties
+    ///     RuntimeError: If the request fails
+    pub fn get_assembly_mass_properties(
+        &self,
+        did: &str,
+        wtype: &str,
+        wid: &str,
+        eid: &str
+    ) -> PyResult<MassProperties> {
+        let endpoint = GetAssemblyMassProperties { did, wtype, wid, eid };
+
+        let mass_props: MassProperties = Query::query(&endpoint, self)
+            .map_err(|e| match e {
+                ApiError::Server(msg) if msg.contains("404") => {
+                    pyo3::exceptions::PyValueError::new_err(format!("Assembly does not have a mass property"))
+                }
+                _ => pyo3::exceptions::PyRuntimeError::new_err(format!("API error: {}", e))
+            })?;
+
+        Ok(mass_props)
+    }
+
+    /// Get mass properties of a part in a part studio
+    ///
+    /// Args:
+    ///     did: The unique identifier of the document
+    ///     wtype: The type of workspace (w, v, or m)
+    ///     wid: The unique identifier of the workspace
+    ///     eid: The unique identifier of the element
+    ///     part_id: The identifier of the part
+    ///
+    /// Returns:
+    ///     MassProperties object containing the mass properties of the part
+    ///
+    /// Raises:
+    ///     ValueError: If the part does not have a material assigned or is not found
+    ///     RuntimeError: If the request fails
+    pub fn get_mass_property(
+        &self,
+        did: &str,
+        wtype: &str,
+        wid: &str,
+        eid: &str,
+        part_id: &str
+    ) -> PyResult<MassProperties> {
+        let endpoint = GetPartMassProperties {
+            did,
+            wtype,
+            wid,
+            eid,
+            part_id,
+            use_mass_properties_overrides: true,
+        };
+
+        let response: serde_json::Value = Query::query(&endpoint, self)
+            .map_err(|e| match e {
+                ApiError::Server(msg) if msg.contains("404") => {
+                    pyo3::exceptions::PyValueError::new_err(
+                        format!("Part does not have a material assigned or the part is not found")
+                    )
+                }
+                ApiError::Server(msg) if msg.contains("429") => {
+                    // Extract retry-after if available
+                    pyo3::exceptions::PyValueError::new_err("Too many requests, please retry later")
+                }
+                _ => pyo3::exceptions::PyRuntimeError::new_err(format!("API error: {}", e))
+            })?;
+
+        // Parse the mass properties from the bodies field
+        let bodies = response["bodies"].as_object()
+            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err("Bodies not found in response"))?;
+
+        let mass_props_value = bodies.get(part_id)
+            .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(format!("Bodies not found in response, broken part? {}", part_id)))?;
+
+        let mass_props: MassProperties = serde_json::from_value(mass_props_value.clone())
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to parse mass properties: {}", e)))?;
+
+        Ok(mass_props)
+    }
+
+    /// Download an STL file from a part studio as bytes
+    ///
+    /// Args:
+    ///     did: The unique identifier of the document
+    ///     wtype: The type of workspace (w, v, or m)
+    ///     wid: The unique identifier of the workspace
+    ///     eid: The unique identifier of the element
+    ///     part_id: The unique identifier of the part
+    ///
+    /// Returns:
+    ///     Bytes containing the STL file content
+    ///
+    /// Raises:
+    ///     RuntimeError: If the download fails
+    pub fn download_part_stl(
+        &self,
+        did: &str,
+        wtype: &str,
+        wid: &str,
+        eid: &str,
+        part_id: &str
+    ) -> PyResult<Vec<u8>> {
+        let endpoint = DownloadPartStl {
+            did,
+            wtype,
+            wid,
+            eid,
+            part_id,
+            mode: "binary",
+            grouping: true,
+            units: "meter",
+        };
+
+        // Build the URL using the Client trait implementation
+        let url = Client::rest_endpoint(self, &endpoint.endpoint())
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("API error: {}", e)))?;
+
+        let mut request = http::Request::builder()
+            .method(endpoint.method())
+            .uri(url.as_str())
+            .header("Accept", "application/vnd.onshape.v1+octet-stream");
+
+        // Add query parameters
+        let params = endpoint.parameters();
+        if !params.is_empty() {
+            let mut url_with_params = url.clone();
+            {
+                let mut query_pairs = url_with_params.query_pairs_mut();
+                for (key, value) in params.iter() {
+                    query_pairs.append_pair(key, value);
+                }
+            }
+            request = request.uri(url_with_params.as_str());
+        }
+
+        let request = request.body(Vec::new())
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to build request: {}", e)))?;
+
+        let response = Client::rest(self, request)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("API error: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                format!("Failed to download STL file: {} - {}", response.status(),
+                        String::from_utf8_lossy(&response.body()))
+            ));
+        }
+
+        Ok(response.into_body().to_vec())
     }
 
     /// Get the current API call count

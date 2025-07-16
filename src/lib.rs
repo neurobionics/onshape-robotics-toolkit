@@ -20,10 +20,15 @@ pub use derive_builder;
 
 #[pymodule]
 fn native(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(utils::generate_nonce_py, m)?)?;
     m.add_class::<client::OnshapeClient>()?;
+    m.add_class::<model::DocumentMetaData>()?;
+    m.add_class::<model::DefaultWorkspace>()?;
+    m.add_class::<model::Element>()?;
+    m.add_class::<model::Variable>()?;
+    m.add_class::<model::Assembly>()?;
+    m.add_class::<model::RootAssembly>()?;
+    m.add_class::<model::Document>()?;
+    m.add_class::<model::MassProperties>()?;
+    m.add_class::<model::TranslationJob>()?;
     Ok(())
 }
-
-// Re-export core traits for library users
-pub use endpoint::{Endpoint, Client, AsyncClient};

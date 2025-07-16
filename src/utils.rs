@@ -1,4 +1,3 @@
-use pyo3::prelude::*;
 use rand::{thread_rng, Rng};
 use rand::distributions::Alphanumeric;
 
@@ -9,12 +8,6 @@ pub fn generate_nonce() -> String {
         .take(25)
         .map(char::from)
         .collect()
-}
-
-/// Python wrapper for generate_nonce
-#[pyfunction]
-pub fn generate_nonce_py() -> String {
-    generate_nonce()
 }
 
 /// Sanitize a name for use in file paths

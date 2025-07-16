@@ -28,7 +28,6 @@ if __name__ == "__main__":
         "w",
         "c842455c29cc878dc48bdc68",
     )
-    print(rs_elements)
-    print(f"Rust client SUCCESS: Found {len(rs_elements)} elements")
+    print(rs_elements["Tie"].id)
 
     print(f"\nAPI call count: {rs_client.api_call_count}")
