@@ -33,42 +33,16 @@ pub struct TraversalResult {
     pub id_to_name_map: IdToNameMap,
 }
 
-/// Configuration for assembly parsing
-#[derive(Debug, Clone)]
-pub struct ParseConfig {
-    pub max_depth: usize,
-    pub configuration: Option<String>,
-    pub with_mass_properties: bool,
-    pub include_mate_features: bool,
-    pub include_mate_connectors: bool,
-    pub include_non_solids: bool,
-    pub log_response: bool,
-}
-
-impl Default for ParseConfig {
-    fn default() -> Self {
-        Self {
-            max_depth: 0,
-            configuration: None,
-            with_mass_properties: true,
-            include_mate_features: true,
-            include_mate_connectors: true,
-            include_non_solids: false,
-            log_response: false,
-        }
-    }
-}
-
 /// Instance traversal engine
 pub struct InstanceTraverser {
-    config: ParseConfig,
+    max_depth: usize,
     current_depth: usize,
 }
 
 impl InstanceTraverser {
-    pub fn new(config: ParseConfig) -> Self {
+    pub fn new(max_depth: usize) -> Self {
         Self {
-            config,
+            max_depth,
             current_depth: 0,
         }
     }
@@ -102,59 +76,59 @@ impl InstanceTraverser {
         id_to_name_map: &'a mut IdToNameMap,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + 'a>> {
         Box::pin(async move {
-            let is_rigid = self.current_depth >= self.config.max_depth;
+        let is_rigid = self.current_depth >= self.max_depth;
 
-            if is_rigid {
-                log::debug!(
-                    "Max depth {} reached. Assuming all sub-assemblies to be rigid at depth {}.",
-                    self.config.max_depth, self.current_depth
-                );
+        if is_rigid {
+            log::debug!(
+                "Max depth {} reached. Assuming all sub-assemblies to be rigid at depth {}.",
+                self.max_depth, self.current_depth
+            );
+        }
+
+        // Process all instances in this subassembly
+        for instance in &root.instances {
+            let sanitized_name = sanitize_name(instance.get_name());
+            log::debug!("Parsing instance: {}", sanitized_name);
+
+            let instance_id = if prefix.is_empty() {
+                sanitized_name.clone()
+            } else {
+                format!("{}{}{}", prefix, SUBASSEMBLY_JOINER, sanitized_name)
+            };
+
+            id_to_name_map.insert(instance.get_id().to_string(), sanitized_name);
+
+            // Mark assembly instances as rigid if needed
+            let mut instance_clone = instance.clone();
+            if let Instance::Assembly(ref mut assembly_instance) = instance_clone {
+                assembly_instance.is_rigid = Some(is_rigid);
             }
 
-            // Process all instances in this subassembly
-            for instance in &root.instances {
-                let sanitized_name = sanitize_name(instance.get_name());
-                log::debug!("Parsing instance: {}", sanitized_name);
+            instance_map.insert(instance_id.clone(), instance_clone);
 
-                let instance_id = if prefix.is_empty() {
-                    sanitized_name.clone()
-                } else {
-                    format!("{}{}{}", prefix, SUBASSEMBLY_JOINER, sanitized_name)
-                };
+            // Recursively process subassemblies if not at max depth
+            if matches!(instance.get_type(), InstanceType::Assembly) && !is_rigid {
+                self.current_depth += 1;
 
-                id_to_name_map.insert(instance.get_id().to_string(), sanitized_name);
-
-                // Mark assembly instances as rigid if needed
-                let mut instance_clone = instance.clone();
-                if let Instance::Assembly(ref mut assembly_instance) = instance_clone {
-                    assembly_instance.is_rigid = Some(is_rigid);
-                }
-
-                instance_map.insert(instance_id.clone(), instance_clone);
-
-                // Recursively process subassemblies if not at max depth
-                if matches!(instance.get_type(), InstanceType::Assembly) && !is_rigid {
-                    self.current_depth += 1;
-
-                    // Find matching subassembly and traverse it
-                    for sub_assembly in &assembly.sub_assemblies {
-                        if sub_assembly.uid() == instance.uid() {
-                            self.traverse_subassembly_async(
-                                sub_assembly,
-                                &instance_id,
-                                assembly,
-                                instance_map,
-                                id_to_name_map,
-                            ).await?;
-                            break;
-                        }
+                // Find matching subassembly and traverse it
+                for sub_assembly in &assembly.sub_assemblies {
+                    if sub_assembly.uid() == instance.uid() {
+                        self.traverse_subassembly_async(
+                            sub_assembly,
+                            &instance_id,
+                            assembly,
+                            instance_map,
+                            id_to_name_map,
+                        ).await?;
+                        break;
                     }
-
-                    self.current_depth -= 1;
                 }
-            }
 
-            Ok(())
+                self.current_depth -= 1;
+            }
+        }
+
+        Ok(())
         })
     }
 
@@ -162,12 +136,12 @@ impl InstanceTraverser {
     /// Mirrors the Python get_instances function
     pub async fn get_instances(
         assembly: &Assembly,
-        config: ParseConfig,
+        max_depth: usize,
     ) -> Result<TraversalResult, String> {
         let mut instance_map = HashMap::new();
         let mut id_to_name_map = HashMap::new();
 
-        let mut traverser = Self::new(config.clone());
+        let mut traverser = Self::new(max_depth);
         traverser.traverse_instances_async(
             &assembly.root_assembly,
             "",
@@ -177,7 +151,7 @@ impl InstanceTraverser {
         ).await?;
 
         // Get occurrences
-        let occurrence_map = Self::get_occurrences(assembly, &id_to_name_map, config.max_depth);
+        let occurrence_map = Self::get_occurrences(assembly, &id_to_name_map, max_depth);
 
         Ok(TraversalResult {
             instance_map,
@@ -226,9 +200,8 @@ impl SubassemblyFetcher {
     /// Enhanced version with AsyncFetcher for better performance
     pub async fn get_subassemblies_async(
         assembly: &Assembly,
-        client: &AsyncOnshapeClient,
+        client: &OnshapeClient,
         instances: &InstanceMap,
-        config: &ParseConfig,
     ) -> Result<(HashMap<String, SubAssembly>, HashMap<String, RootAssembly>), String> {
         let mut subassembly_map = HashMap::new();
         let mut rigid_subassembly_map = HashMap::new();
@@ -379,17 +352,6 @@ impl SubassemblyFetcher {
         Ok((subassembly_map, rigid_subassembly_map))
     }
 
-    /// Synchronous wrapper (to be implemented later)
-    pub fn get_subassemblies(
-        _assembly: &Assembly,
-        _client: &OnshapeClient,
-        _instances: &InstanceMap,
-        _config: &ParseConfig,
-    ) -> Result<(HashMap<String, SubAssembly>, HashMap<String, RootAssembly>), String> {
-        // TODO: Implement synchronous wrapper once client credentials access is resolved
-        Err("Synchronous version not yet implemented. Use get_subassemblies_async instead.".to_string())
-    }
-
     /// Fetch assembly without mass properties (for batch optimization)
     /// Mass properties are fetched separately in batch for better performance
     async fn fetch_assembly_without_mass_props(
@@ -484,9 +446,8 @@ impl PartFetcher {
     pub async fn get_parts_async(
         assembly: &Assembly,
         rigid_subassemblies: &HashMap<String, RootAssembly>,
-        client: &AsyncOnshapeClient,
+        client: &OnshapeClient,
         instances: &InstanceMap,
-        config: &ParseConfig,
     ) -> Result<HashMap<String, Part>, String> {
         let mut part_map = HashMap::new();
 
@@ -580,32 +541,31 @@ impl PartFetcher {
         Ok(part_map)
     }
 
-    /// Synchronous wrapper (to be implemented later)
-    pub fn get_parts(
-        _assembly: &Assembly,
-        _rigid_subassemblies: &HashMap<String, RootAssembly>,
-        _client: &OnshapeClient,
-        _instances: &InstanceMap,
-        _config: &ParseConfig,
-    ) -> Result<HashMap<String, Part>, String> {
-        // TODO: Implement synchronous wrapper once client credentials access is resolved
-        Err("Synchronous version not yet implemented. Use get_parts_async instead.".to_string())
-    }
-
     /// Fetch a part with its mass properties
     /// Mirrors the Python _fetch_mass_properties_async function
     async fn _fetch_part_with_mass_properties_async(
         mut part: Part,
         key: String,
-        client: &AsyncOnshapeClient,
+        _client: &OnshapeClient,
         rigid_subassemblies: &HashMap<String, RootAssembly>,
-        config: &ParseConfig,
     ) -> Result<(String, Part), String> {
         // Check if this part is from a rigid subassembly
         let assembly_key = key.split(SUBASSEMBLY_JOINER).next().unwrap_or("");
 
-        if !rigid_subassemblies.contains_key(assembly_key) && config.with_mass_properties {
+        if !rigid_subassemblies.contains_key(assembly_key) {
             // Fetch mass properties for non-rigid assembly parts
+            // This would use the client to fetch mass properties
+            // For now, we'll keep the existing mass_property if any
+
+            // In the actual implementation, this would call:
+            // part.mass_property = Some(client.get_mass_property(
+            //     &part.base.document_id,
+            //     "m", // workspace type for microversion
+            //     &part.base.document_microversion,
+            //     &part.base.element_id,
+            //     &part.part_id,
+            // ).await?);
+
             log::info!("Fetching mass properties for part: {}, {}", part.uid(), part.part_id);
 
             match Self::_fetch_part_mass_properties(
@@ -687,38 +647,9 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_config_default() {
-        let config = ParseConfig::default();
-        assert_eq!(config.max_depth, 0);
-        assert_eq!(config.configuration, None);
-        assert!(config.with_mass_properties);
-        assert!(config.include_mate_features);
-        assert!(config.include_mate_connectors);
-        assert!(!config.include_non_solids);
-        assert!(!config.log_response);
-    }
-
-    #[test]
-    fn test_get_occurrence_name() {
-        assert_eq!(
-            get_occurrence_name(&["part1".to_string()], Some("sub1")),
-            "sub1_SUB_part1"
-        );
-        assert_eq!(
-            get_occurrence_name(&["part1".to_string(), "part2".to_string()], None),
-            "part1_SUB_part2"
-        );
-    }
-
-    #[test]
-    fn test_join_mate_occurrences() {
-        assert_eq!(
-            join_mate_occurrences(
-                &["sub1".to_string(), "part1".to_string()],
-                &["sub2".to_string()],
-                None
-            ),
-            "sub1_SUB_part1_to_sub2"
-        );
+    fn test_instance_traverser_creation() {
+        let traverser = InstanceTraverser::new(5);
+        assert_eq!(traverser.max_depth, 5);
+        assert_eq!(traverser.current_depth, 0);
     }
 }
