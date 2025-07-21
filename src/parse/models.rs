@@ -1,330 +1,233 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use pyo3::prelude::*;
-use nalgebra::Matrix4;
-use crate::model::{MassProperties, DocumentMetaData, Document};
+use crate::model::MassProperties;
 
-/// Enumerates the types of instances in an assembly
+/// Instance type enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[pyclass(eq, eq_int)]
 pub enum InstanceType {
-    #[serde(rename = "Part")]
     Part,
-    #[serde(rename = "Assembly")]
     Assembly,
 }
 
-/// Enumerates the type of mate between two parts or assemblies
+/// Mate type enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[pyclass(eq, eq_int)]
 pub enum MateType {
-    #[serde(rename = "SLIDER")]
     Slider,
-    #[serde(rename = "CYLINDRICAL")]
     Cylindrical,
-    #[serde(rename = "REVOLUTE")]
     Revolute,
-    #[serde(rename = "PIN_SLOT")]
     PinSlot,
-    #[serde(rename = "PLANAR")]
     Planar,
-    #[serde(rename = "BALL")]
     Ball,
-    #[serde(rename = "FASTENED")]
     Fastened,
-    #[serde(rename = "PARALLEL")]
     Parallel,
 }
 
-/// Enumerates the type of mate relation between two parts or assemblies
+/// Relation type enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[pyclass(eq, eq_int)]
 pub enum RelationType {
-    #[serde(rename = "LINEAR")]
     Linear,
-    #[serde(rename = "GEAR")]
     Gear,
-    #[serde(rename = "SCREW")]
     Screw,
-    #[serde(rename = "RACK_AND_PINION")]
     RackAndPinion,
 }
 
-/// Enumerates the type of assembly feature
+/// Assembly feature type enumeration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[pyclass(eq, eq_int)]
 pub enum AssemblyFeatureType {
-    #[serde(rename = "mate")]
     Mate,
-    #[serde(rename = "mateRelation")]
     MateRelation,
-    #[serde(rename = "mateGroup")]
     MateGroup,
-    #[serde(rename = "mateConnector")]
     MateConnector,
 }
 
-/// Represents an occurrence of a part or sub-assembly within an assembly
+/// Transform matrix representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
-pub struct Occurrence {
-    #[pyo3(get)]
-    pub fixed: bool,
-    #[pyo3(get)]
-    pub transform: Vec<f64>, // 16-element transformation matrix
-    #[pyo3(get)]
-    pub hidden: bool,
-    #[pyo3(get)]
-    pub path: Vec<String>,
+pub struct Transform {
+    pub matrix: Vec<f64>, // 4x4 transformation matrix as flat array
 }
 
-#[pymethods]
-impl Occurrence {
-    /// Get the transformation matrix as a 4x4 nalgebra matrix
-    pub fn get_transform_matrix(&self) -> PyResult<Vec<Vec<f64>>> {
-        if self.transform.len() != 16 {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "Transform must have 16 elements"
-            ));
+impl Transform {
+    pub fn new(matrix: Vec<f64>) -> Self {
+        Self { matrix }
+    }
+
+    pub fn identity() -> Self {
+        Self {
+            matrix: vec![
+                1.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, 0.0, 0.0, 1.0,
+            ],
         }
-
-        let matrix = Matrix4::from_column_slice(&self.transform);
-        Ok(matrix.data.as_slice().chunks(4).map(|row| row.to_vec()).collect())
     }
 }
 
-impl Occurrence {
-    /// Get the transformation matrix as a nalgebra Matrix4
-    pub fn transform_matrix(&self) -> Result<Matrix4<f64>, String> {
-        if self.transform.len() != 16 {
-            return Err("Transform must have 16 elements".to_string());
-        }
-        Ok(Matrix4::from_column_slice(&self.transform))
-    }
-}
-
-/// Base model providing common attributes for Part, SubAssembly, and AssemblyInstance models
+/// Coordinate system representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
-pub struct IdBase {
-    #[serde(rename = "fullConfiguration")]
-    #[pyo3(get)]
-    pub full_configuration: String,
-    #[pyo3(get)]
-    pub configuration: String,
-    #[serde(rename = "documentId")]
-    #[pyo3(get)]
-    pub document_id: String,
-    #[serde(rename = "elementId")]
-    #[pyo3(get)]
-    pub element_id: String,
-    #[serde(rename = "documentMicroversion")]
-    #[pyo3(get)]
-    pub document_microversion: String,
-}
-
-#[pymethods]
-impl IdBase {
-    /// Generate a unique identifier
-    pub fn uid(&self) -> String {
-        use uuid::Uuid;
-        let input = format!("{}-{}-{}-{}",
-            self.document_id,
-            self.document_microversion,
-            self.element_id,
-            self.full_configuration
-        );
-        Uuid::new_v5(&Uuid::NAMESPACE_OID, input.as_bytes()).to_string()
-    }
-}
-
-/// Represents a coordinate system used for mating parts within an assembly
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
 pub struct MatedCS {
-    #[serde(rename = "xAxis")]
-    #[pyo3(get)]
-    pub x_axis: Vec<f64>,
-    #[serde(rename = "yAxis")]
-    #[pyo3(get)]
-    pub y_axis: Vec<f64>,
-    #[serde(rename = "zAxis")]
-    #[pyo3(get)]
-    pub z_axis: Vec<f64>,
-    #[pyo3(get)]
     pub origin: Vec<f64>,
-
-    // Custom transformation matrix (not serialized)
-    #[serde(skip)]
-    pub part_tf: Option<Matrix4<f64>>,
-}
-
-#[pymethods]
-impl MatedCS {
-    #[new]
-    pub fn new(x_axis: Vec<f64>, y_axis: Vec<f64>, z_axis: Vec<f64>, origin: Vec<f64>) -> PyResult<Self> {
-        if x_axis.len() != 3 || y_axis.len() != 3 || z_axis.len() != 3 || origin.len() != 3 {
-            return Err(pyo3::exceptions::PyValueError::new_err("All vectors must have 3 elements"));
-        }
-
-        Ok(MatedCS {
-            x_axis,
-            y_axis,
-            z_axis,
-            origin,
-            part_tf: None,
-        })
-    }
-
-    /// Get the part-to-mate transformation matrix
-    pub fn part_to_mate_tf(&self) -> PyResult<Vec<Vec<f64>>> {
-        let matrix = self.get_part_to_mate_matrix()
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))?;
-        Ok(matrix.data.as_slice().chunks(4).map(|row| row.to_vec()).collect())
-    }
+    pub x_axis: Vec<f64>,
+    pub y_axis: Vec<f64>,
+    pub z_axis: Vec<f64>,
 }
 
 impl MatedCS {
-    /// Get the part-to-mate transformation matrix as nalgebra Matrix4
-    pub fn get_part_to_mate_matrix(&self) -> Result<Matrix4<f64>, String> {
-        if let Some(tf) = &self.part_tf {
-            return Ok(*tf);
-        }
-
-        if self.x_axis.len() != 3 || self.y_axis.len() != 3 || self.z_axis.len() != 3 || self.origin.len() != 3 {
-            return Err("All vectors must have 3 elements".to_string());
-        }
-
-        let mut matrix = Matrix4::identity();
-
-        // Set rotation part (column-major)
-        matrix[(0, 0)] = self.x_axis[0]; matrix[(1, 0)] = self.x_axis[1]; matrix[(2, 0)] = self.x_axis[2];
-        matrix[(0, 1)] = self.y_axis[0]; matrix[(1, 1)] = self.y_axis[1]; matrix[(2, 1)] = self.y_axis[2];
-        matrix[(0, 2)] = self.z_axis[0]; matrix[(1, 2)] = self.z_axis[1]; matrix[(2, 2)] = self.z_axis[2];
-
-        // Set translation part
-        matrix[(0, 3)] = self.origin[0]; matrix[(1, 3)] = self.origin[1]; matrix[(2, 3)] = self.origin[2];
-
-        Ok(matrix)
+    pub fn new(origin: Vec<f64>, x_axis: Vec<f64>, y_axis: Vec<f64>, z_axis: Vec<f64>) -> Self {
+        Self { origin, x_axis, y_axis, z_axis }
     }
 
-    /// Create MatedCS from transformation matrix
-    pub fn from_matrix(matrix: &Matrix4<f64>) -> Self {
-        let x_axis = vec![matrix[(0, 0)], matrix[(1, 0)], matrix[(2, 0)]];
-        let y_axis = vec![matrix[(0, 1)], matrix[(1, 1)], matrix[(2, 1)]];
-        let z_axis = vec![matrix[(0, 2)], matrix[(1, 2)], matrix[(2, 2)]];
-        let origin = vec![matrix[(0, 3)], matrix[(1, 3)], matrix[(2, 3)]];
+    pub fn from_matrix(matrix: &[f64; 16]) -> Self {
+        // Extract coordinate system from 4x4 transformation matrix
+        let x_axis = vec![matrix[0], matrix[1], matrix[2]];
+        let y_axis = vec![matrix[4], matrix[5], matrix[6]];
+        let z_axis = vec![matrix[8], matrix[9], matrix[10]];
+        let origin = vec![matrix[12], matrix[13], matrix[14]];
 
-        MatedCS {
-            x_axis,
-            y_axis,
-            z_axis,
-            origin,
-            part_tf: Some(*matrix),
-        }
+        Self { origin, x_axis, y_axis, z_axis }
     }
 }
 
-/// Represents an entity that is mated within an assembly
+/// Occurrence path representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
+pub struct Occurrence {
+    pub path: Vec<String>,
+    pub transform: Vec<f64>, // 4x4 transformation matrix
+    pub hidden: bool,
+    pub suppressed: bool,
+}
+
+impl Occurrence {
+    pub fn new(path: Vec<String>, transform: Vec<f64>, hidden: bool, suppressed: bool) -> Self {
+        Self { path, transform, hidden, suppressed }
+    }
+}
+
+/// Base metadata for assembly components
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaseMetadata {
+    pub document_id: String,
+    pub document_microversion: String,
+    pub element_id: String,
+    pub full_configuration: String,
+    pub configuration: String,
+}
+
+impl BaseMetadata {
+    pub fn new(
+        document_id: String,
+        document_microversion: String,
+        element_id: String,
+        full_configuration: String,
+        configuration: String,
+    ) -> Self {
+        Self {
+            document_id,
+            document_microversion,
+            element_id,
+            full_configuration,
+            configuration,
+        }
+    }
+
+    pub fn uid(&self) -> String {
+        format!("{}:{}", self.document_id, self.element_id)
+    }
+}
+
+/// Mated entity representation
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatedEntity {
-    #[serde(rename = "matedOccurrence")]
-    #[pyo3(get)]
     pub mated_occurrence: Vec<String>,
-    #[serde(rename = "matedCS")]
-    #[pyo3(get)]
-    pub mated_cs: MatedCS,
-    #[serde(skip)]
-    #[pyo3(get)]
     pub parent_cs: Option<MatedCS>,
+    pub mated_cs: MatedCS, // Add this field for compatibility
 }
 
-/// Represents a mate relation within an assembly
+impl MatedEntity {
+    pub fn new(mated_occurrence: Vec<String>, parent_cs: Option<MatedCS>, mated_cs: MatedCS) -> Self {
+        Self { mated_occurrence, parent_cs, mated_cs }
+    }
+}
+
+/// Feature reference
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
-pub struct MateRelationMate {
-    #[serde(rename = "featureId")]
-    #[pyo3(get)]
+pub struct FeatureReference {
     pub feature_id: String,
-    #[pyo3(get)]
-    pub occurrence: Vec<String>,
+    pub feature_type: String,
 }
 
-/// Represents data for a mate relation feature within an assembly
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
-pub struct MateRelationFeatureData {
-    #[serde(rename = "relationType")]
-    #[pyo3(get)]
-    pub relation_type: RelationType,
-    #[pyo3(get)]
-    pub mates: Vec<MateRelationMate>,
-    #[serde(rename = "reverseDirection")]
-    #[pyo3(get)]
-    pub reverse_direction: bool,
-    #[serde(rename = "relationRatio")]
-    #[pyo3(get)]
-    pub relation_ratio: Option<f64>,
-    #[serde(rename = "relationLength")]
-    #[pyo3(get)]
-    pub relation_length: Option<f64>,
-    #[pyo3(get)]
-    pub name: String,
-
-    // Custom attribute set by processing
-    #[serde(skip)]
-    #[pyo3(get)]
-    pub id: Option<String>,
+impl FeatureReference {
+    pub fn new(feature_id: String, feature_type: String) -> Self {
+        Self { feature_id, feature_type }
+    }
 }
 
-/// Represents data for a mate feature within an assembly
+/// Mate feature data
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
 pub struct MateFeatureData {
-    #[serde(rename = "matedEntities")]
-    #[pyo3(get)]
-    pub mated_entities: Vec<MatedEntity>,
-    #[serde(rename = "mateType")]
-    #[pyo3(get)]
-    pub mate_type: MateType,
-    #[pyo3(get)]
-    pub name: String,
-
-    // Custom attribute set by processing
-    #[serde(skip)]
-    #[pyo3(get)]
     pub id: Option<String>,
+    pub mated_entities: Vec<MatedEntity>,
+    pub mate_type: MateType,
+    pub name: String,
 }
 
-/// Union type for assembly feature data
+impl MateFeatureData {
+    pub fn new(id: Option<String>, mated_entities: Vec<MatedEntity>, mate_type: MateType, name: String) -> Self {
+        Self { id, mated_entities, mate_type, name }
+    }
+}
+
+/// Mate relation feature data
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+pub struct MateRelationFeatureData {
+    pub id: Option<String>,
+    pub relation_type: RelationType,
+    pub mates: Vec<FeatureReference>,
+    pub relation_ratio: Option<f64>,
+    pub relation_length: Option<f64>,
+    pub name: String,
+}
+
+impl MateRelationFeatureData {
+    pub fn new(
+        id: Option<String>,
+        relation_type: RelationType,
+        mates: Vec<FeatureReference>,
+        relation_ratio: Option<f64>,
+        relation_length: Option<f64>,
+        name: String,
+    ) -> Self {
+        Self { id, relation_type, mates, relation_ratio, relation_length, name }
+    }
+}
+
+/// Assembly feature data variants
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AssemblyFeatureData {
     Mate(MateFeatureData),
     MateRelation(MateRelationFeatureData),
-    // Add other feature types as needed
-    Generic(serde_json::Value),
+    Generic(serde_json::Value), // For other feature types
 }
 
-/// Represents a feature within an assembly
+/// Assembly feature
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
 pub struct AssemblyFeature {
-    #[pyo3(get)]
     pub id: String,
-    #[pyo3(get)]
-    pub suppressed: bool,
-    #[serde(rename = "featureType")]
-    #[pyo3(get)]
     pub feature_type: AssemblyFeatureType,
-    #[serde(rename = "featureData")]
+    pub suppressed: bool,
     pub feature_data: AssemblyFeatureData,
 }
 
-#[pymethods]
 impl AssemblyFeature {
-    /// Get mate feature data if this is a mate feature
+    pub fn new(
+        id: String,
+        feature_type: AssemblyFeatureType,
+        suppressed: bool,
+        feature_data: AssemblyFeatureData,
+    ) -> Self {
+        Self { id, feature_type, suppressed, feature_data }
+    }
+
     pub fn get_mate_data(&self) -> Option<MateFeatureData> {
         match &self.feature_data {
             AssemblyFeatureData::Mate(data) => Some(data.clone()),
@@ -332,7 +235,6 @@ impl AssemblyFeature {
         }
     }
 
-    /// Get mate relation feature data if this is a mate relation feature
     pub fn get_mate_relation_data(&self) -> Option<MateRelationFeatureData> {
         match &self.feature_data {
             AssemblyFeatureData::MateRelation(data) => Some(data.clone()),
@@ -341,139 +243,134 @@ impl AssemblyFeature {
     }
 }
 
-/// Represents a part within an assembly
+/// Part representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
 pub struct Part {
-    // Inherits from IdBase
-    #[serde(flatten)]
-    #[pyo3(get)]
-    pub base: IdBase,
-
-    #[serde(rename = "isStandardContent")]
-    #[pyo3(get)]
-    pub is_standard_content: bool,
-    #[serde(rename = "partId")]
-    #[pyo3(get)]
+    pub base: BaseMetadata,
     pub part_id: String,
-    #[serde(rename = "bodyType")]
-    #[pyo3(get)]
     pub body_type: String,
-    #[serde(rename = "documentVersion")]
-    #[pyo3(get)]
-    pub document_version: Option<String>,
-
-    // Custom attributes
-    #[serde(skip)]
-    #[pyo3(get)]
+    pub is_standard_content: bool,
     pub mass_property: Option<MassProperties>,
-    #[serde(skip)]
-    #[pyo3(get)]
+    pub document_version: Option<String>,
     pub is_rigid_assembly: Option<bool>,
-    #[serde(skip)]
     pub rigid_assembly_to_part_tf: Option<HashMap<String, MatedCS>>,
-    #[serde(skip)]
-    #[pyo3(get)]
     pub rigid_assembly_workspace_id: Option<String>,
 }
 
-#[pymethods]
 impl Part {
-    /// Generate unique identifier for the part
-    pub fn uid(&self) -> String {
-        use uuid::Uuid;
-        let input = format!("{}-{}-{}-{}-{}",
-            self.base.document_id,
-            self.base.document_microversion,
-            self.base.element_id,
-            self.part_id,
-            self.base.full_configuration
-        );
-        Uuid::new_v5(&Uuid::NAMESPACE_OID, input.as_bytes()).to_string()
+    pub fn new(
+        base: BaseMetadata,
+        part_id: String,
+        body_type: String,
+        is_standard_content: bool,
+        mass_property: Option<MassProperties>,
+    ) -> Self {
+        Self {
+            base,
+            part_id,
+            body_type,
+            is_standard_content,
+            mass_property,
+            document_version: None,
+            is_rigid_assembly: None,
+            rigid_assembly_to_part_tf: None,
+            rigid_assembly_workspace_id: None,
+        }
     }
-}
 
-/// Represents an instance of a part within an assembly
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
-pub struct PartInstance {
-    // Inherits from IdBase
-    #[serde(flatten)]
-    #[pyo3(get)]
-    pub base: IdBase,
-
-    #[serde(rename = "isStandardContent")]
-    #[pyo3(get)]
-    pub is_standard_content: bool,
-    #[serde(rename = "type")]
-    #[pyo3(get)]
-    pub instance_type: InstanceType,
-    #[pyo3(get)]
-    pub id: String,
-    #[pyo3(get)]
-    pub name: String,
-    #[pyo3(get)]
-    pub suppressed: bool,
-    #[serde(rename = "partId")]
-    #[pyo3(get)]
-    pub part_id: String,
-    #[serde(rename = "documentVersion")]
-    #[pyo3(get)]
-    pub document_version: Option<String>,
-}
-
-#[pymethods]
-impl PartInstance {
-    /// Generate unique identifier for the part instance
-    pub fn uid(&self) -> String {
-        use uuid::Uuid;
-        let input = format!("{}-{}-{}-{}-{}",
-            self.base.document_id,
-            self.base.document_microversion,
-            self.base.element_id,
-            self.part_id,
-            self.base.full_configuration
-        );
-        Uuid::new_v5(&Uuid::NAMESPACE_OID, input.as_bytes()).to_string()
-    }
-}
-
-/// Represents an instance of an assembly within another assembly
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
-pub struct AssemblyInstance {
-    // Inherits from IdBase
-    #[serde(flatten)]
-    #[pyo3(get)]
-    pub base: IdBase,
-
-    #[pyo3(get)]
-    pub id: String,
-    #[serde(rename = "type")]
-    #[pyo3(get)]
-    pub instance_type: InstanceType,
-    #[pyo3(get)]
-    pub name: String,
-    #[pyo3(get)]
-    pub suppressed: bool,
-
-    // Custom attributes
-    #[serde(skip)]
-    #[pyo3(get)]
-    pub is_rigid: Option<bool>,
-}
-
-#[pymethods]
-impl AssemblyInstance {
-    /// Generate unique identifier for the assembly instance
     pub fn uid(&self) -> String {
         self.base.uid()
     }
 }
 
-/// Union type for instances
+/// Part instance representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+pub struct PartInstance {
+    pub id: String,
+    pub name: String,
+    pub part_id: String,
+    pub instance_type: InstanceType,
+    pub suppressed: bool,
+    pub hidden: bool,
+    pub transform: Vec<f64>, // 4x4 transformation matrix
+    pub is_standard_content: bool,
+    pub document_version: Option<String>,
+}
+
+impl PartInstance {
+    pub fn new(
+        id: String,
+        name: String,
+        part_id: String,
+        instance_type: InstanceType,
+        suppressed: bool,
+        hidden: bool,
+        transform: Vec<f64>,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            part_id,
+            instance_type,
+            suppressed,
+            hidden,
+            transform,
+            is_standard_content: false,
+            document_version: None,
+        }
+    }
+
+    pub fn uid(&self) -> String {
+        self.part_id.clone()
+    }
+}
+
+/// Assembly instance representation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssemblyInstance {
+    pub id: String,
+    pub name: String,
+    pub document_id: String,
+    pub element_id: String,
+    pub instance_type: InstanceType,
+    pub suppressed: bool,
+    pub hidden: bool,
+    pub transform: Vec<f64>, // 4x4 transformation matrix
+    pub is_rigid: Option<bool>,
+}
+
+impl AssemblyInstance {
+    pub fn new(
+        id: String,
+        name: String,
+        document_id: String,
+        element_id: String,
+        instance_type: InstanceType,
+        suppressed: bool,
+        hidden: bool,
+        transform: Vec<f64>,
+        is_rigid: Option<bool>,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            document_id,
+            element_id,
+            instance_type,
+            suppressed,
+            hidden,
+            transform,
+            is_rigid,
+        }
+    }
+
+    pub fn uid(&self) -> String {
+        format!("{}:{}", self.document_id, self.element_id)
+    }
+}
+
+/// Instance variants (union type)
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instance {
     Part(PartInstance),
     Assembly(AssemblyInstance),
@@ -482,149 +379,326 @@ pub enum Instance {
 impl Instance {
     pub fn get_id(&self) -> &str {
         match self {
-            Instance::Part(p) => &p.id,
-            Instance::Assembly(a) => &a.id,
+            Instance::Part(part) => &part.id,
+            Instance::Assembly(assembly) => &assembly.id,
         }
     }
 
     pub fn get_name(&self) -> &str {
         match self {
-            Instance::Part(p) => &p.name,
-            Instance::Assembly(a) => &a.name,
+            Instance::Part(part) => &part.name,
+            Instance::Assembly(assembly) => &assembly.name,
         }
     }
 
     pub fn get_type(&self) -> &InstanceType {
         match self {
-            Instance::Part(p) => &p.instance_type,
-            Instance::Assembly(a) => &a.instance_type,
+            Instance::Part(part) => &part.instance_type,
+            Instance::Assembly(assembly) => &assembly.instance_type,
         }
     }
 
     pub fn uid(&self) -> String {
         match self {
-            Instance::Part(p) => p.uid(),
-            Instance::Assembly(a) => a.uid(),
+            Instance::Part(part) => part.uid(),
+            Instance::Assembly(assembly) => assembly.uid(),
         }
     }
 }
 
-/// Represents a sub-assembly within a larger assembly
+/// SubAssembly representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
 pub struct SubAssembly {
-    // Inherits from IdBase
-    #[serde(flatten)]
-    #[pyo3(get)]
-    pub base: IdBase,
-
+    pub base: BaseMetadata,
     pub instances: Vec<Instance>,
-    pub patterns: Vec<serde_json::Value>, // Keeping as JSON for now
-    #[pyo3(get)]
     pub features: Vec<AssemblyFeature>,
 }
 
-#[pymethods]
 impl SubAssembly {
-    /// Generate unique identifier for the subassembly
+    pub fn new(
+        base: BaseMetadata,
+        instances: Vec<Instance>,
+        features: Vec<AssemblyFeature>,
+    ) -> Self {
+        Self { base, instances, features }
+    }
+
     pub fn uid(&self) -> String {
         self.base.uid()
     }
-
-    /// Get instances as strings for Python compatibility
-    #[getter]
-    pub fn instances(&self) -> Vec<String> {
-        self.instances.iter().map(|i| format!("{:?}", i)).collect()
-    }
-
-    /// Get patterns as strings for Python compatibility
-    #[getter]
-    pub fn patterns(&self) -> Vec<String> {
-        self.patterns.iter().map(|p| p.to_string()).collect()
-    }
 }
 
-/// Represents the root assembly
+/// Root assembly representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
 pub struct RootAssembly {
-    // Inherits from SubAssembly
-    #[serde(flatten)]
-    #[pyo3(get)]
     pub sub_assembly: SubAssembly,
-
-    #[pyo3(get)]
     pub occurrences: Vec<Occurrence>,
-
-    // Custom attributes
-    #[serde(skip)]
-    #[pyo3(get)]
     pub mass_property: Option<MassProperties>,
-    #[serde(skip)]
-    #[pyo3(get)]
-    pub document_meta_data: Option<DocumentMetaData>,
 }
 
-/// Represents the overall assembly
+impl RootAssembly {
+    pub fn new(
+        sub_assembly: SubAssembly,
+        occurrences: Vec<Occurrence>,
+        mass_property: Option<MassProperties>,
+    ) -> Self {
+        Self { sub_assembly, occurrences, mass_property }
+    }
+}
+
+/// Complete assembly representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[pyclass]
 pub struct Assembly {
-    #[serde(rename = "rootAssembly")]
-    #[pyo3(get)]
     pub root_assembly: RootAssembly,
-    #[serde(rename = "subAssemblies")]
-    #[pyo3(get)]
     pub sub_assemblies: Vec<SubAssembly>,
-    #[pyo3(get)]
     pub parts: Vec<Part>,
-    #[serde(rename = "partStudioFeatures")]
-    pub part_studio_features: Vec<serde_json::Value>, // Keeping as JSON for now
-
-    // Custom attributes
-    #[serde(skip)]
-    #[pyo3(get)]
-    pub document: Option<Document>,
-    #[serde(skip)]
-    #[pyo3(get)]
-    pub name: Option<String>,
 }
 
-#[pymethods]
 impl Assembly {
-    /// Get part studio features as strings for Python compatibility
-    #[getter]
-    pub fn part_studio_features(&self) -> Vec<String> {
-        self.part_studio_features.iter().map(|f| f.to_string()).collect()
+    pub fn new(
+        root_assembly: RootAssembly,
+        sub_assemblies: Vec<SubAssembly>,
+        parts: Vec<Part>,
+    ) -> Self {
+        Self { root_assembly, sub_assemblies, parts }
     }
 }
 
 // Conversion from client model to parse model
 impl From<crate::model::RootAssembly> for RootAssembly {
     fn from(root: crate::model::RootAssembly) -> Self {
-        // Convert JSON instances to typed instances
+        // Convert instances to our format
         let instances: Vec<Instance> = root.instances
             .into_iter()
-            .filter_map(|json| serde_json::from_value(json).ok())
+            .filter_map(|json_value| {
+                // Clone for logging if parsing fails
+                let json_value_clone = json_value.clone();
+
+                // Try to parse as PartInstance first
+                if let Ok(part_instance) = serde_json::from_value::<serde_json::Value>(json_value.clone())
+                    .and_then(|val| {
+                        if val.get("type").and_then(|t| t.as_str()) == Some("Part") {
+                            Ok(PartInstance {
+                                id: val.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                name: val.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                part_id: val.get("partId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                instance_type: InstanceType::Part,
+                                suppressed: val.get("suppressed").and_then(|v| v.as_bool()).unwrap_or(false),
+                                hidden: val.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false),
+                                transform: val.get("transform").and_then(|v| v.as_array())
+                                    .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+                                    .unwrap_or_else(|| vec![1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0]),
+                                is_standard_content: val.get("isStandardContent").and_then(|v| v.as_bool()).unwrap_or(false),
+                                document_version: val.get("documentVersion").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            })
+                        } else {
+                            Err(serde_json::Error::io(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "Not a part instance"
+                            )))
+                        }
+                    })
+                {
+                    Some(Instance::Part(part_instance))
+                } else if let Ok(assembly_instance) = serde_json::from_value::<serde_json::Value>(json_value)
+                    .and_then(|val| {
+                        if val.get("type").and_then(|t| t.as_str()) == Some("Assembly") {
+                            Ok(AssemblyInstance {
+                                id: val.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                name: val.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                document_id: val.get("documentId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                element_id: val.get("elementId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                instance_type: InstanceType::Assembly,
+                                suppressed: val.get("suppressed").and_then(|v| v.as_bool()).unwrap_or(false),
+                                hidden: val.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false),
+                                transform: val.get("transform").and_then(|v| v.as_array())
+                                    .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+                                    .unwrap_or_else(|| vec![1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0]),
+                                is_rigid: None,
+                            })
+                        } else {
+                            Err(serde_json::Error::io(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "Not an assembly instance"
+                            )))
+                        }
+                    })
+                {
+                    Some(Instance::Assembly(assembly_instance))
+                } else {
+                    log::warn!("Failed to parse instance: {:?}", json_value_clone);
+                    None
+                }
+            })
             .collect();
 
-        // Convert JSON patterns to typed patterns
-        let patterns: Vec<serde_json::Value> = root.patterns;
-
-        // Convert JSON features to typed features
+        // Convert features to our format
         let features: Vec<AssemblyFeature> = root.features
             .into_iter()
-            .filter_map(|json| serde_json::from_value(json).ok())
+            .filter_map(|json_value| {
+                serde_json::from_value::<serde_json::Value>(json_value.clone())
+                    .ok()
+                    .and_then(|val| {
+                        let id = val.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let suppressed = val.get("suppressed").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let feature_type_str = val.get("featureType").and_then(|v| v.as_str()).unwrap_or("");
+
+                        let feature_type = match feature_type_str {
+                            "mate" => AssemblyFeatureType::Mate,
+                            "mateRelation" => AssemblyFeatureType::MateRelation,
+                            "mateGroup" => AssemblyFeatureType::MateGroup,
+                            "mateConnector" => AssemblyFeatureType::MateConnector,
+                            _ => return None,
+                        };
+
+                        let feature_data = if let Some(feature_data_val) = val.get("featureData") {
+                            match feature_type {
+                                AssemblyFeatureType::Mate => {
+                                    // Parse mate feature data
+                                    let mate_type_str = feature_data_val.get("mateType").and_then(|v| v.as_str()).unwrap_or("");
+                                    let mate_type = match mate_type_str {
+                                        "FASTENED" => MateType::Fastened,
+                                        "REVOLUTE" => MateType::Revolute,
+                                        "SLIDER" => MateType::Slider,
+                                        "CYLINDRICAL" => MateType::Cylindrical,
+                                        "PLANAR" => MateType::Planar,
+                                        "BALL" => MateType::Ball,
+                                        "PIN_SLOT" => MateType::PinSlot,
+                                        "PARALLEL" => MateType::Parallel,
+                                        _ => return None,
+                                    };
+
+                                    let mated_entities = feature_data_val.get("matedEntities")
+                                        .and_then(|v| v.as_array())
+                                        .map(|arr| {
+                                            arr.iter().filter_map(|entity_val| {
+                                                let mated_occurrence = entity_val.get("matedOccurrence")
+                                                    .and_then(|v| v.as_array())
+                                                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                                                    .unwrap_or_default();
+
+                                                // Create a basic MatedCS from available data
+                                                let mated_cs = entity_val.get("matedCS")
+                                                    .map(|cs_val| MatedCS {
+                                                        origin: cs_val.get("origin").and_then(|v| v.as_array())
+                                                            .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+                                                            .unwrap_or_else(|| vec![0.0, 0.0, 0.0]),
+                                                        x_axis: cs_val.get("xAxis").and_then(|v| v.as_array())
+                                                            .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+                                                            .unwrap_or_else(|| vec![1.0, 0.0, 0.0]),
+                                                        y_axis: cs_val.get("yAxis").and_then(|v| v.as_array())
+                                                            .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+                                                            .unwrap_or_else(|| vec![0.0, 1.0, 0.0]),
+                                                        z_axis: cs_val.get("zAxis").and_then(|v| v.as_array())
+                                                            .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+                                                            .unwrap_or_else(|| vec![0.0, 0.0, 1.0]),
+                                                    })
+                                                    .unwrap_or_else(|| MatedCS {
+                                                        origin: vec![0.0, 0.0, 0.0],
+                                                        x_axis: vec![1.0, 0.0, 0.0],
+                                                        y_axis: vec![0.0, 1.0, 0.0],
+                                                        z_axis: vec![0.0, 0.0, 1.0],
+                                                    });
+
+                                                Some(MatedEntity {
+                                                    mated_occurrence,
+                                                    parent_cs: None,
+                                                    mated_cs,
+                                                })
+                                            }).collect()
+                                        })
+                                        .unwrap_or_default();
+
+                                    AssemblyFeatureData::Mate(MateFeatureData {
+                                        id: None,
+                                        mated_entities,
+                                        mate_type,
+                                        name: feature_data_val.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                    })
+                                }
+                                AssemblyFeatureType::MateRelation => {
+                                    let relation_type_str = feature_data_val.get("relationType").and_then(|v| v.as_str()).unwrap_or("");
+                                    let relation_type = match relation_type_str {
+                                        "LINEAR" => RelationType::Linear,
+                                        "GEAR" => RelationType::Gear,
+                                        "SCREW" => RelationType::Screw,
+                                        "RACK_AND_PINION" => RelationType::RackAndPinion,
+                                        _ => return None,
+                                    };
+
+                                    let mates = feature_data_val.get("mates")
+                                        .and_then(|v| v.as_array())
+                                        .map(|arr| {
+                                            arr.iter().filter_map(|mate_val| {
+                                                Some(FeatureReference {
+                                                    feature_id: mate_val.get("featureId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                                    feature_type: mate_val.get("featureType").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                                })
+                                            }).collect()
+                                        })
+                                        .unwrap_or_default();
+
+                                    AssemblyFeatureData::MateRelation(MateRelationFeatureData {
+                                        id: None,
+                                        relation_type,
+                                        mates,
+                                        relation_ratio: feature_data_val.get("relationRatio").and_then(|v| v.as_f64()),
+                                        relation_length: feature_data_val.get("relationLength").and_then(|v| v.as_f64()),
+                                        name: feature_data_val.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                    })
+                                }
+                                _ => {
+                                    // Generic feature data for unsupported types
+                                    AssemblyFeatureData::Generic(feature_data_val.clone())
+                                }
+                            }
+                        } else {
+                            AssemblyFeatureData::Generic(serde_json::Value::Null)
+                        };
+
+                        Some(AssemblyFeature {
+                            id,
+                            feature_type,
+                            suppressed,
+                            feature_data,
+                        })
+                    })
+            })
             .collect();
 
-        // Convert JSON occurrences to typed occurrences
+        // Convert occurrences to our format
         let occurrences: Vec<Occurrence> = root.occurrences
             .into_iter()
-            .filter_map(|json| serde_json::from_value(json).ok())
+            .filter_map(|json_value| {
+                serde_json::from_value::<serde_json::Value>(json_value)
+                    .ok()
+                    .and_then(|val| {
+                        let path = val.get("path")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                            .unwrap_or_default();
+
+                        let transform = val.get("transform")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect())
+                            .unwrap_or_else(|| vec![1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0,0.0,0.0,0.0,0.0,1.0]);
+
+                        let hidden = val.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let suppressed = val.get("suppressed").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                        Some(Occurrence {
+                            path,
+                            transform,
+                            hidden,
+                            suppressed,
+                        })
+                    })
+            })
             .collect();
 
         // Create the SubAssembly part
         let sub_assembly = SubAssembly {
-            base: IdBase {
+            base: BaseMetadata {
                 full_configuration: root.full_configuration,
                 configuration: root.configuration,
                 document_id: root.document_id,
@@ -632,7 +706,6 @@ impl From<crate::model::RootAssembly> for RootAssembly {
                 document_microversion: root.document_microversion,
             },
             instances,
-            patterns,
             features,
         };
 
@@ -640,7 +713,6 @@ impl From<crate::model::RootAssembly> for RootAssembly {
             sub_assembly,
             occurrences,
             mass_property: root.mass_property,
-            document_meta_data: root.document_meta_data,
         }
     }
 }

@@ -26,38 +26,33 @@ pub mod parse_module {
 pub use derive_builder;
 
 #[pymodule]
-fn native(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // Existing bindings
-    m.add_class::<client::OnshapeClient>()?;
-    m.add_class::<model::DocumentMetaData>()?;
-    m.add_class::<model::DefaultWorkspace>()?;
-    m.add_class::<model::Element>()?;
-    m.add_class::<model::Variable>()?;
-    m.add_class::<model::Assembly>()?;
-    m.add_class::<model::RootAssembly>()?;
-    m.add_class::<model::Document>()?;
-    m.add_class::<model::MassProperties>()?;
-    m.add_class::<model::TranslationJob>()?;
+fn native(_py: Python, m: &PyModule) -> PyResult<()> {
+    // Add the function to the module
+    m.add_function(wrap_pyfunction!(parse_module::high_level_api::get_instances_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_module::high_level_api::get_mates_and_relations_rust, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_module::high_level_api::get_performance_metrics, m)?)?;
 
-    // New parse module bindings
-    m.add_class::<parse::models::InstanceType>()?;
-    m.add_class::<parse::models::MateType>()?;
-    m.add_class::<parse::models::RelationType>()?;
-    m.add_class::<parse::models::AssemblyFeatureType>()?;
-    m.add_class::<parse::models::Occurrence>()?;
-    m.add_class::<parse::models::IdBase>()?;
-    m.add_class::<parse::models::MatedCS>()?;
-    m.add_class::<parse::models::MatedEntity>()?;
-    m.add_class::<parse::models::MateRelationMate>()?;
-    m.add_class::<parse::models::MateRelationFeatureData>()?;
-    m.add_class::<parse::models::MateFeatureData>()?;
-    m.add_class::<parse::models::AssemblyFeature>()?;
-    m.add_class::<parse::models::Part>()?;
-    m.add_class::<parse::models::PartInstance>()?;
-    m.add_class::<parse::models::AssemblyInstance>()?;
-    m.add_class::<parse::models::SubAssembly>()?;
-    m.add_class::<parse::models::RootAssembly>()?;
-    m.add_class::<parse::models::Assembly>()?;
+    // Add classes to the module
+    m.add_class::<OnshapeClient>()?;
+    m.add_class::<DocumentMetaData>()?;
+    m.add_class::<DefaultWorkspace>()?;
+    m.add_class::<Element>()?;
+    m.add_class::<Variable>()?;
+    m.add_class::<Document>()?;
+    m.add_class::<MassProperties>()?;
+    m.add_class::<TranslationJob>()?;
+    m.add_class::<parse_module::high_level_api::ParseConfig>()?;
+    m.add_class::<parse_module::high_level_api::FetchConfig>()?;
+    m.add_class::<parse_module::high_level_api::ParseResult>()?;
+    m.add_class::<parse_module::high_level_api::RustAssemblyParser>()?;
+
+    // Add constants
+    m.add("MATE_JOINER", parse_module::MATE_JOINER)?;
+    m.add("SUBASSEMBLY_JOINER", parse_module::SUBASSEMBLY_JOINER)?;
+    m.add("CHILD", parse_module::CHILD)?;
+    m.add("PARENT", parse_module::PARENT)?;
+    m.add("RELATION_CHILD", parse_module::RELATION_CHILD)?;
+    m.add("RELATION_PARENT", parse_module::RELATION_PARENT)?;
 
     Ok(())
 }

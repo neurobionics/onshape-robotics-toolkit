@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use futures::future::join_all;
 use crate::parse::models::*;
 use crate::parse::{SUBASSEMBLY_JOINER};
+use crate::parse::async_fetcher::{AsyncFetcher, MassPropertiesRequest, FetchConfig};
 use crate::client::{OnshapeClient, AsyncOnshapeClient};
 use crate::endpoint::AsyncQuery;
 use crate::endpoints::{GetAssembly, GetPartMassProperties, GetAssemblyMassProperties};
@@ -221,8 +222,8 @@ impl InstanceTraverser {
 pub struct SubassemblyFetcher;
 
 impl SubassemblyFetcher {
-    /// Get subassemblies with concurrent fetching
-    /// Mirrors the Python get_subassemblies_async function
+    /// Get subassemblies with optimized batch assembly fetching and mass properties
+    /// Enhanced version with AsyncFetcher for better performance
     pub async fn get_subassemblies_async(
         assembly: &Assembly,
         client: &AsyncOnshapeClient,
@@ -254,6 +255,11 @@ impl SubassemblyFetcher {
             }
         }
 
+        // Collect all assembly fetch requests and mass properties requests
+        let mut assembly_fetch_tasks = Vec::new();
+        let mut mass_props_requests = Vec::new();
+        let mut assembly_request_map: HashMap<String, (SubAssembly, String)> = HashMap::new();
+
         // Process flexible subassemblies
         for subassembly in &assembly.sub_assemblies {
             let uid = subassembly.uid();
@@ -266,20 +272,19 @@ impl SubassemblyFetcher {
                     );
 
                 if is_rigid {
-                    // Fetch as rigid subassemblies concurrently
-                    let fetch_tasks: Vec<_> = instance_keys.iter().map(|key| {
-                        Self::fetch_rigid_subassembly_async(subassembly, key.clone(), client, config)
-                    }).collect();
+                    // Schedule rigid subassembly fetches
+                    for key in instance_keys {
+                        assembly_fetch_tasks.push((subassembly.clone(), key.clone()));
+                        assembly_request_map.insert(key.clone(), (subassembly.clone(), uid.clone()));
 
-                    let results = join_all(fetch_tasks).await;
-                    for (key, result) in instance_keys.iter().zip(results) {
-                        match result {
-                            Ok(root_assembly) => {
-                                rigid_subassembly_map.insert(key.clone(), root_assembly);
-                            }
-                            Err(e) => {
-                                log::error!("Failed to fetch rigid subassembly for {}: {}", key, e);
-                            }
+                        // Add mass properties request if needed
+                        if config.with_mass_properties {
+                            let request = MassPropertiesRequest::assembly(
+                                subassembly.base.document_id.clone(),
+                                subassembly.base.document_microversion.clone(),
+                                subassembly.base.element_id.clone(),
+                            );
+                            mass_props_requests.push(request);
                         }
                     }
                 } else {
@@ -296,23 +301,80 @@ impl SubassemblyFetcher {
             let uid = subassembly.uid();
 
             if let Some(instance_keys) = rigid_subassembly_instances.get(&uid) {
-                let fetch_tasks: Vec<_> = instance_keys.iter().map(|key| {
-                    Self::fetch_rigid_subassembly_async(subassembly, key.clone(), client, config)
-                }).collect();
+                for key in instance_keys {
+                    assembly_fetch_tasks.push((subassembly.clone(), key.clone()));
+                    assembly_request_map.insert(key.clone(), (subassembly.clone(), uid.clone()));
 
-                let results = join_all(fetch_tasks).await;
-                for (key, result) in instance_keys.iter().zip(results) {
-                    match result {
-                        Ok(root_assembly) => {
-                            rigid_subassembly_map.insert(key.clone(), root_assembly);
-                        }
-                        Err(e) => {
-                            log::error!("Failed to fetch rigid subassembly for {}: {}", key, e);
-                        }
+                    // Add mass properties request if needed
+                    if config.with_mass_properties {
+                        let request = MassPropertiesRequest::assembly(
+                            subassembly.base.document_id.clone(),
+                            subassembly.base.document_microversion.clone(),
+                            subassembly.base.element_id.clone(),
+                        );
+                        mass_props_requests.push(request);
                     }
                 }
             }
         }
+
+        // Fetch mass properties in batch if needed
+        let mass_props_results = if !mass_props_requests.is_empty() {
+            log::info!("Batch fetching {} assembly mass properties requests", mass_props_requests.len());
+
+            // Create AsyncFetcher with assembly-optimized config
+            let fetch_config = FetchConfig {
+                max_concurrent_requests: 12, // Conservative for assembly requests
+                batch_size: 20, // Smaller batches for assemblies (more complex requests)
+                batch_delay_ms: 75, // Slightly longer delay for assemblies
+                ..Default::default()
+            };
+            let fetcher = AsyncFetcher::new(fetch_config);
+
+            fetcher.fetch_mass_properties_batch(client, mass_props_requests).await
+                .unwrap_or_else(|e| {
+                    log::error!("Batch assembly mass properties fetch failed: {}", e);
+                    HashMap::new()
+                })
+        } else {
+            HashMap::new()
+        };
+
+        // Fetch assemblies concurrently
+        let assembly_fetch_futures: Vec<_> = assembly_fetch_tasks.into_iter().map(|(subassembly, key)| {
+            Self::fetch_assembly_without_mass_props(subassembly, key.clone(), client, config)
+        }).collect();
+
+        let assembly_results = join_all(assembly_fetch_futures).await;
+
+        // Process results and apply mass properties
+        for result in assembly_results {
+            match result {
+                Ok((key, mut root_assembly, subassembly)) => {
+                    // Apply mass properties if available
+                    if config.with_mass_properties {
+                        let request_key = format!("{}:{}:{}",
+                            subassembly.base.document_id,
+                            subassembly.base.document_microversion,
+                            subassembly.base.element_id
+                        );
+
+                        if let Some(mass_props) = mass_props_results.get(&request_key) {
+                            root_assembly.mass_property = Some(mass_props.clone());
+                            log::debug!("Applied assembly mass properties to: {}", key);
+                        }
+                    }
+
+                    rigid_subassembly_map.insert(key, root_assembly);
+                }
+                Err(e) => {
+                    log::error!("Failed to fetch assembly: {}", e);
+                }
+            }
+        }
+
+        log::info!("Subassembly fetching completed: {} flexible, {} rigid, {} with mass properties",
+                  subassembly_map.len(), rigid_subassembly_map.len(), mass_props_results.len());
 
         Ok((subassembly_map, rigid_subassembly_map))
     }
@@ -328,15 +390,15 @@ impl SubassemblyFetcher {
         Err("Synchronous version not yet implemented. Use get_subassemblies_async instead.".to_string())
     }
 
-    /// Fetch a rigid subassembly
-    /// Mirrors the Python fetch_rigid_subassemblies_async function
-    async fn fetch_rigid_subassembly_async(
-        subassembly: &SubAssembly,
+    /// Fetch assembly without mass properties (for batch optimization)
+    /// Mass properties are fetched separately in batch for better performance
+    async fn fetch_assembly_without_mass_props(
+        subassembly: SubAssembly,
         key: String,
         client: &AsyncOnshapeClient,
         config: &ParseConfig,
-    ) -> Result<RootAssembly, String> {
-        log::info!("Fetching rigid subassembly for key: {}", key);
+    ) -> Result<(String, RootAssembly, SubAssembly), String> {
+        log::debug!("Fetching assembly for key: {}", key);
 
         let endpoint = GetAssembly {
             did: &subassembly.base.document_id,
@@ -350,20 +412,40 @@ impl SubassemblyFetcher {
         };
 
         let assembly: OnshapeAssembly = AsyncQuery::query(&endpoint, client).await
-            .map_err(|e| format!("Failed to fetch assembly: {}", e))?;
+            .map_err(|e| format!("Failed to fetch assembly {}: {}", key, e))?;
 
-        let mut root_assembly: RootAssembly = assembly.root_assembly.into();
+        let root_assembly: RootAssembly = assembly.root_assembly.into();
 
-        // Fetch mass properties if requested
+        Ok((key, root_assembly, subassembly))
+    }
+
+    /// Legacy function - kept for backward compatibility
+    /// Fetch a rigid subassembly (now uses batch optimization internally)
+    async fn _fetch_rigid_subassembly_async(
+        subassembly: &SubAssembly,
+        key: String,
+        client: &AsyncOnshapeClient,
+        config: &ParseConfig,
+    ) -> Result<RootAssembly, String> {
+        log::info!("Fetching rigid subassembly for key: {}", key);
+
+        let (_, mut root_assembly, subassembly_clone) = Self::fetch_assembly_without_mass_props(
+            subassembly.clone(),
+            key.clone(),
+            client,
+            config,
+        ).await?;
+
+        // Fetch mass properties individually if requested (legacy behavior)
         if config.with_mass_properties {
-            match Self::fetch_assembly_mass_properties(
-                &subassembly.base.document_id,
-                &subassembly.base.document_microversion,
-                &subassembly.base.element_id,
+            match Self::_fetch_assembly_mass_properties(
+                &subassembly_clone.base.document_id,
+                &subassembly_clone.base.document_microversion,
+                &subassembly_clone.base.element_id,
                 client
             ).await {
                 Ok(mass_props) => {
-                                     root_assembly.mass_property = Some(mass_props);
+                    root_assembly.mass_property = Some(mass_props);
                 }
                 Err(e) => {
                     log::warn!("Failed to fetch mass properties for {}: {}", key, e);
@@ -375,7 +457,7 @@ impl SubassemblyFetcher {
     }
 
     /// Fetch assembly mass properties
-    async fn fetch_assembly_mass_properties(
+    async fn _fetch_assembly_mass_properties(
         did: &str,
         wid: &str,
         eid: &str,
@@ -397,8 +479,8 @@ impl SubassemblyFetcher {
 pub struct PartFetcher;
 
 impl PartFetcher {
-    /// Get parts with concurrent mass property fetching
-    /// Mirrors the Python get_parts function
+    /// Get parts with optimized batch mass property fetching
+    /// Enhanced version with AsyncFetcher for better performance
     pub async fn get_parts_async(
         assembly: &Assembly,
         rigid_subassemblies: &HashMap<String, RootAssembly>,
@@ -420,44 +502,80 @@ impl PartFetcher {
             }
         }
 
-        // Process parts with concurrent mass property fetching
-        let mut fetch_tasks = vec![];
+        // Collect all mass properties requests for batch fetching
+        let mut mass_props_requests = Vec::new();
+        let mut part_requests_map: HashMap<String, (Part, Vec<String>)> = HashMap::new();
 
         for part in &assembly.parts {
             if let Some(instance_keys) = part_instances.get(&part.uid()) {
-                for key in instance_keys {
-                    let part_clone = part.clone();
-                    let key_clone = key.clone();
-                    let client_clone = client.clone();
-                    let rigid_subassemblies_clone = rigid_subassemblies.clone();
-                    let config_clone = config.clone();
-
-                    fetch_tasks.push(async move {
-                        Self::fetch_part_with_mass_properties_async(
-                            part_clone,
-                            key_clone,
-                            &client_clone,
-                            &rigid_subassemblies_clone,
-                            &config_clone,
-                        ).await
+                // Check if any instances need mass properties (not from rigid subassemblies)
+                let needs_mass_props = config.with_mass_properties &&
+                    instance_keys.iter().any(|key| {
+                        let assembly_key = key.split(SUBASSEMBLY_JOINER).next().unwrap_or("");
+                        !rigid_subassemblies.contains_key(assembly_key)
                     });
+
+                if needs_mass_props {
+                    let request = MassPropertiesRequest::part(
+                        part.base.document_id.clone(),
+                        part.base.document_microversion.clone(),
+                        part.base.element_id.clone(),
+                        part.part_id.clone(),
+                    );
+                    mass_props_requests.push(request);
                 }
+
+                part_requests_map.insert(part.uid(), (part.clone(), instance_keys.clone()));
             }
         }
 
-        // Execute all fetch tasks concurrently
-        let results = join_all(fetch_tasks).await;
+        // Fetch all mass properties in optimized batches
+        let mass_props_results = if !mass_props_requests.is_empty() {
+            log::info!("Batch fetching {} mass properties requests", mass_props_requests.len());
 
-        for result in results {
-            match result {
-                Ok((key, part)) => {
-                    part_map.insert(key, part);
-                }
-                Err(e) => {
-                    log::error!("Failed to fetch part: {}", e);
+            // Create AsyncFetcher with performance-optimized config
+            let fetch_config = FetchConfig {
+                max_concurrent_requests: 15, // Increase concurrency for part fetching
+                batch_size: 30, // Larger batch size for better throughput
+                batch_delay_ms: 50, // Reduce delay for faster processing
+                ..Default::default()
+            };
+            let fetcher = AsyncFetcher::new(fetch_config);
+
+            fetcher.fetch_mass_properties_batch(client, mass_props_requests).await
+                .unwrap_or_else(|e| {
+                    log::error!("Batch mass properties fetch failed: {}", e);
+                    HashMap::new()
+                })
+        } else {
+            HashMap::new()
+        };
+
+        // Apply mass properties to parts and create final part map
+        for (_uid, (mut part, instance_keys)) in part_requests_map {
+            // Apply mass properties if available
+            if config.with_mass_properties {
+                let request_key = format!("{}:{}:{}:{}",
+                    part.base.document_id,
+                    part.base.document_microversion,
+                    part.base.element_id,
+                    part.part_id
+                );
+
+                if let Some(mass_props) = mass_props_results.get(&request_key) {
+                    part.mass_property = Some(mass_props.clone());
+                    log::debug!("Applied mass properties to part: {}", part.part_id);
                 }
             }
+
+            // Add part to map for each instance
+            for key in instance_keys {
+                part_map.insert(key, part.clone());
+            }
         }
+
+        log::info!("Part fetching completed: {} parts processed, {} with mass properties",
+                  part_map.len(), mass_props_results.len());
 
         Ok(part_map)
     }
@@ -476,7 +594,7 @@ impl PartFetcher {
 
     /// Fetch a part with its mass properties
     /// Mirrors the Python _fetch_mass_properties_async function
-    async fn fetch_part_with_mass_properties_async(
+    async fn _fetch_part_with_mass_properties_async(
         mut part: Part,
         key: String,
         client: &AsyncOnshapeClient,
@@ -490,7 +608,7 @@ impl PartFetcher {
             // Fetch mass properties for non-rigid assembly parts
             log::info!("Fetching mass properties for part: {}, {}", part.uid(), part.part_id);
 
-            match Self::fetch_part_mass_properties(
+            match Self::_fetch_part_mass_properties(
                 &part.base.document_id,
                 &part.base.document_microversion,
                 &part.base.element_id,
@@ -510,7 +628,7 @@ impl PartFetcher {
     }
 
     /// Fetch part mass properties
-    async fn fetch_part_mass_properties(
+    async fn _fetch_part_mass_properties(
         did: &str,
         wid: &str,
         eid: &str,
