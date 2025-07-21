@@ -12,16 +12,6 @@ pub enum OnshapeError {
     Server(String),
     Serialization(serde_json::Error),
     Io(std::io::Error),
-    // New specific error variants for better HTTP status code handling
-    BadRequest(String),
-    MethodNotAllowed(String),
-    NotAcceptable(String),
-    Conflict(String),
-    UnsupportedMediaType(String),
-    Timeout(String),
-    InternalServerError(String),
-    ServiceUnavailable { retry_after: Option<u64> },
-    TemporaryRedirect(String),
 }
 
 impl fmt::Display for OnshapeError {
@@ -42,21 +32,6 @@ impl fmt::Display for OnshapeError {
             OnshapeError::Server(msg) => write!(f, "Server error: {}", msg),
             OnshapeError::Serialization(e) => write!(f, "Serialization error: {}", e),
             OnshapeError::Io(e) => write!(f, "IO error: {}", e),
-            OnshapeError::BadRequest(msg) => write!(f, "Bad request: {}", msg),
-            OnshapeError::MethodNotAllowed(msg) => write!(f, "Method not allowed: {}", msg),
-            OnshapeError::NotAcceptable(msg) => write!(f, "Not acceptable: {}", msg),
-            OnshapeError::Conflict(msg) => write!(f, "Conflict: {}", msg),
-            OnshapeError::UnsupportedMediaType(msg) => write!(f, "Unsupported media type: {}", msg),
-            OnshapeError::Timeout(msg) => write!(f, "Timeout: {}", msg),
-            OnshapeError::InternalServerError(msg) => write!(f, "Internal server error: {}", msg),
-            OnshapeError::ServiceUnavailable { retry_after } => {
-                if let Some(seconds) = retry_after {
-                    write!(f, "Service unavailable, retry after {} seconds", seconds)
-                } else {
-                    write!(f, "Service unavailable")
-                }
-            }
-            OnshapeError::TemporaryRedirect(msg) => write!(f, "Temporary redirect: {}", msg),
         }
     }
 }
@@ -89,17 +64,6 @@ impl From<std::io::Error> for OnshapeError {
         OnshapeError::Io(error)
     }
 }
-
-/// Utility function to extract retry-after value from headers
-pub fn extract_retry_after(headers: &http::HeaderMap) -> Option<u64> {
-    headers
-        .get("retry-after")
-        .or_else(|| headers.get("Retry-After"))
-        .and_then(|value| value.to_str().ok())
-        .and_then(|s| s.parse::<u64>().ok())
-}
-
-
 
 #[derive(Debug)]
 pub enum ApiError<E> {
