@@ -52,6 +52,9 @@ class AssemblyComplexity:
     occurrence_count: int
     total_api_calls: int
     complexity_score: float  # Calculated composite score
+    complexity_class: str  # Auto-classified: "simple", "medium", "complex", "large"
+    robot_links: int = 0  # Number of links in robot graph
+    robot_joints: int = 0  # Number of joints in robot graph
 
 
 @dataclass
@@ -175,6 +178,8 @@ class WorkflowProfiler:
         mate_count = 0
         instance_count = 0
         occurrence_count = 0
+        robot_links = 0
+        robot_joints = 0
 
         # Extract metrics from successful phases
         for phase in phases:
@@ -195,6 +200,12 @@ class WorkflowProfiler:
                 if "occurrence_count" in phase.metadata:
                     occurrence_count = phase.metadata["occurrence_count"]
 
+                # Robot graph data (nodes = links, edges = joints)
+                if "link_count" in phase.metadata:
+                    robot_links = phase.metadata["link_count"]
+                if "joint_count" in phase.metadata:
+                    robot_joints = phase.metadata["joint_count"]
+
         # Get API call count
         api_summary = self.api_tracker.get_summary()
         total_api_calls = api_summary.total_calls
@@ -209,6 +220,19 @@ class WorkflowProfiler:
             + occurrence_count * 0.2
         )
 
+        # Auto-classify complexity based on part count
+        def classify_complexity(parts: int) -> str:
+            if parts <= 10:
+                return "simple"
+            elif parts <= 50:
+                return "medium"
+            elif parts <= 200:
+                return "complex"
+            else:
+                return "large"
+
+        complexity_class = classify_complexity(part_count)
+
         return AssemblyComplexity(
             part_count=part_count,
             subassembly_count=subassembly_count,
@@ -218,6 +242,9 @@ class WorkflowProfiler:
             occurrence_count=occurrence_count,
             total_api_calls=total_api_calls,
             complexity_score=complexity_score,
+            complexity_class=complexity_class,
+            robot_links=robot_links,
+            robot_joints=robot_joints,
         )
 
     def _profile_phase(self, name: str, func) -> PerformanceMetrics:

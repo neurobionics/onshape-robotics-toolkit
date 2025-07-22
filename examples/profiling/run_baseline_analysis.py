@@ -30,7 +30,7 @@ def run_comprehensive_analysis():
 
     print(f"Configured Test Assemblies: {len(TEST_ASSEMBLIES)}")
     for i, assembly in enumerate(TEST_ASSEMBLIES, 1):
-        print(f"  {i}. {assembly.name} ({assembly.complexity}) - ~{assembly.expected_parts} parts")
+        print(f"  {i}. {assembly.name} ({assembly.expected_complexity} expected) - parts will be auto-detected")
     print()
 
     successful_profiles = 0
@@ -51,7 +51,8 @@ def run_comprehensive_analysis():
 
                 # Show basic performance metrics
                 print(f"   Total time: {profile.total_duration:.2f}s")
-                print(f"   Part count: {profile.complexity.part_count}")
+                print(f"   Part count: {profile.complexity.part_count} ({profile.complexity.complexity_class})")
+                print(f"   Robot links: {profile.complexity.robot_links}, joints: {profile.complexity.robot_joints}")
                 print(f"   API calls: {profile.api_call_summary['total_calls']}")
 
             else:
