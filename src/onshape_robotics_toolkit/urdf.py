@@ -98,10 +98,7 @@ def get_robot_link(
     if mate is None:
         _link_to_stl_tf[:3, 3] = np.array(part.MassProperty.center_of_mass).reshape(3)
     elif mate.matedEntities[CHILD].parentCS:
-        _link_to_stl_tf = (
-            mate.matedEntities[CHILD].parentCS.part_tf
-            @ mate.matedEntities[CHILD].matedCS.part_to_mate_tf
-        )
+        _link_to_stl_tf = mate.matedEntities[CHILD].parentCS.part_tf @ mate.matedEntities[CHILD].matedCS.part_to_mate_tf
     else:
         _link_to_stl_tf = mate.matedEntities[CHILD].matedCS.part_to_mate_tf
 
@@ -222,8 +219,7 @@ def get_robot_joint(
         else:
             # for rigid assemblies, get the parentCS and transform it to the mateCS
             parent_to_mate_tf = (
-                mate.matedEntities[PARENT].parentCS.part_tf
-                @ mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+                mate.matedEntities[PARENT].parentCS.part_tf @ mate.matedEntities[PARENT].matedCS.part_to_mate_tf
             )
 
     stl_to_mate_tf = stl_to_parent_tf @ parent_to_mate_tf
@@ -252,9 +248,7 @@ def get_robot_joint(
         ], links
 
     elif mate.mateType == MateType.FASTENED:
-        return [
-            FixedJoint(name=sanitized_name, parent=parent, child=child, origin=origin)
-        ], links
+        return [FixedJoint(name=sanitized_name, parent=parent, child=child, origin=origin)], links
 
     elif mate.mateType == MateType.SLIDER or mate.mateType == MateType.CYLINDRICAL:
         return [
@@ -345,9 +339,7 @@ def get_robot_joint(
 
     else:
         LOGGER.warning(f"Unsupported joint type: {mate.mateType}")
-        return [
-            DummyJoint(name=sanitized_name, parent=parent, child=child, origin=origin)
-        ], links
+        return [DummyJoint(name=sanitized_name, parent=parent, child=child, origin=origin)], links
 
 
 def get_topological_mates(
@@ -397,9 +389,7 @@ def get_topological_mates(
             topological_mates[key] = mates[rogue_key]
 
             if isinstance(topological_mates[key], MateFeatureData):
-                topological_mates[key].matedEntities = topological_mates[
-                    key
-                ].matedEntities[::-1]
+                topological_mates[key].matedEntities = topological_mates[key].matedEntities[::-1]
 
             if relations and rogue_key in topological_relations:
                 LOGGER.info(f"Rogue relation found: {rogue_key}")

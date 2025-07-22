@@ -88,9 +88,7 @@ class MetaWorkspaceType(str, Enum):
 
 
 # Pattern for matching Onshape document URLs
-DOCUMENT_PATTERN = (
-    r"(https://[\w\d\.]+)/documents/([\w\d]+)/(w|v|m)/([\w\d]+)/e/([\w\d]+)"
-)
+DOCUMENT_PATTERN = r"(https://[\w\d\.]+)/documents/([\w\d]+)/(w|v|m)/([\w\d]+)/e/([\w\d]+)"
 
 
 def generate_url(base_url: str, did: str, wtype: str, wid: str, eid: str) -> str:
@@ -193,9 +191,7 @@ class Document(BaseModel):
     def __init__(self, **data):
         super().__init__(**data)
         if self.url is None:
-            self.url = generate_url(
-                self.base_url, self.did, self.wtype, self.wid, self.eid
-            )
+            self.url = generate_url(self.base_url, self.did, self.wtype, self.wid, self.eid)
 
     @field_validator("did", "wid", "eid")
     def check_ids(cls, value: str) -> str:
@@ -294,9 +290,7 @@ class DefaultWorkspace(BaseModel):
     """
 
     id: str = Field(..., description="The unique identifier of the workspace")
-    type: MetaWorkspaceType = Field(
-        ..., description="The type of workspace (workspace, version, microversion)"
-    )
+    type: MetaWorkspaceType = Field(..., description="The type of workspace (workspace, version, microversion)")
 
 
 class DocumentMetaData(BaseModel):
@@ -333,8 +327,6 @@ class DocumentMetaData(BaseModel):
         )
     """
 
-    defaultWorkspace: DefaultWorkspace = Field(
-        ..., description="Default workspace information"
-    )
+    defaultWorkspace: DefaultWorkspace = Field(..., description="Default workspace information")
     name: str = Field(..., description="The name of the document")
     id: str = Field(..., description="The unique identifier of the document")

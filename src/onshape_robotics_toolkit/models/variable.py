@@ -86,9 +86,7 @@ class Variable(BaseModel):
         )
     """
 
-    type: str = Field(
-        ..., description="The type of the variable (LENGTH, ANGLE, NUMBER, ANY)"
-    )
+    type: str = Field(..., description="The type of the variable (LENGTH, ANGLE, NUMBER, ANY)")
     name: str = Field(..., description="The name of the variable")
     value: str | None = Field(None, description="The value of the variable")
     description: str = Field(None, description="The description of the variable")

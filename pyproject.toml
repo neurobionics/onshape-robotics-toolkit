@@ -45,12 +45,19 @@ dev = [
     "pre-commit>=4.2.0",
     "pyrefly>=0.24.1",
     "ruff>=0.12.3",
-    "pytest>=8.4.1",    
+    "pytest>=8.4.1",
+    "psutil>=7.0.0",
+    "tqdm>=4.67.1",
+    "colorama>=0.4.6",
+    "matplotlib>=3.10.3",
+    "seaborn>=0.13.2",
 ]
 
 [tool.ruff]
 line-length = 120
 fix = true
+
+[tool.ruff.lint]
 select = [
     # flake8-2020
     "YTT",
@@ -88,6 +95,9 @@ ignore = [
     "E731",
     "TRY003",
     "SIM115",
+    # Function too complex (McCabe complexity)
+    "C901",
+    "S320"
 ]
 
 [tool.ruff.format]

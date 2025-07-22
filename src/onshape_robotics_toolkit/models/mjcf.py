@@ -167,11 +167,7 @@ class IMU(Sensor):
         Args:
             root: The root element to append the IMU to.
         """
-        framequat = (
-            ET.Element("framequat")
-            if root is None
-            else ET.SubElement(root, "framequat")
-        )
+        framequat = ET.Element("framequat") if root is None else ET.SubElement(root, "framequat")
         framequat.set("name", self.name)
         framequat.set("objtype", self.objtype)
         framequat.set("objname", self.objname)
@@ -236,21 +232,13 @@ class Encoder(Sensor):
         Args:
             root: The root element to append the encoder to.
         """
-        encoder_pos = (
-            ET.Element("actuatorpos")
-            if root is None
-            else ET.SubElement(root, "actuatorpos")
-        )
+        encoder_pos = ET.Element("actuatorpos") if root is None else ET.SubElement(root, "actuatorpos")
         encoder_pos.set("name", self.name + "-pos")
         encoder_pos.set("actuator", self.actuator)
         if self.noise is not None:
             encoder_pos.set("noise", str(self.noise))
 
-        encoder_vel = (
-            ET.Element("actuatorvel")
-            if root is None
-            else ET.SubElement(root, "actuatorvel")
-        )
+        encoder_vel = ET.Element("actuatorvel") if root is None else ET.SubElement(root, "actuatorvel")
         encoder_vel.set("name", self.name + "-vel")
         encoder_vel.set("actuator", self.actuator)
         if self.noise is not None:
@@ -274,11 +262,7 @@ class ForceSensor(Sensor):
         Args:
             root: The root element to append the force sensor to.
         """
-        force_sensor = (
-            ET.Element("actuatorfrc")
-            if root is None
-            else ET.SubElement(root, "actuatorfrc")
-        )
+        force_sensor = ET.Element("actuatorfrc") if root is None else ET.SubElement(root, "actuatorfrc")
         force_sensor.set("name", self.name)
         force_sensor.set("actuator", self.actuator)
         if self.noise is not None:

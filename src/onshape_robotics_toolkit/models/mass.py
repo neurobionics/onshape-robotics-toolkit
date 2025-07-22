@@ -129,12 +129,8 @@ class MassProperties(BaseModel):
     mass: list[float] = Field(..., description="The mass of the part.")
     centroid: list[float] = Field(..., description="The centroid of the part.")
     inertia: list[float] = Field(..., description="The inertia of the part.")
-    principalInertia: list[float, float, float] = Field(
-        ..., description="The principal inertia of the part."
-    )
-    principalAxes: list[PrincipalAxis] = Field(
-        ..., description="The principal axes of the part."
-    )
+    principalInertia: list[float, float, float] = Field(..., description="The principal inertia of the part.")
+    principalAxes: list[PrincipalAxis] = Field(..., description="The principal axes of the part.")
 
     @field_validator("principalAxes")
     def check_principal_axes(cls, v: list[PrincipalAxis]) -> list[PrincipalAxis]:

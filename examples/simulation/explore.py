@@ -2,9 +2,6 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 from mods import modify_ballbot
-from scipy.spatial.transform import Rotation
-from transformations import compute_motor_torques
-
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models.document import Document
@@ -12,6 +9,8 @@ from onshape_robotics_toolkit.robot import Robot, RobotType
 
 # from onshape_robotics_toolkit.robot import RobotType, get_robot
 from onshape_robotics_toolkit.utilities import save_gif
+from scipy.spatial.transform import Rotation
+from transformations import compute_motor_torques
 
 HEIGHT = 480
 WIDTH = 640
@@ -145,9 +144,7 @@ if __name__ == "__main__":
                 # Update variables with random values
                 variables["wheel_diameter"].expression = f"{random_wheel:.1f} mm"
                 variables["alpha"].expression = f"{random_alpha:.1f} deg"
-                client.set_variables(
-                    doc.did, doc.wid, elements["variables"].id, variables
-                )
+                client.set_variables(doc.did, doc.wid, elements["variables"].id, variables)
 
                 ballbot: Robot = Robot.from_url(
                     url=doc.url,

@@ -100,9 +100,7 @@ class Element(BaseModel):
     id: str = Field(..., description="The unique identifier of the element")
     name: str = Field(..., description="The name of the element")
     elementType: str = Field(..., description="The type of the element")
-    microversionId: str = Field(
-        ..., description="The unique identifier of the microversion of the element"
-    )
+    microversionId: str = Field(..., description="The unique identifier of the microversion of the element")
 
     @field_validator("elementType")
     def validate_type(cls, value: str) -> str:
@@ -160,8 +158,6 @@ class Element(BaseModel):
         """
 
         if len(value) != 24:
-            raise ValueError(
-                f"Invalid microversion ID: {value}, must be 24 characters long"
-            )
+            raise ValueError(f"Invalid microversion ID: {value}, must be 24 characters long")
 
         return value

@@ -255,10 +255,7 @@ class Client:
             LOGGER.error(f"Access forbidden for document: {did}")
             return {}
 
-        return {
-            element["name"]: Element.model_validate(element)
-            for element in response.json()
-        }
+        return {element["name"]: Element.model_validate(element) for element in response.json()}
 
     def get_variables(self, did: str, wid: str, eid: str) -> dict[str, Variable]:
         """
@@ -289,23 +286,16 @@ class Client:
                 )
             }
         """
-        request_path = (
-            "/api/variables/d/" + did + "/w/" + wid + "/e/" + eid + "/variables"
-        )
+        request_path = "/api/variables/d/" + did + "/w/" + wid + "/e/" + eid + "/variables"
 
         _variables_json = self.request(
             HTTP.GET,
             request_path,
         ).json()
 
-        return {
-            variable["name"]: Variable.model_validate(variable)
-            for variable in _variables_json[0]["variables"]
-        }
+        return {variable["name"]: Variable.model_validate(variable) for variable in _variables_json[0]["variables"]}
 
-    def set_variables(
-        self, did: str, wid: str, eid: str, variables: dict[str, str]
-    ) -> requests.Response:
+    def set_variables(self, did: str, wid: str, eid: str, variables: dict[str, str]) -> requests.Response:
         """
         Set values for variables of a variable studio in a document.
 
@@ -335,9 +325,7 @@ class Client:
         payload = [variable.model_dump() for variable in variables.values()]
 
         # api/v9/variables/d/a1c1addf75444f54b504f25c/w/0d17b8ebb2a4c76be9fff3c7/e/cba5e3ca026547f34f8d9f0f/variables
-        request_path = (
-            "/api/variables/d/" + did + "/w/" + wid + "/e/" + eid + "/variables"
-        )
+        request_path = "/api/variables/d/" + did + "/w/" + wid + "/e/" + eid + "/variables"
 
         return self.request(
             HTTP.POST,
@@ -451,9 +439,7 @@ class Client:
                 documentMicroversion="349f6413cafefe8fb4ab3b07",
             )
         """
-        request_path = (
-            "/api/assemblies/d/" + did + "/" + wtype + "/" + wid + "/e/" + eid
-        )
+        request_path = "/api/assemblies/d/" + did + "/" + wtype + "/" + wid + "/e/" + eid
         res = self.request(
             HTTP.GET,
             request_path,
@@ -557,9 +543,7 @@ class Client:
                 )
             )
         """
-        request_path = (
-            "/api/assemblies/d/" + did + "/" + wtype + "/" + wid + "/e/" + eid
-        )
+        request_path = "/api/assemblies/d/" + did + "/" + wtype + "/" + wid + "/e/" + eid
         res = self.request(
             HTTP.GET,
             request_path,
@@ -648,9 +632,7 @@ class Client:
             while True:
                 status_response = self.request(HTTP.GET, path=status_path)
                 if status_response.status_code != 200:
-                    LOGGER.error(
-                        f"Failed to get translation status: {status_response.text}"
-                    )
+                    LOGGER.error(f"Failed to get translation status: {status_response.text}")
                     return None
 
                 status_info = status_response.json()
@@ -682,9 +664,7 @@ class Client:
                 return None
 
         else:
-            LOGGER.info(
-                f"Failed to download assembly: {response.status_code} - {response.text}"
-            )
+            LOGGER.info(f"Failed to download assembly: {response.status_code} - {response.text}")
             LOGGER.info(
                 generate_url(
                     base_url=self._url,
@@ -761,9 +741,7 @@ class Client:
                 eid=eid,
             )
             LOGGER.info(f"{url}")
-            LOGGER.info(
-                f"Failed to download STL file: {response.status_code} - {response.text}"
-            )
+            LOGGER.info(f"Failed to download STL file: {response.status_code} - {response.text}")
 
         return buffer
 
@@ -858,9 +836,7 @@ class Client:
             )
         """
         # TODO: version id seems to always work, should this default behavior be changed?
-        request_path = (
-            f"/api/parts/d/{did}/{wtype}/{wid}/e/{eid}/partid/{partID}/massproperties"
-        )
+        request_path = f"/api/parts/d/{did}/{wtype}/{wid}/e/{eid}/partid/{partID}/massproperties"
         res = self.request(
             HTTP.GET,
             request_path,
@@ -878,14 +854,10 @@ class Client:
                 wid=wid,
                 eid=eid,
             )
-            raise ValueError(
-                f"Part: {url} does not have a material assigned or the part is not found"
-            )
+            raise ValueError(f"Part: {url} does not have a material assigned or the part is not found")
 
         elif res.status_code == 429:
-            raise ValueError(
-                f"Too many requests, please retry after {res.headers['Retry-After']} seconds"
-            )
+            raise ValueError(f"Too many requests, please retry after {res.headers['Retry-After']} seconds")
 
         resonse_json = res.json()
 
@@ -1068,34 +1040,17 @@ class Client:
         query = urlencode(query)
 
         hmac_str = (
-            str(
-                method
-                + "\n"
-                + nonce
-                + "\n"
-                + date
-                + "\n"
-                + ctype
-                + "\n"
-                + path
-                + "\n"
-                + query
-                + "\n"
-            )
+            str(method + "\n" + nonce + "\n" + date + "\n" + ctype + "\n" + path + "\n" + query + "\n")
             .lower()
             .encode("utf-8")
         )
 
         signature = base64.b64encode(
-            hmac.new(
-                self._secret_key.encode("utf-8"), hmac_str, digestmod=hashlib.sha256
-            ).digest()
+            hmac.new(self._secret_key.encode("utf-8"), hmac_str, digestmod=hashlib.sha256).digest()
         )
         auth = "On " + self._access_key + ":HmacSHA256:" + signature.decode("utf-8")
 
-        LOGGER.debug(
-            f"query: {query}, hmac_str: {hmac_str}, signature: {signature}, auth: {auth}"
-        )
+        LOGGER.debug(f"query: {query}, hmac_str: {hmac_str}, signature: {signature}, auth: {auth}")
 
         return auth
 
@@ -1124,11 +1079,7 @@ class Client:
             query = {}
         date = datetime.datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")
         nonce = make_nonce()
-        ctype = (
-            headers.get("Content-Type")
-            if headers.get("Content-Type")
-            else "application/json"
-        )
+        ctype = headers.get("Content-Type") if headers.get("Content-Type") else "application/json"
 
         auth = self._make_auth(method, date, nonce, path, query=query, ctype=ctype)
 

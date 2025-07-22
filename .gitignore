@@ -229,6 +229,7 @@ src/target
 *.stl
 *.png
 *.xml
+*.txt
 
 # Local development files
 .local/

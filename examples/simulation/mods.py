@@ -1,5 +1,4 @@
 from lxml import etree as ET
-
 from onshape_robotics_toolkit.models.mjcf import IMU, Gyro
 from onshape_robotics_toolkit.robot import Robot, load_element
 
@@ -90,16 +89,10 @@ def modify_ballbot(ballbot: Robot) -> Robot:
     pair_7.set("geom2", "floor")
     pair_7.set("friction", "1 10 3 10 10")
 
-    ballbot.add_custom_element_by_tag(
-        name="contact", parent_tag="mujoco", element=contact
-    )
+    ballbot.add_custom_element_by_tag(name="contact", parent_tag="mujoco", element=contact)
 
-    ballbot_mesh = ET.Element(
-        "mesh", attrib={"name": "Part_1_1", "file": "meshes\\ball.stl"}
-    )
-    ballbot.add_custom_element_by_tag(
-        name="ballbot", parent_tag="asset", element=ballbot_mesh
-    )
+    ballbot_mesh = ET.Element("mesh", attrib={"name": "Part_1_1", "file": "meshes\\ball.stl"})
+    ballbot.add_custom_element_by_tag(name="ballbot", parent_tag="asset", element=ballbot_mesh)
     ball = load_element("ball.xml")
     ballbot.add_custom_element_by_tag(name="ball", parent_tag="worldbody", element=ball)
 
@@ -108,14 +101,8 @@ def modify_ballbot(ballbot: Robot) -> Robot:
     # ballbot.set_element_attributes(element_name="Part-2-2-collision", attributes={"friction": "0.1 0.05 0.001"})
     # ballbot.set_element_attributes(element_name="Part-2-3-collision", attributes={"friction": "0.1 0.05 0.001"})
 
-    ballbot.set_element_attributes(
-        element_name="Revolute_1", attributes={"axis": "0 0 1", "damping": "0.05"}
-    )
-    ballbot.set_element_attributes(
-        element_name="Revolute_2", attributes={"axis": "0 0 1", "damping": "0.05"}
-    )
-    ballbot.set_element_attributes(
-        element_name="Revolute_3", attributes={"axis": "0 0 1", "damping": "0.05"}
-    )
+    ballbot.set_element_attributes(element_name="Revolute_1", attributes={"axis": "0 0 1", "damping": "0.05"})
+    ballbot.set_element_attributes(element_name="Revolute_2", attributes={"axis": "0 0 1", "damping": "0.05"})
+    ballbot.set_element_attributes(element_name="Revolute_3", attributes={"axis": "0 0 1", "damping": "0.05"})
 
     return ballbot

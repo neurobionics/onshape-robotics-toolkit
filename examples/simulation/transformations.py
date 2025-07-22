@@ -42,22 +42,12 @@ def compute_motor_torques(alpha, Tx, Ty, Tz, beta=0.0):
     T3: Motor Torque 3
     """
 
-    T1 = (0.3333) * (
-        Tz + ((2 / np.cos(alpha)) * (Tx * np.cos(beta) - Ty * np.sin(beta)))
-    )
+    T1 = (0.3333) * (Tz + ((2 / np.cos(alpha)) * (Tx * np.cos(beta) - Ty * np.sin(beta))))
     T2 = (0.3333) * (
-        Tz
-        + (
-            (1 / np.cos(alpha))
-            * (np.sin(beta) * (1.7320 * Tx + Ty) + np.cos(beta) * (1.7320 * Ty - Tx))
-        )
+        Tz + ((1 / np.cos(alpha)) * (np.sin(beta) * (1.7320 * Tx + Ty) + np.cos(beta) * (1.7320 * Ty - Tx)))
     )
     T3 = (0.3333) * (
-        Tz
-        + (
-            (1 / np.cos(alpha))
-            * (np.sin(beta) * (-1.7320 * Tx + Ty) - np.cos(beta) * (1.7320 * Ty + Tx))
-        )
+        Tz + ((1 / np.cos(alpha)) * (np.sin(beta) * (-1.7320 * Tx + Ty) - np.cos(beta) * (1.7320 * Ty + Tx)))
     )
 
     return T1, T2, T3

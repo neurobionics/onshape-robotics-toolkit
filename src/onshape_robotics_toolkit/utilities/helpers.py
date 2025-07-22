@@ -204,9 +204,7 @@ def get_random_files(directory: str, file_extension: str, count: int) -> list[st
     return file_paths, [x.split(".")[0] for x in selected_files]
 
 
-def get_random_names(
-    directory: str, count: int, filename: str = "words.txt"
-) -> list[str]:
+def get_random_names(directory: str, count: int, filename: str = "words.txt") -> list[str]:
     """
     Generate random names from a list of words in a file
 
@@ -298,9 +296,7 @@ def make_unique_name(name: str, existing_names: set[str]) -> str:
     return f"{name}-{count}"
 
 
-def get_sanitized_name(
-    name: str, replace_with: str = "_", remove_onshape_tags: bool = False
-) -> str:
+def get_sanitized_name(name: str, replace_with: str = "_", remove_onshape_tags: bool = False) -> str:
     """
     Sanitize a name by removing special characters, preserving only the specified
     replacement character, and replacing spaces with it. Ensures no consecutive
@@ -339,13 +335,9 @@ def get_sanitized_name(
             if tag:
                 name = name[: match.start()]
 
-    sanitized_name = "".join(
-        char if char.isalnum() or char in "-_ " else "" for char in name
-    )
+    sanitized_name = "".join(char if char.isalnum() or char in "-_ " else "" for char in name)
     sanitized_name = sanitized_name.replace(" ", replace_with)
-    sanitized_name = re.sub(
-        f"{re.escape(replace_with)}{{2,}}", replace_with, sanitized_name
-    )
+    sanitized_name = re.sub(f"{re.escape(replace_with)}{{2,}}", replace_with, sanitized_name)
 
     return sanitized_name
 
@@ -360,9 +352,7 @@ def show_video(frames, framerate=60):
         im.set_array(frame)
         return [im]
 
-    animation.FuncAnimation(
-        fig, update, frames=frames, interval=1000 / framerate, blit=True
-    )
+    animation.FuncAnimation(fig, update, frames=frames, interval=1000 / framerate, blit=True)
 
     plt.show()
 

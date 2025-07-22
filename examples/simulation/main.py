@@ -11,13 +11,12 @@ import plotly
 from controllers import PIDController
 from mods import modify_ballbot
 from mujoco.usd import exporter
-from scipy.spatial.transform import Rotation
-from transformations import compute_motor_torques
-
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.robot import Robot, RobotType
+from scipy.spatial.transform import Rotation
+from transformations import compute_motor_torques
 
 N_DESIGN_TRAILS = 100
 N_PID_TRAILS = 50
@@ -114,21 +113,17 @@ def get_states(data):
     dtheta = get_dtheta(data)
     dphi = get_dphi(data)
 
-    return np.array(
-        [
-            phi[0],
-            theta[0],
-            dphi[0],
-            dtheta[0],
-        ]
-    ), np.array(
-        [
-            phi[1],
-            theta[1],
-            dphi[1],
-            dtheta[1],
-        ]
-    )
+    return np.array([
+        phi[0],
+        theta[0],
+        dphi[0],
+        dtheta[0],
+    ]), np.array([
+        phi[1],
+        theta[1],
+        dphi[1],
+        dtheta[1],
+    ])
 
 
 def apply_ball_torque(data, torque):
@@ -154,9 +149,7 @@ def exit_condition(data):
 
     ball_pos = get_ball_pos(data)
     bot_pos = get_bot_pos(data)
-    distance_between_ball_and_bot = np.linalg.norm(
-        np.array(ball_pos) - np.array(bot_pos)
-    )
+    distance_between_ball_and_bot = np.linalg.norm(np.array(ball_pos) - np.array(bot_pos))
 
     distance_condition = distance_between_ball_and_bot > MAX_DISTANCE_FROM_BALL
 
@@ -176,9 +169,7 @@ def control(data, roll_pid, pitch_pid, variables: dict[str, float]):
     tz = 0.0
 
     # Compute motor torques
-    t1, t2, t3 = compute_motor_torques(
-        np.deg2rad(variables["alpha"]), tx, ty, tz, theta[2]
-    )
+    t1, t2, t3 = compute_motor_torques(np.deg2rad(variables["alpha"]), tx, ty, tz, theta[2])
 
     data.ctrl[0] = t1
     data.ctrl[1] = t2
@@ -276,11 +267,7 @@ def find_best_pid_params(trial, model, data, viewer, variables, usd_output_dir):
     time_on_ball = data.time  # Time the ball stayed on top
     average_distance = cumulative_distance / steps if steps > 0 else 0.0
     average_vibration = cumulative_vibration / steps if steps > 0 else 0.0
-    objective_value = (
-        time_on_ball
-        - LAMBDA_WEIGHT * average_distance
-        - BETA_WEIGHT * average_vibration
-    )
+    objective_value = time_on_ball - LAMBDA_WEIGHT * average_distance - BETA_WEIGHT * average_vibration
 
     LOGGER.info(
         f"Time on Ball: {time_on_ball}, "
@@ -299,18 +286,12 @@ def stop_when_target_reached(study, trial):
         study.stop()
 
 
-def find_best_design_variables(trial):  # noqa: C901
+def find_best_design_variables(trial):
     # reset global PID error values
-    wheel_diameter = trial.suggest_float(
-        "wheel_diameter", WHEEL_DIAMETER_BOUNDS[0], WHEEL_DIAMETER_BOUNDS[1]
-    )
-    spacer_height = trial.suggest_float(
-        "spacer_height", SPACER_HEIGHT_BOUNDS[0], SPACER_HEIGHT_BOUNDS[1]
-    )
+    wheel_diameter = trial.suggest_float("wheel_diameter", WHEEL_DIAMETER_BOUNDS[0], WHEEL_DIAMETER_BOUNDS[1])
+    spacer_height = trial.suggest_float("spacer_height", SPACER_HEIGHT_BOUNDS[0], SPACER_HEIGHT_BOUNDS[1])
     alpha = trial.suggest_float("alpha", ALPHA_BOUNDS[0], ALPHA_BOUNDS[1])
-    plate_thickness = trial.suggest_float(
-        "plate_thickness", PLATE_BOUNDS[0], PLATE_BOUNDS[1]
-    )
+    plate_thickness = trial.suggest_float("plate_thickness", PLATE_BOUNDS[0], PLATE_BOUNDS[1])
 
     variables["wheel_diameter"].expression = f"{wheel_diameter:.1f} mm"
     variables["alpha"].expression = f"{alpha:.1f} deg"
@@ -352,9 +333,7 @@ def find_best_design_variables(trial):  # noqa: C901
         usd_output_dir=os.path.join(output_dir, "scenes", f"trial_{trial.number}"),
     )
     pid_study = optuna.create_study(directions=["maximize"])
-    pid_study.optimize(
-        this_pid_study, n_trials=N_PID_TRAILS, callbacks=[stop_when_target_reached]
-    )
+    pid_study.optimize(this_pid_study, n_trials=N_PID_TRAILS, callbacks=[stop_when_target_reached])
     viewer.close()
 
     if pid_study.best_params is None:
@@ -461,11 +440,7 @@ def find_best_design_variables(trial):  # noqa: C901
     average_distance = cumulative_distance / steps if steps > 0 else 0.0
     average_vibration = cumulative_vibration / steps if steps > 0 else 0.0
 
-    objective_value = (
-        time_on_ball
-        - LAMBDA_WEIGHT * average_distance
-        - BETA_WEIGHT * average_vibration
-    )
+    objective_value = time_on_ball - LAMBDA_WEIGHT * average_distance - BETA_WEIGHT * average_vibration
 
     LOGGER.info(
         f"Time on Ball: {time_on_ball}, "
@@ -487,9 +462,7 @@ if __name__ == "__main__":
     # Create output directory for this run
     output_dir = run_name
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(
-        os.path.join(output_dir, "scenes"), exist_ok=True
-    )  # Create scenes subdirectory
+    os.makedirs(os.path.join(output_dir, "scenes"), exist_ok=True)  # Create scenes subdirectory
     # Update log file path
     LOGGER.set_file_name(os.path.join(output_dir, f"{run_name}.log"))
     LOGGER.set_stream_level(LogLevel.INFO)
@@ -538,9 +511,7 @@ if __name__ == "__main__":
     plotly.io.write_html(contour_plot, os.path.join(output_dir, "contour.html"))
 
     optimization_history_plot = optuna.visualization.plot_optimization_history(study)
-    plotly.io.write_html(
-        optimization_history_plot, os.path.join(output_dir, "optimization_history.html")
-    )
+    plotly.io.write_html(optimization_history_plot, os.path.join(output_dir, "optimization_history.html"))
 
     hyperparameter_importance_plot = optuna.visualization.plot_param_importances(study)
     plotly.io.write_html(
@@ -552,6 +523,4 @@ if __name__ == "__main__":
     plotly.io.write_html(timeline_plot, os.path.join(output_dir, "timeline.html"))
 
     parallel_coordinate_plot = optuna.visualization.plot_parallel_coordinate(study)
-    plotly.io.write_html(
-        parallel_coordinate_plot, os.path.join(output_dir, "parallel_coordinate.html")
-    )
+    plotly.io.write_html(parallel_coordinate_plot, os.path.join(output_dir, "parallel_coordinate.html"))

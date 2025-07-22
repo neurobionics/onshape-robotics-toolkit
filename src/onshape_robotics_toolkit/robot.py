@@ -297,9 +297,7 @@ class Robot:
         )
 
         if add_encoder:
-            self.add_sensor(
-                actuator_name + "-enc", Encoder(actuator_name, actuator_name)
-            )
+            self.add_sensor(actuator_name + "-enc", Encoder(actuator_name, actuator_name))
 
         if add_force_sensor:
             self.add_sensor(
@@ -497,7 +495,7 @@ class Robot:
         """
         return ET.tostring(element, pretty_print=True, encoding="unicode")
 
-    def to_mjcf(self) -> str:  # noqa: C901
+    def to_mjcf(self) -> str:
         """Generate MJCF XML from the graph.
 
         Returns:
@@ -535,9 +533,7 @@ class Robot:
             for light in self.lights.values():
                 light.to_mjcf(worldbody)
 
-        root_body = ET.SubElement(
-            worldbody, "body", name=self.name, pos=" ".join(map(str, self.position))
-        )
+        root_body = ET.SubElement(worldbody, "body", name=self.name, pos=" ".join(map(str, self.position)))
         ET.SubElement(root_body, "freejoint", name=f"{self.name}_freejoint")
 
         body_elements = {self.name: root_body}
@@ -562,15 +558,11 @@ class Robot:
                 child_body = body_elements.get(child_name)
 
                 if parent_body is not None and child_body is not None:
-                    LOGGER.debug(
-                        f"\nProcessing fixed joint from {parent_name} to {child_name}"
-                    )
+                    LOGGER.debug(f"\nProcessing fixed joint from {parent_name} to {child_name}")
 
                     # Convert joint transform from URDF convention
                     joint_pos = np.array(joint_data.origin.xyz)
-                    joint_rot = Rotation.from_euler(
-                        URDF_EULER_SEQ, joint_data.origin.rpy
-                    )
+                    joint_rot = Rotation.from_euler(URDF_EULER_SEQ, joint_data.origin.rpy)
 
                     # If parent was dissolved, compose transformations
                     if parent_name in dissolved_transforms:
@@ -585,32 +577,15 @@ class Robot:
                     for element in list(child_body):
                         if element.tag == "inertial":
                             # Get current inertial properties
-                            current_pos = np.array(
-                                [
-                                    float(x)
-                                    for x in (element.get("pos") or "0 0 0").split()
-                                ]
-                            )
-                            current_euler = np.array(
-                                [
-                                    float(x)
-                                    for x in (element.get("euler") or "0 0 0").split()
-                                ]
-                            )
-                            current_rot = Rotation.from_euler(
-                                MJCF_EULER_SEQ, current_euler, degrees=False
-                            )
+                            current_pos = np.array([float(x) for x in (element.get("pos") or "0 0 0").split()])
+                            current_euler = np.array([float(x) for x in (element.get("euler") or "0 0 0").split()])
+                            current_rot = Rotation.from_euler(MJCF_EULER_SEQ, current_euler, degrees=False)
 
                             # Get current mass and diaginertia
                             current_mass = float(element.get("mass", 0))
-                            current_diaginertia = np.array(
-                                [
-                                    float(x)
-                                    for x in (
-                                        element.get("diaginertia") or "0 0 0"
-                                    ).split()
-                                ]
-                            )
+                            current_diaginertia = np.array([
+                                float(x) for x in (element.get("diaginertia") or "0 0 0").split()
+                            ])
 
                             # Transform position and orientation
                             new_pos = joint_rot.apply(current_pos) + joint_pos
@@ -628,39 +603,21 @@ class Robot:
                             continue
 
                         elif element.tag == "geom":
-                            current_pos = np.array(
-                                [
-                                    float(x)
-                                    for x in (element.get("pos") or "0 0 0").split()
-                                ]
-                            )
-                            current_euler = np.array(
-                                [
-                                    float(x)
-                                    for x in (element.get("euler") or "0 0 0").split()
-                                ]
-                            )
+                            current_pos = np.array([float(x) for x in (element.get("pos") or "0 0 0").split()])
+                            current_euler = np.array([float(x) for x in (element.get("euler") or "0 0 0").split()])
 
                             # Convert current rotation from MuJoCo convention
-                            current_rot = Rotation.from_euler(
-                                MJCF_EULER_SEQ, current_euler, degrees=False
-                            )
+                            current_rot = Rotation.from_euler(MJCF_EULER_SEQ, current_euler, degrees=False)
 
                             # Apply the dissolved transformation
                             new_pos = joint_rot.apply(current_pos) + joint_pos
-                            new_rot = (
-                                joint_rot * current_rot
-                            )  # Order matters for rotation composition
+                            new_rot = joint_rot * current_rot  # Order matters for rotation composition
 
                             # Convert back to MuJoCo convention - explicitly specify intrinsic/extrinsic
                             new_euler = new_rot.as_euler(MJCF_EULER_SEQ, degrees=False)
 
-                            element.set(
-                                "pos", " ".join(format_number(v) for v in new_pos)
-                            )
-                            element.set(
-                                "euler", " ".join(format_number(v) for v in new_euler)
-                            )
+                            element.set("pos", " ".join(format_number(v) for v in new_pos))
+                            element.set("euler", " ".join(format_number(v) for v in new_euler))
 
                         parent_body.append(element)
 
@@ -678,23 +635,15 @@ class Robot:
             # Update the existing inertial element
             parent_inertial.set("mass", str(combined_mass))
             parent_inertial.set("pos", " ".join(format_number(v) for v in combined_pos))
-            parent_inertial.set(
-                "euler", " ".join(format_number(v) for v in combined_euler)
-            )
-            parent_inertial.set(
-                "diaginertia", " ".join(format_number(v) for v in combined_diaginertia)
-            )
+            parent_inertial.set("euler", " ".join(format_number(v) for v in combined_euler))
+            parent_inertial.set("diaginertia", " ".join(format_number(v) for v in combined_diaginertia))
         else:
             # If no inertial element exists, create one
             new_inertial = ET.Element("inertial")
             new_inertial.set("mass", str(combined_mass))
             new_inertial.set("pos", " ".join(format_number(v) for v in combined_pos))
-            new_inertial.set(
-                "euler", " ".join(format_number(v) for v in combined_euler)
-            )
-            new_inertial.set(
-                "diaginertia", " ".join(format_number(v) for v in combined_diaginertia)
-            )
+            new_inertial.set("euler", " ".join(format_number(v) for v in combined_euler))
+            new_inertial.set("diaginertia", " ".join(format_number(v) for v in combined_diaginertia))
             parent_body.append(new_inertial)
 
         # Then process revolute joints
@@ -704,9 +653,7 @@ class Robot:
                 child_body = body_elements.get(child_name)
 
                 if parent_body is not None and child_body is not None:
-                    LOGGER.debug(
-                        f"\nProcessing revolute joint from {parent_name} to {child_name}"
-                    )
+                    LOGGER.debug(f"\nProcessing revolute joint from {parent_name} to {child_name}")
 
                     # Get dissolved parent transform
                     if parent_name in dissolved_transforms:
@@ -717,9 +664,7 @@ class Robot:
 
                     # Convert joint transform from URDF convention
                     joint_pos = np.array(joint_data.origin.xyz)
-                    joint_rot = Rotation.from_euler(
-                        URDF_EULER_SEQ, joint_data.origin.rpy
-                    )
+                    joint_rot = Rotation.from_euler(URDF_EULER_SEQ, joint_data.origin.rpy)
 
                     # Apply parent's dissolved transformation
                     final_pos = parent_rot.apply(joint_pos) + parent_pos
@@ -729,16 +674,12 @@ class Robot:
                     final_euler = final_rot.as_euler(MJCF_EULER_SEQ, degrees=False)
 
                     LOGGER.debug(f"Joint {parent_name}->{child_name}:")
-                    LOGGER.debug(
-                        f"  Original: pos={joint_data.origin.xyz}, rpy={joint_data.origin.rpy}"
-                    )
+                    LOGGER.debug(f"  Original: pos={joint_data.origin.xyz}, rpy={joint_data.origin.rpy}")
                     LOGGER.debug(f"  Final: pos={final_pos}, euler={final_euler}")
 
                     # Update child body transformation
                     child_body.set("pos", " ".join(format_number(v) for v in final_pos))
-                    child_body.set(
-                        "euler", " ".join(format_number(v) for v in final_euler)
-                    )
+                    child_body.set("euler", " ".join(format_number(v) for v in final_euler))
 
                     # Create joint with zero origin
                     joint_data.origin.xyz = [0, 0, 0]
@@ -772,17 +713,13 @@ class Robot:
 
                 if parent_element is not None:
                     # Create new element with proper parent relationship
-                    new_element = ET.SubElement(
-                        parent_element, element.tag, element.attrib
-                    )
+                    new_element = ET.SubElement(parent_element, element.tag, element.attrib)
                     # Copy any children if they exist
                     for child in element:
                         new_element.append(ET.fromstring(ET.tostring(child)))
                 else:
                     search_type = "tag" if find_by_tag else "name"
-                    LOGGER.warning(
-                        f"Parent element with {search_type} '{parent}' not found in model."
-                    )
+                    LOGGER.warning(f"Parent element with {search_type} '{parent}' not found in model.")
 
         for element_name, attributes in self.mutated_elements.items():
             # Search recursively through all descendants, looking for both body and joint elements
@@ -796,9 +733,7 @@ class Robot:
 
         return ET.tostring(model, pretty_print=True, encoding="unicode")
 
-    def save(
-        self, file_path: str | None = None, download_assets: bool = True
-    ) -> None:
+    def save(self, file_path: str | None = None, download_assets: bool = True) -> None:
         """Save the robot model to a URDF file.
 
         Args:
@@ -810,9 +745,7 @@ class Robot:
 
         if not file_path:
             LOGGER.warning("No file path provided. Saving to current directory.")
-            LOGGER.warning(
-                "Please keep in mind that the path to the assets will not be updated"
-            )
+            LOGGER.warning("Please keep in mind that the path to the assets will not be updated")
             file_path = f"{self.name}.{self.type}"
 
         xml_declaration = '<?xml version="1.0" ?>\n'
@@ -857,9 +790,7 @@ class Robot:
             LOGGER.warning("No assets found for the robot model.")
             return
 
-        tasks = [
-            asset.download() for asset in self.assets.values() if not asset.is_from_file
-        ]
+        tasks = [asset.download() for asset in self.assets.values() if not asset.is_from_file]
         try:
             await asyncio.gather(*tasks)
             LOGGER.info("All assets downloaded successfully.")
@@ -881,9 +812,7 @@ class Robot:
         else:
             parent = self.model.find(f".//*[@name='{parent_name}']")
             if parent is None:
-                raise ValueError(
-                    f"Parent with name '{parent_name}' not found in the robot model."
-                )
+                raise ValueError(f"Parent with name '{parent_name}' not found in the robot model.")
 
             # Add the custom element under the parent
             parent.append(element)
@@ -891,7 +820,7 @@ class Robot:
         LOGGER.info(f"Custom element added to parent '{parent_name}'.")
 
     @classmethod
-    def from_urdf(cls, file_name: str, robot_type: RobotType) -> "Robot":  # noqa: C901
+    def from_urdf(cls, file_name: str, robot_type: RobotType) -> "Robot":
         """Load a robot model from a URDF file.
 
         Args:
@@ -978,12 +907,8 @@ class Robot:
             with_meta_data=True,
         )
 
-        instances, occurrences, id_to_name_map = get_instances(
-            assembly=assembly, max_depth=max_depth
-        )
-        subassemblies, rigid_subassemblies = get_subassemblies(
-            assembly=assembly, client=client, instances=instances
-        )
+        instances, occurrences, id_to_name_map = get_instances(assembly=assembly, max_depth=max_depth)
+        subassemblies, rigid_subassemblies = get_subassemblies(assembly=assembly, client=client, instances=instances)
 
         parts = get_parts(
             assembly=assembly,
@@ -1077,9 +1002,7 @@ def get_robot(
 
     assets_map = {}
     stl_to_link_tf_map = {}
-    topological_mates, topological_relations = get_topological_mates(
-        graph, mates, relations
-    )
+    topological_mates, topological_relations = get_topological_mates(graph, mates, relations)
 
     LOGGER.info(f"Processing root node: {root_node}")
 
@@ -1102,9 +1025,7 @@ def get_robot(
         parent_tf = stl_to_link_tf_map[parent]
 
         if parent not in parts or child not in parts:
-            LOGGER.warning(
-                f"Part {parent} or {child} not found in parts dictionary. Skipping."
-            )
+            LOGGER.warning(f"Part {parent} or {child} not found in parts dictionary. Skipping.")
             continue
 
         joint_mimic = None
@@ -1149,9 +1070,7 @@ def get_robot(
             if link.name not in robot.graph:
                 robot.add_link(link)
             else:
-                LOGGER.warning(
-                    f"Link {link.name} already exists in the robot graph. Skipping."
-                )
+                LOGGER.warning(f"Link {link.name} already exists in the robot graph. Skipping.")
 
         for joint in joint_list:
             robot.add_joint(joint)

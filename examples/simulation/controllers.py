@@ -1,4 +1,3 @@
-
 import numpy as np
 
 
@@ -45,9 +44,7 @@ class PIDController:
 
         self.feed_forward_offset: float = feed_forward_offset
 
-    def update(
-        self, error: float, return_all_terms: bool = False
-    ) -> float | tuple[float, float, float, float]:
+    def update(self, error: float, return_all_terms: bool = False) -> float | tuple[float, float, float, float]:
         """
         Compute the PID output for the given error signal.
 
@@ -82,15 +79,11 @@ class PIDController:
         # Apply output clamping, if limits are set
         if self.min_output is not None and output < self.min_output:
             output = self.min_output
-            self.integral_error -= (
-                error * self.dt
-            )  # remove the last integration step to prevent windup
+            self.integral_error -= error * self.dt  # remove the last integration step to prevent windup
 
         elif self.max_output is not None and output > self.max_output:
             output = self.max_output
-            self.integral_error -= (
-                error * self.dt
-            )  # remove the last integration step to prevent windup
+            self.integral_error -= error * self.dt  # remove the last integration step to prevent windup
 
         if return_all_terms:
             return output, p_term, i_term, d_term
@@ -105,9 +98,7 @@ class PIDController:
         self.previous_error = 0.0
         self.derivative_filtered = 0.0
 
-    def set_output_limits(
-        self, min_output: float | None, max_output: float | None
-    ):
+    def set_output_limits(self, min_output: float | None, max_output: float | None):
         """
         Dynamically set output limits.
         """

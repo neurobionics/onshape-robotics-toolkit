@@ -389,11 +389,7 @@ class Logger(logging.Logger):
         timestamp = now.strftime("%Y%m%d_%H%M%S")
         script_name = os.path.basename(__file__).split(".")[0]
 
-        base_name = (
-            self._user_file_name
-            if self._user_file_name
-            else f"{script_name}_{timestamp}"
-        )
+        base_name = self._user_file_name if self._user_file_name else f"{script_name}_{timestamp}"
 
         file_path = os.path.join(self._log_path, base_name)
         self._file_path = file_path + ".log"

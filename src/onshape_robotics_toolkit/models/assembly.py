@@ -197,17 +197,13 @@ class Occurrence(BaseModel):
         )
     """
 
-    fixed: bool = Field(
-        ..., description="Indicates if the occurrence is fixed in space."
-    )
+    fixed: bool = Field(..., description="Indicates if the occurrence is fixed in space.")
     transform: list[float] = Field(
         ...,
         description="A 4x4 transformation matrix represented as a list of 16 floats.",
     )
     hidden: bool = Field(..., description="Indicates if the occurrence is hidden.")
-    path: list[str] = Field(
-        ..., description="A list of strings representing the path to the instance."
-    )
+    path: list[str] = Field(..., description="A list of strings representing the path to the instance.")
 
     @field_validator("transform")
     def check_transform(cls, v: list[float]) -> list[float]:
@@ -252,15 +248,11 @@ class IDBase(BaseModel):
         documentMicroversion (str): The microversion of the document.
     """
 
-    fullConfiguration: str = Field(
-        ..., description="The full configuration of the entity."
-    )
+    fullConfiguration: str = Field(..., description="The full configuration of the entity.")
     configuration: str = Field(..., description="The configuration of the entity.")
     documentId: str = Field(..., description="The unique identifier of the entity.")
     elementId: str = Field(..., description="The unique identifier of the entity.")
-    documentMicroversion: str = Field(
-        ..., description="The microversion of the document."
-    )
+    documentMicroversion: str = Field(..., description="The microversion of the document.")
 
     @field_validator("documentId", "elementId", "documentMicroversion")
     def check_ids(cls, v: str) -> str:
@@ -290,14 +282,12 @@ class IDBase(BaseModel):
             str: The unique identifier generated from documentId, documentMicroversion,
                 elementId, and fullConfiguration.
         """
-        return generate_uid(
-            [
-                self.documentId,
-                self.documentMicroversion,
-                self.elementId,
-                self.fullConfiguration,
-            ]
-        )
+        return generate_uid([
+            self.documentId,
+            self.documentMicroversion,
+            self.elementId,
+            self.fullConfiguration,
+        ])
 
 
 class PartMetadata(BaseModel):
@@ -346,12 +336,8 @@ class PartMateConnector(BaseModel):
         )
     """
 
-    mateConnectorCS: "MatedCS" = Field(
-        ..., description="The coordinate system used for the mate connector."
-    )
-    featureId: str = Field(
-        ..., description="The unique identifier of the mate connector feature."
-    )
+    mateConnectorCS: "MatedCS" = Field(..., description="The coordinate system used for the mate connector.")
+    featureId: str = Field(..., description="The unique identifier of the mate connector feature.")
 
 
 class Part(IDBase):
@@ -395,16 +381,10 @@ class Part(IDBase):
 
     """
 
-    isStandardContent: bool = Field(
-        ..., description="Indicates if the part is standard content."
-    )
+    isStandardContent: bool = Field(..., description="Indicates if the part is standard content.")
     partId: str = Field(..., description="The unique identifier of the part.")
-    bodyType: str = Field(
-        ..., description="The type of the body (e.g., solid, surface)."
-    )
-    mateConnectors: list[PartMateConnector] = Field(
-        None, description="The mate connectors that belong to the part."
-    )
+    bodyType: str = Field(..., description="The type of the body (e.g., solid, surface).")
+    mateConnectors: list[PartMateConnector] = Field(None, description="The mate connectors that belong to the part.")
     documentVersion: str = Field(None, description="The version of the document.")
     MassProperty: MassProperties | None = Field(
         None,
@@ -433,15 +413,13 @@ class Part(IDBase):
             str: The unique identifier generated from documentId, documentMicroversion,
                 elementId, partId, and fullConfiguration.
         """
-        return generate_uid(
-            [
-                self.documentId,
-                self.documentMicroversion,
-                self.elementId,
-                self.partId,
-                self.fullConfiguration,
-            ]
-        )
+        return generate_uid([
+            self.documentId,
+            self.documentMicroversion,
+            self.elementId,
+            self.partId,
+            self.fullConfiguration,
+        ])
 
 
 class PartInstance(IDBase):
@@ -492,18 +470,12 @@ class PartInstance(IDBase):
         )
     """
 
-    isStandardContent: bool = Field(
-        ..., description="Indicates if the part is standard content."
-    )
-    type: InstanceType = Field(
-        ..., description="The type of the instance, must be 'Part'."
-    )
+    isStandardContent: bool = Field(..., description="Indicates if the part is standard content.")
+    type: InstanceType = Field(..., description="The type of the instance, must be 'Part'.")
     documentVersion: str = Field(None, description="The version of the document.")
     id: str = Field(..., description="The unique identifier for the part instance.")
     name: str = Field(..., description="The name of the part instance.")
-    suppressed: bool = Field(
-        ..., description="Indicates if the part instance is suppressed."
-    )
+    suppressed: bool = Field(..., description="Indicates if the part instance is suppressed.")
     partId: str = Field(..., description="The identifier for the part.")
 
     @field_validator("type")
@@ -530,15 +502,13 @@ class PartInstance(IDBase):
         Returns:
             str: The unique identifier for the part instance.
         """
-        return generate_uid(
-            [
-                self.documentId,
-                self.documentMicroversion,
-                self.elementId,
-                self.partId,
-                self.fullConfiguration,
-            ]
-        )
+        return generate_uid([
+            self.documentId,
+            self.documentMicroversion,
+            self.elementId,
+            self.partId,
+            self.fullConfiguration,
+        ])
 
 
 class AssemblyInstance(IDBase):
@@ -582,13 +552,9 @@ class AssemblyInstance(IDBase):
     """
 
     id: str = Field(..., description="The unique identifier for the assembly instance.")
-    type: InstanceType = Field(
-        ..., description="The type of the instance, must be 'Assembly'."
-    )
+    type: InstanceType = Field(..., description="The type of the instance, must be 'Assembly'.")
     name: str = Field(..., description="The name of the assembly instance.")
-    suppressed: bool = Field(
-        ..., description="Indicates if the assembly instance is suppressed."
-    )
+    suppressed: bool = Field(..., description="Indicates if the assembly instance is suppressed.")
 
     isRigid: bool = Field(
         False,
@@ -651,18 +617,10 @@ class MatedCS(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-    xAxis: list[float] = Field(
-        ..., description="The x-axis vector of the coordinate system."
-    )
-    yAxis: list[float] = Field(
-        ..., description="The y-axis vector of the coordinate system."
-    )
-    zAxis: list[float] = Field(
-        ..., description="The z-axis vector of the coordinate system."
-    )
-    origin: list[float] = Field(
-        ..., description="The origin point of the coordinate system."
-    )
+    xAxis: list[float] = Field(..., description="The x-axis vector of the coordinate system.")
+    yAxis: list[float] = Field(..., description="The y-axis vector of the coordinate system.")
+    zAxis: list[float] = Field(..., description="The z-axis vector of the coordinate system.")
+    origin: list[float] = Field(..., description="The origin point of the coordinate system.")
 
     part_tf: np.matrix = Field(
         None,
@@ -768,12 +726,8 @@ class MatedEntity(BaseModel):
         )
     """
 
-    matedOccurrence: list[str] = Field(
-        ..., description="A list of identifiers for the occurrences that are mated."
-    )
-    matedCS: MatedCS = Field(
-        ..., description="The coordinate system used for mating the parts."
-    )
+    matedOccurrence: list[str] = Field(..., description="A list of identifiers for the occurrences that are mated.")
+    matedCS: MatedCS = Field(..., description="The coordinate system used for mating the parts.")
 
     parentCS: MatedCS = Field(
         None,
@@ -808,9 +762,7 @@ class MateRelationMate(BaseModel):
         )
     """
 
-    featureId: str = Field(
-        ..., description="The unique identifier of the mate feature."
-    )
+    featureId: str = Field(..., description="The unique identifier of the mate feature.")
     occurrence: list[str] = Field(
         ...,
         description="A list of identifiers for the occurrences involved in the mate relation.",
@@ -947,9 +899,7 @@ class MateConnectorFeatureData(BaseModel):
         )
     """
 
-    mateConnectorCS: MatedCS = Field(
-        ..., description="The coordinate system used for the mate connector."
-    )
+    mateConnectorCS: MatedCS = Field(..., description="The coordinate system used for the mate connector.")
     occurrence: list[str] = Field(
         ...,
         description="A list of identifiers for the occurrences involved in the mate connector.",
@@ -1013,12 +963,8 @@ class MateRelationFeatureData(BaseModel):
 
     relationType: RelationType = Field(..., description="The type of mate relation.")
     mates: list[MateRelationMate] = Field(..., description="A list of mate relations.")
-    reverseDirection: bool = Field(
-        ..., description="Indicates if the direction of the mate relation is reversed."
-    )
-    relationRatio: float | None = Field(
-        None, description="The ratio of the GEAR mate relation. Defaults to None."
-    )
+    reverseDirection: bool = Field(..., description="Indicates if the direction of the mate relation is reversed.")
+    relationRatio: float | None = Field(None, description="The ratio of the GEAR mate relation. Defaults to None.")
     relationLength: float | None = Field(
         None,
         description="The length of the RACK_AND_PINION mate relation. Defaults to None.",
@@ -1087,9 +1033,7 @@ class MateFeatureData(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-    matedEntities: list[MatedEntity] = Field(
-        ..., description="A list of mated entities."
-    )
+    matedEntities: list[MatedEntity] = Field(..., description="A list of mated entities.")
     mateType: MateType = Field(..., description="The type of mate.")
     name: str = Field(..., description="The name of the mate feature.")
 
@@ -1167,15 +1111,10 @@ class AssemblyFeature(BaseModel):
 
     id: str = Field(..., description="The unique identifier of the feature.")
     suppressed: bool = Field(..., description="Indicates if the feature is suppressed.")
-    featureType: AssemblyFeatureType = Field(
-        ..., description="The type of the feature."
+    featureType: AssemblyFeatureType = Field(..., description="The type of the feature.")
+    featureData: MateGroupFeatureData | MateConnectorFeatureData | MateRelationFeatureData | MateFeatureData = Field(
+        ..., description="Data associated with the assembly feature."
     )
-    featureData: (
-        MateGroupFeatureData
-        | MateConnectorFeatureData
-        | MateRelationFeatureData
-        | MateFeatureData
-    ) = Field(..., description="Data associated with the assembly feature.")
 
 
 class Pattern(BaseModel):
@@ -1247,12 +1186,8 @@ class SubAssembly(IDBase):
     instances: list[PartInstance | AssemblyInstance] = Field(
         ..., description="A list of part and assembly instances in the sub-assembly."
     )
-    patterns: list[Pattern] = Field(
-        ..., description="A list of patterns in the sub-assembly."
-    )
-    features: list[AssemblyFeature] = Field(
-        ..., description="A list of features in the sub-assembly"
-    )
+    patterns: list[Pattern] = Field(..., description="A list of patterns in the sub-assembly.")
+    features: list[AssemblyFeature] = Field(..., description="A list of features in the sub-assembly")
 
     MassProperty: MassProperties | None = Field(
         None,
@@ -1268,14 +1203,12 @@ class SubAssembly(IDBase):
         Returns:
             str: The unique identifier for the sub-assembly.
         """
-        return generate_uid(
-            [
-                self.documentId,
-                self.documentMicroversion,
-                self.elementId,
-                self.fullConfiguration,
-            ]
-        )
+        return generate_uid([
+            self.documentId,
+            self.documentMicroversion,
+            self.elementId,
+            self.fullConfiguration,
+        ])
 
 
 class RootAssembly(SubAssembly):
@@ -1334,13 +1267,9 @@ class RootAssembly(SubAssembly):
         )
     """
 
-    occurrences: list[Occurrence] = Field(
-        ..., description="A list of occurrences in the root assembly."
-    )
+    occurrences: list[Occurrence] = Field(..., description="A list of occurrences in the root assembly.")
 
-    documentMetaData: DocumentMetaData | None = Field(
-        None, description="The document associated with the assembly."
-    )
+    documentMetaData: DocumentMetaData | None = Field(None, description="The document associated with the assembly.")
 
 
 class Assembly(BaseModel):
@@ -1413,20 +1342,12 @@ class Assembly(BaseModel):
         )
     """
 
-    rootAssembly: RootAssembly = Field(
-        ..., description="The root assembly in the document."
-    )
-    subAssemblies: list[SubAssembly] = Field(
-        ..., description="A list of sub-assemblies in the document."
-    )
+    rootAssembly: RootAssembly = Field(..., description="The root assembly in the document.")
+    subAssemblies: list[SubAssembly] = Field(..., description="A list of sub-assemblies in the document.")
     parts: list[Part] = Field(..., description="A list of parts in the document.")
-    partStudioFeatures: list[dict] = Field(
-        ..., description="A list of part studio features in the document."
-    )
+    partStudioFeatures: list[dict] = Field(..., description="A list of part studio features in the document.")
 
-    document: Document | None = Field(
-        None, description="The document associated with the assembly."
-    )
+    document: Document | None = Field(None, description="The document associated with the assembly.")
     name: str | None = Field(None, description="The name of the assembly.")
 
 

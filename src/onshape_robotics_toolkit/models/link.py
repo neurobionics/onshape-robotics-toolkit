@@ -110,9 +110,7 @@ class Origin:
     xyz: tuple[float, float, float]
     rpy: tuple[float, float, float]
 
-    def transform(
-        self, matrix: np.matrix, inplace: bool = False
-    ) -> Union["Origin", None]:
+    def transform(self, matrix: np.matrix, inplace: bool = False) -> Union["Origin", None]:
         """
         Apply a transformation matrix to the origin.
 
@@ -408,9 +406,7 @@ class Inertia:
             <Element 'inertia' at 0x7f8b3c0b4c70>
         """
 
-        inertia = (
-            ET.Element("inertia") if root is None else ET.SubElement(root, "inertia")
-        )
+        inertia = ET.Element("inertia") if root is None else ET.SubElement(root, "inertia")
         inertia.set("ixx", format_number(self.ixx))
         inertia.set("iyy", format_number(self.iyy))
         inertia.set("izz", format_number(self.izz))
@@ -486,13 +482,11 @@ class Inertia:
         Returns:
             The inertia tensor as a 3x3 numpy array.
         """
-        return np.array(
-            [
-                [self.ixx, self.ixy, self.ixz],
-                [self.ixy, self.iyy, self.iyz],
-                [self.ixz, self.iyz, self.izz],
-            ]
-        )
+        return np.array([
+            [self.ixx, self.ixy, self.ixz],
+            [self.ixy, self.iyy, self.iyz],
+            [self.ixz, self.iyz, self.izz],
+        ])
 
 
 @dataclass
@@ -545,13 +539,9 @@ class Material:
             <Element 'material' at 0x7f8b3c0b4c70>
         """
 
-        material = (
-            ET.Element("material") if root is None else ET.SubElement(root, "material")
-        )
+        material = ET.Element("material") if root is None else ET.SubElement(root, "material")
         material.set("name", self.name)
-        ET.SubElement(
-            material, "color", rgba=" ".join(format_number(v) for v in self.color)
-        )
+        ET.SubElement(material, "color", rgba=" ".join(format_number(v) for v in self.color))
         return material
 
     def to_mjcf(self, root: ET.Element) -> None:
@@ -569,11 +559,7 @@ class Material:
             >>> material.to_mjcf()
             <Element 'material' at 0x7f8b3c0b4c70>
         """
-        geom = (
-            root
-            if root is not None and root.tag == "geom"
-            else ET.SubElement(root, "geom")
-        )
+        geom = root if root is not None and root.tag == "geom" else ET.SubElement(root, "geom")
         geom.set("rgba", " ".join(format_number(v) for v in self.color))
 
     @classmethod
@@ -670,9 +656,7 @@ class InertialLink:
             >>> inertial.to_xml()
             <Element 'inertial' at 0x...>
         """
-        inertial = (
-            ET.Element("inertial") if root is None else ET.SubElement(root, "inertial")
-        )
+        inertial = ET.Element("inertial") if root is None else ET.SubElement(root, "inertial")
         ET.SubElement(inertial, "mass", value=format_number(self.mass))
         self.inertia.to_xml(inertial)
         self.origin.to_xml(inertial)
@@ -695,9 +679,7 @@ class InertialLink:
         self.origin.to_mjcf(inertial)
         self.inertia.to_mjcf(inertial)
 
-    def transform(
-        self, tf_matrix: np.matrix, inplace: bool = False
-    ) -> Union["InertialLink", None]:
+    def transform(self, tf_matrix: np.matrix, inplace: bool = False) -> Union["InertialLink", None]:
         """
         Apply a transformation matrix to the Inertial Properties of the a link.
 
@@ -732,9 +714,7 @@ class InertialLink:
         I_rot = R @ inertia_matrix @ R.T
 
         # Compute the parallel axis theorem adjustment
-        parallel_axis_adjustment = self.mass * (
-            np.dot(p, p) * np.eye(3) - np.outer(p, p)
-        )
+        parallel_axis_adjustment = self.mass * (np.dot(p, p) * np.eye(3) - np.outer(p, p))
 
         # Final transformed inertia matrix
         I_transformed = I_rot + parallel_axis_adjustment
@@ -763,9 +743,7 @@ class InertialLink:
         else:
             new_InertialLink = InertialLink(
                 mass=self.mass,
-                inertia=Inertia(
-                    ixx_prime, iyy_prime, izz_prime, ixy_prime, ixz_prime, iyz_prime
-                ),
+                inertia=Inertia(ixx_prime, iyy_prime, izz_prime, ixy_prime, ixz_prime, iyz_prime),
                 origin=Origin_prime,
             )
             return new_InertialLink
@@ -789,9 +767,7 @@ class InertialLink:
         mass = float(xml.find("mass").get("value"))
 
         inertia_element = xml.find("inertia")
-        inertia = (
-            Inertia.from_xml(inertia_element) if inertia_element is not None else None
-        )
+        inertia = Inertia.from_xml(inertia_element) if inertia_element is not None else None
 
         origin_element = xml.find("origin")
         origin = Origin.from_xml(origin_element) if origin_element is not None else None
@@ -963,18 +939,10 @@ class VisualLink:
         origin = Origin.from_xml(origin_element) if origin_element is not None else None
 
         geometry_element = xml.find("geometry")
-        geometry = (
-            set_geometry_from_xml(geometry_element)
-            if geometry_element is not None
-            else None
-        )
+        geometry = set_geometry_from_xml(geometry_element) if geometry_element is not None else None
 
         material_element = xml.find("material")
-        material = (
-            Material.from_xml(material_element)
-            if material_element is not None
-            else None
-        )
+        material = Material.from_xml(material_element) if material_element is not None else None
         return cls(name=name, origin=origin, geometry=geometry, material=material)
 
 
@@ -1050,11 +1018,7 @@ class CollisionLink:
             >>> collision.to_xml()
             <Element 'collision' at 0x7f8b3c0b4c70>
         """
-        collision = (
-            ET.Element("collision")
-            if root is None
-            else ET.SubElement(root, "collision")
-        )
+        collision = ET.Element("collision") if root is None else ET.SubElement(root, "collision")
         if self.name:
             collision.set("name", self.name)
         self.origin.to_xml(collision)
@@ -1126,11 +1090,7 @@ class CollisionLink:
         origin = Origin.from_xml(origin_element) if origin_element is not None else None
 
         geometry_element = xml.find("geometry")
-        geometry = (
-            set_geometry_from_xml(geometry_element)
-            if geometry_element is not None
-            else None
-        )
+        geometry = set_geometry_from_xml(geometry_element) if geometry_element is not None else None
 
         return cls(name=name, origin=origin, geometry=geometry)
 
@@ -1270,23 +1230,13 @@ class Link:
         name = xml.get("name")
 
         visual_element = xml.find("visual")
-        visual = (
-            VisualLink.from_xml(visual_element) if visual_element is not None else None
-        )
+        visual = VisualLink.from_xml(visual_element) if visual_element is not None else None
 
         collision_element = xml.find("collision")
-        collision = (
-            CollisionLink.from_xml(collision_element)
-            if collision_element is not None
-            else None
-        )
+        collision = CollisionLink.from_xml(collision_element) if collision_element is not None else None
 
         inertial_element = xml.find("inertial")
-        inertial = (
-            InertialLink.from_xml(inertial_element)
-            if inertial_element is not None
-            else None
-        )
+        inertial = InertialLink.from_xml(inertial_element) if inertial_element is not None else None
 
         return cls(name=name, visual=visual, collision=collision, inertial=inertial)
 

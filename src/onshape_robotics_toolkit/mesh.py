@@ -9,9 +9,7 @@ import numpy as np
 from stl.mesh import Mesh
 
 
-def transform_vectors(
-    vectors: np.ndarray, rotation: np.ndarray, translation: np.ndarray
-) -> np.ndarray:
+def transform_vectors(vectors: np.ndarray, rotation: np.ndarray, translation: np.ndarray) -> np.ndarray:
     """
     Apply a transformation matrix to a set of vectors.
 
@@ -58,9 +56,7 @@ def transform_mesh(mesh: Mesh, transform: np.ndarray) -> Mesh:
     return mesh
 
 
-def transform_inertia_matrix(
-    inertia_matrix: np.matrix, rotation: np.matrix
-) -> np.matrix:
+def transform_inertia_matrix(inertia_matrix: np.matrix, rotation: np.matrix) -> np.matrix:
     """
     Transform an inertia matrix
 

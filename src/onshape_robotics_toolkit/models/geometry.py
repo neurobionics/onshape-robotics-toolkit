@@ -100,12 +100,8 @@ class BoxGeometry(BaseGeometry):
             >>> box.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = (
-            ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
-        )
-        ET.SubElement(
-            geometry, "box", size=" ".join(format_number(v) for v in self.size)
-        )
+        geometry = ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
+        ET.SubElement(geometry, "box", size=" ".join(format_number(v) for v in self.size))
         return geometry
 
     def to_mjcf(self, root: ET.Element) -> None:
@@ -188,9 +184,7 @@ class CylinderGeometry(BaseGeometry):
             >>> cylinder.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = (
-            ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
-        )
+        geometry = ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
         ET.SubElement(
             geometry,
             "cylinder",
@@ -214,11 +208,7 @@ class CylinderGeometry(BaseGeometry):
             >>> cylinder.to_mjcf()
             <Element 'geom' at 0x7f8b3c0b4c70>
         """
-        geom = (
-            root
-            if root is not None and root.tag == "geom"
-            else ET.SubElement(root, "geom")
-        )
+        geom = root if root is not None and root.tag == "geom" else ET.SubElement(root, "geom")
         geom.set("type", GeometryType.CYLINDER)
         geom.set("size", f"{format_number(self.radius)} {format_number(self.length)}")
 
@@ -282,9 +272,7 @@ class SphereGeometry(BaseGeometry):
             >>> sphere.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = (
-            ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
-        )
+        geometry = ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
         ET.SubElement(geometry, "sphere", radius=format_number(self.radius))
         return geometry
 
@@ -303,11 +291,7 @@ class SphereGeometry(BaseGeometry):
             >>> sphere.to_mjcf()
             <Element 'geom' at 0x7f8b3c0b4c70>
         """
-        geom = (
-            root
-            if root is not None and root.tag == "geom"
-            else ET.SubElement(root, "geom")
-        )
+        geom = root if root is not None and root.tag == "geom" else ET.SubElement(root, "geom")
         geom.set("type", GeometryType.SPHERE)
         geom.set("size", format_number(self.radius))
 
@@ -370,9 +354,7 @@ class MeshGeometry(BaseGeometry):
             >>> mesh.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = (
-            ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
-        )
+        geometry = ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
         ET.SubElement(geometry, "mesh", filename=self.filename)
         return geometry
 
@@ -391,11 +373,7 @@ class MeshGeometry(BaseGeometry):
             >>> mesh.to_mjcf()
             <Element 'geom' at 0x7f8b3c0b4c70>
         """
-        geom = (
-            root
-            if root is not None and root.tag == "geom"
-            else ET.SubElement(root, "geom")
-        )
+        geom = root if root is not None and root.tag == "geom" else ET.SubElement(root, "geom")
         geom.set("type", GeometryType.MESH)
         geom.set("mesh", self.mesh_name)
 

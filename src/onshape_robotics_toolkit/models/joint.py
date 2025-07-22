@@ -228,9 +228,7 @@ class JointDynamics:
             <Element 'dynamics' at 0x7f8b3c0b4c70>
         """
 
-        joint = (
-            ET.Element("dynamics") if root is None else ET.SubElement(root, "dynamics")
-        )
+        joint = ET.Element("dynamics") if root is None else ET.SubElement(root, "dynamics")
         joint.set("damping", format_number(self.damping))
         joint.set("friction", format_number(self.friction))
         return joint
@@ -308,9 +306,7 @@ class BaseJoint(ABC):
             root: The root element to append the joint to.
         """
 
-        joint = ET.SubElement(
-            root, "joint", name=self.name, type=MJCF_JOINT_MAP[self.joint_type]
-        )
+        joint = ET.SubElement(root, "joint", name=self.name, type=MJCF_JOINT_MAP[self.joint_type])
         joint.set("pos", " ".join(map(str, self.origin.xyz)))
 
     @property
@@ -473,16 +469,12 @@ class RevoluteJoint(BaseJoint):
             root: The root element to append the revolute joint to.
         """
 
-        joint = ET.SubElement(
-            root, "joint", name=self.name, type=MJCF_JOINT_MAP[self.joint_type]
-        )
+        joint = ET.SubElement(root, "joint", name=self.name, type=MJCF_JOINT_MAP[self.joint_type])
         joint.set("pos", " ".join(map(str, self.origin.xyz)))
 
         self.axis.to_mjcf(joint)
         if self.limits:
-            joint.set(
-                "range", " ".join(map(str, [self.limits.lower, self.limits.upper]))
-            )
+            joint.set("range", " ".join(map(str, [self.limits.lower, self.limits.upper])))
 
         if self.dynamics:
             joint.set("damping", str(self.dynamics.damping))
@@ -556,9 +548,7 @@ class RevoluteJoint(BaseJoint):
 
         # Handle mimic
         mimic_element = element.find("mimic")
-        mimic = (
-            JointMimic.from_xml(mimic_element) if mimic_element is not None else None
-        )
+        mimic = JointMimic.from_xml(mimic_element) if mimic_element is not None else None
 
         return cls(
             name=name,
@@ -683,9 +673,7 @@ class ContinuousJoint(BaseJoint):
 
         # Handle mimic
         mimic_element = element.find("mimic")
-        mimic = (
-            JointMimic.from_xml(mimic_element) if mimic_element is not None else None
-        )
+        mimic = JointMimic.from_xml(mimic_element) if mimic_element is not None else None
 
         return cls(name, parent, child, origin, mimic)
 
@@ -848,9 +836,7 @@ class PrismaticJoint(BaseJoint):
             dynamics = None
 
         mimic_element = element.find("mimic")
-        mimic = (
-            JointMimic.from_xml(mimic_element) if mimic_element is not None else None
-        )
+        mimic = JointMimic.from_xml(mimic_element) if mimic_element is not None else None
 
         return cls(name, parent, child, origin, limits, axis, dynamics, mimic)
 
@@ -1052,9 +1038,7 @@ class FloatingJoint(BaseJoint):
         origin = Origin.from_xml(element.find("origin"))
 
         mimic_element = element.find("mimic")
-        mimic = (
-            JointMimic.from_xml(mimic_element) if mimic_element is not None else None
-        )
+        mimic = JointMimic.from_xml(mimic_element) if mimic_element is not None else None
 
         return cls(name, parent, child, origin, mimic)
 
@@ -1198,9 +1182,7 @@ class PlanarJoint(BaseJoint):
         axis = Axis.from_xml(element.find("axis"))
 
         mimic_element = element.find("mimic")
-        mimic = (
-            JointMimic.from_xml(mimic_element) if mimic_element is not None else None
-        )
+        mimic = JointMimic.from_xml(mimic_element) if mimic_element is not None else None
 
         return cls(name, parent, child, origin, limits, axis, mimic)
 

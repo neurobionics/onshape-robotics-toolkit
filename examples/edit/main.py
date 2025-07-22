@@ -36,16 +36,10 @@ if __name__ == "__main__":
     subassemblies, rigid_subassemblies = get_subassemblies(assembly, client, instances)
     parts = get_parts(assembly, rigid_subassemblies, client, instances)
 
-    mates, relations = get_mates_and_relations(
-        assembly, subassemblies, rigid_subassemblies, id_to_name_map, parts
-    )
+    mates, relations = get_mates_and_relations(assembly, subassemblies, rigid_subassemblies, id_to_name_map, parts)
 
-    graph, root_node = create_graph(
-        occurrences=occurrences, instances=instances, parts=parts, mates=mates
-    )
-    robot = get_robot(
-        assembly, graph, root_node, parts, mates, relations, client, "test"
-    )
+    graph, root_node = create_graph(occurrences=occurrences, instances=instances, parts=parts, mates=mates)
+    robot = get_robot(assembly, graph, root_node, parts, mates, relations, client, "test")
     robot.show_tree()
     robot.show_graph("bike.png")
     robot.save()

@@ -20,9 +20,7 @@ from onshape_robotics_toolkit.models.assembly import (
 from onshape_robotics_toolkit.parse import MATE_JOINER, SUBASSEMBLY_JOINER
 
 
-def plot_graph(
-    graph: nx.Graph | nx.DiGraph, file_name: str | None = None
-) -> None:
+def plot_graph(graph: nx.Graph | nx.DiGraph, file_name: str | None = None) -> None:
     """
     Display the graph using networkx and matplotlib, or save it as an image file.
 
@@ -79,9 +77,7 @@ def get_root_node(graph: nx.DiGraph) -> str:
     return next(nx.topological_sort(graph))
 
 
-def convert_to_digraph(
-    graph: nx.Graph, user_defined_root: str | None = None
-) -> nx.DiGraph:
+def convert_to_digraph(graph: nx.Graph, user_defined_root: str | None = None) -> nx.DiGraph:
     """
     Convert a graph to a directed graph and calculate the root node using closeness centrality.
 
@@ -99,9 +95,7 @@ def convert_to_digraph(
     """
 
     centrality = nx.closeness_centrality(graph)
-    root_node = (
-        user_defined_root if user_defined_root else max(centrality, key=centrality.get)
-    )
+    root_node = user_defined_root if user_defined_root else max(centrality, key=centrality.get)
 
     bfs_graph = nx.bfs_tree(graph, root_node)
     di_graph = nx.DiGraph(bfs_graph)
@@ -174,9 +168,7 @@ def create_graph(
     """
 
     graph = nx.Graph()
-    user_defined_root = add_nodes_to_graph(
-        graph, occurrences, instances, parts, use_user_defined_root
-    )
+    user_defined_root = add_nodes_to_graph(graph, occurrences, instances, parts, use_user_defined_root)
 
     if user_defined_root and user_defined_root.split(SUBASSEMBLY_JOINER)[0] in parts:
         # this means that the user defined root is a rigid subassembly
@@ -239,9 +231,7 @@ def add_nodes_to_graph(
     return user_defined_root
 
 
-def add_edges_to_graph(
-    graph: nx.Graph, mates: dict[str, MateFeatureData]
-) -> None:
+def add_edges_to_graph(graph: nx.Graph, mates: dict[str, MateFeatureData]) -> None:
     """
     Add edges to the graph.
 
@@ -278,11 +268,7 @@ def remove_unconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
         sub_graphs = list(nx.connected_components(graph))
         main_graph_nodes = max(sub_graphs, key=len)
         main_graph = graph.subgraph(main_graph_nodes).copy()
-        LOGGER.warning(
-            f"Reduced graph nodes from {len(graph.nodes)} to {len(main_graph.nodes)}"
-        )
-        LOGGER.warning(
-            f"Reduced graph edges from {len(graph.edges)} to {len(main_graph.edges)}"
-        )
+        LOGGER.warning(f"Reduced graph nodes from {len(graph.nodes)} to {len(main_graph.nodes)}")
+        LOGGER.warning(f"Reduced graph edges from {len(graph.edges)} to {len(main_graph.edges)}")
         return main_graph
     return graph
