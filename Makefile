@@ -26,7 +26,7 @@ build: clean-build ## Build wheel file using uv
 
 .PHONY: clean-build
 clean-build: ## clean build artifacts
-	@if exist dist rmdir /s /q dist
+	@rm -rf dist
 
 .PHONY: publish
 publish: ## publish a release to pypi.
