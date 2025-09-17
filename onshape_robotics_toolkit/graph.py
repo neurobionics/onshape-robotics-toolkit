@@ -252,6 +252,9 @@ def add_edges_to_graph(graph: nx.Graph, mates: dict[str, Union[MateFeatureData]]
             )
         except KeyError:
             LOGGER.warning(f"Mate {mate} not found")
+        except ValueError:
+            LOGGER.warning(f"Mate key: {mate} is not in the correct format")
+            exit(1)
 
 
 def remove_unconnected_subgraphs(graph: nx.Graph) -> nx.Graph:

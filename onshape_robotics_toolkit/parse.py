@@ -5,6 +5,7 @@ subassemblies, instances, and mates, and generate a hierarchical representation 
 """
 
 import asyncio
+import uuid
 from typing import Optional, Union
 
 import numpy as np
@@ -30,8 +31,10 @@ from onshape_robotics_toolkit.models.assembly import (
 from onshape_robotics_toolkit.models.document import WorkspaceType
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
-SUBASSEMBLY_JOINER = "_SUB_"
-MATE_JOINER = "_to_"
+SUBASSEMBLY_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
+MATE_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
+
+LOGGER.info(f"Generated joiners - SUBASSEMBLY: {SUBASSEMBLY_JOINER}, MATE: {MATE_JOINER}")
 
 CHILD = 0
 PARENT = 1
