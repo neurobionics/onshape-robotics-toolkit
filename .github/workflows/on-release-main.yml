@@ -17,9 +17,7 @@ jobs:
       - name: Build and publish
         run: |
           source .venv/bin/activate
-          make build-and-publish
-        env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+          make build-and-publish PYPI_TOKEN=${{ secrets.PYPI_TOKEN }}
 
   deploy-docs:
     needs: publish
