@@ -14,18 +14,12 @@ jobs:
       - name: Set up the environment
         uses: ./.github/actions/setup-uv-env
 
-      - name: Export tag
-        id: vars
-        run: echo tag=${GITHUB_REF#refs/*/} >> $GITHUB_OUTPUT
-
       - name: Build and publish
         run: |
           source .venv/bin/activate
-          make version VERSION=$RELEASE_VERSION
           make build-and-publish
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-          RELEASE_VERSION: ${{ steps.vars.outputs.tag }}
 
   deploy-docs:
     needs: publish
