@@ -30,7 +30,7 @@ clean-build: ## clean build artifacts
 
 .PHONY: version
 version: ## Update the project version
-	@uv version $VERSION
+	@uv version $(VERSION)
 
 .PHONY: publish
 publish: ## publish a release to pypi.
