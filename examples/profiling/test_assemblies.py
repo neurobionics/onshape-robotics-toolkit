@@ -24,38 +24,30 @@ class TestAssembly:
 # NOTE: Replace these URLs with actual assemblies you have access to
 TEST_ASSEMBLIES: list[TestAssembly] = [
     TestAssembly(
-        name="quadruped_current",
+        name="toy_quadruped",
         url="https://cad.onshape.com/documents/cf6b852d2c88d661ac2e17e8/w/c842455c29cc878dc48bdc68/e/b5e293d409dd0b88596181ef",
-        description="Current quadruped robot from main.py",
+        description="Toy Quadruped Robot",
         expected_complexity="medium",
         timeout_seconds=300,
     ),
-    # Add more test assemblies here as you identify them
-    # TestAssembly(
-    #     name="simple_2dof_arm",
-    #     url="https://cad.onshape.com/documents/.../simple_arm",
-    #     description="2-DOF robotic arm for baseline testing",
-    #     expected_complexity="simple"
-    # ),
-    # TestAssembly(
-    #     name="6dof_manipulator",
-    #     url="https://cad.onshape.com/documents/.../6dof_arm",
-    #     description="6-DOF industrial manipulator",
-    #     expected_complexity="medium"
-    # ),
-    # TestAssembly(
-    #     name="humanoid_robot",
-    #     url="https://cad.onshape.com/documents/.../humanoid",
-    #     description="Full humanoid robot with sensors",
-    #     expected_complexity="complex"
-    # ),
-    # TestAssembly(
-    #     name="large_assembly",
-    #     url="https://cad.onshape.com/documents/.../large",
-    #     description="Very large assembly for stress testing",
-    #     expected_complexity="large",
-    #     timeout_seconds=600  # 10 minutes for large assemblies
-    # ),
+    TestAssembly(
+        name="ballbot",
+        url="https://cad.onshape.com/documents/01d73bbd0f243938a11fbb7c/w/20c6ecfe7711055ba2420fdc/e/833959fcd6ba649195a1e94c",
+        description="Ball-balancing Robot",
+        expected_complexity="simple",
+    ),
+    TestAssembly(
+        name="industrial_quadruped",
+        url="https://cad.onshape.com/documents/cb50eea81bddd3a027f4a8b5/w/d547a9baba059204ce4cab33/e/ab953b9b360f5da522daca82",
+        description="Industrial Quadruped Robot",
+        expected_complexity="complex",
+    ),
+    TestAssembly(
+        name="toy_bike",
+        url="https://cad.onshape.com/documents/a1c1addf75444f54b504f25c/w/0d17b8ebb2a4c76be9fff3c7/e/d8f8f1d9dbf9634a39aa7f5b",
+        description="Toy Bike",
+        expected_complexity="simple",
+    ),
 ]
 
 

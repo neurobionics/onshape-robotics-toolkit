@@ -1022,10 +1022,20 @@ def get_robot(
     for parent, child in graph.edges:
         mate_key = f"{parent}{MATE_JOINER}{child}"
         LOGGER.info(f"Processing edge: {parent} -> {child}")
+
+        # Check if parent transform exists
+        if parent not in stl_to_link_tf_map:
+            LOGGER.warning(f"Parent {parent} transform not found in stl_to_link_tf_map. Skipping edge.")
+            continue
         parent_tf = stl_to_link_tf_map[parent]
 
         if parent not in parts or child not in parts:
             LOGGER.warning(f"Part {parent} or {child} not found in parts dictionary. Skipping.")
+            continue
+
+        # Check if mate key exists in topological_mates
+        if mate_key not in topological_mates:
+            LOGGER.warning(f"Mate key {mate_key} not found in topological_mates. Skipping edge.")
             continue
 
         joint_mimic = None
@@ -1042,24 +1052,29 @@ def get_robot(
                 offset=0.0,
             )
 
-        joint_list, link_list = get_robot_joint(
-            parent,
-            child,
-            topological_mates[mate_key],
-            parent_tf,
-            joint_mimic,
-            is_rigid_assembly=parts[parent].isRigidAssembly,
-        )
+        try:
+            joint_list, link_list = get_robot_joint(
+                parent,
+                child,
+                topological_mates[mate_key],
+                parent_tf,
+                joint_mimic,
+                is_rigid_assembly=parts[parent].isRigidAssembly,
+            )
 
-        link, stl_to_link_tf, asset = get_robot_link(
-            child,
-            parts[child],
-            assembly.document.wid,
-            client,
-            topological_mates[mate_key],
-        )
-        stl_to_link_tf_map[child] = stl_to_link_tf
-        assets_map[child] = asset
+            link, stl_to_link_tf, asset = get_robot_link(
+                child,
+                parts[child],
+                assembly.document.wid,
+                client,
+                topological_mates[mate_key],
+            )
+            stl_to_link_tf_map[child] = stl_to_link_tf
+            assets_map[child] = asset
+        except Exception as e:
+            LOGGER.error(f"Error processing joint/link for {parent} -> {child}: {e}")
+            LOGGER.warning(f"Skipping edge {parent} -> {child} due to processing error")
+            continue
 
         if child not in robot.graph:
             robot.add_link(link)

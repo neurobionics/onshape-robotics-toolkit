@@ -525,7 +525,7 @@ async def build_rigid_subassembly_occurrence_map(
     return occurrence_map
 
 
-async def process_features_async(  # noqa: C901
+async def process_features_async(
     features: list[AssemblyFeature],
     parts: dict[str, Part],
     id_to_name_map: dict[str, str],
@@ -564,32 +564,46 @@ async def process_features_async(  # noqa: C901
                 continue
 
             try:
-                child_occurrences = [
-                    id_to_name_map[path] for path in feature.featureData.matedEntities[CHILD].matedOccurrence
-                ]
-                parent_occurrences = [
-                    id_to_name_map[path] for path in feature.featureData.matedEntities[PARENT].matedOccurrence
-                ]
-            except KeyError as e:
-                LOGGER.warning(e)
-                LOGGER.warning(f"Key not found in {id_to_name_map.keys()}")
+                # Add defensive checks for matedOccurrence arrays
+                if not hasattr(feature.featureData.matedEntities[CHILD], "matedOccurrence") or not hasattr(
+                    feature.featureData.matedEntities[PARENT], "matedOccurrence"
+                ):
+                    LOGGER.warning(f"Mate feature missing matedOccurrence data: {feature.id}")
+                    continue
+
+                child_mated_occurrence = feature.featureData.matedEntities[CHILD].matedOccurrence
+                parent_mated_occurrence = feature.featureData.matedEntities[PARENT].matedOccurrence
+
+                if not child_mated_occurrence or not parent_mated_occurrence:
+                    LOGGER.warning(f"Empty matedOccurrence arrays in mate feature: {feature.id}")
+                    continue
+
+                child_occurrences = [id_to_name_map[path] for path in child_mated_occurrence]
+                parent_occurrences = [id_to_name_map[path] for path in parent_mated_occurrence]
+            except (KeyError, IndexError, AttributeError) as e:
+                LOGGER.warning(f"Error processing mate feature {feature.id}: {e}")
+                LOGGER.warning(f"Available keys: {list(id_to_name_map.keys())[:10]}...")  # Show first 10 keys
                 continue
 
             # Handle rigid subassemblies
-            if parent_occurrences[0] in rigid_subassemblies:
-                _occurrence = rigid_subassembly_occurrence_map[parent_occurrences[0]].get(parent_occurrences[1])
-                if _occurrence:
-                    parent_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
-                    parts[parent_occurrences[0]].rigidAssemblyToPartTF[parent_occurrences[1]] = parent_parentCS.part_tf
-                    feature.featureData.matedEntities[PARENT].parentCS = parent_parentCS
+            if len(parent_occurrences) > 0 and parent_occurrences[0] in rigid_subassemblies:
+                if len(parent_occurrences) > 1:
+                    _occurrence = rigid_subassembly_occurrence_map[parent_occurrences[0]].get(parent_occurrences[1])
+                    if _occurrence:
+                        parent_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
+                        parts[parent_occurrences[0]].rigidAssemblyToPartTF[parent_occurrences[1]] = (
+                            parent_parentCS.part_tf
+                        )
+                        feature.featureData.matedEntities[PARENT].parentCS = parent_parentCS
                 parent_occurrences = [parent_occurrences[0]]
 
-            if child_occurrences[0] in rigid_subassemblies:
-                _occurrence = rigid_subassembly_occurrence_map[child_occurrences[0]].get(child_occurrences[1])
-                if _occurrence:
-                    child_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
-                    parts[child_occurrences[0]].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
-                    feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
+            if len(child_occurrences) > 0 and child_occurrences[0] in rigid_subassemblies:
+                if len(child_occurrences) > 1:
+                    _occurrence = rigid_subassembly_occurrence_map[child_occurrences[0]].get(child_occurrences[1])
+                    if _occurrence:
+                        child_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
+                        parts[child_occurrences[0]].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
+                        feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
                 child_occurrences = [child_occurrences[0]]
 
             mates_map[
