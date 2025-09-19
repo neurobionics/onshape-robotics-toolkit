@@ -1102,13 +1102,44 @@ class AssemblyFeature(BaseModel):
     )
 
 
+class PatternType(str, Enum):
+    CIRCULAR = "CIRCULAR"
+    LINEAR = "LINEAR"
+    MIRROR = "MIRROR"
+
+
 class Pattern(BaseModel):
     """
     Represents a pattern feature within an assembly, defining repeated instances of parts or sub-assemblies.
+
+    JSON:
+        ```json
+            {
+                "seedToPatternInstances" : {
+                    "MZAZxYCFuiiBSyUyF" : [ "Iska+TckyjXBC+1xA", "I1QmePT4s7IvbpMFC" ]
+                },
+                "name" : "Circular pattern 1",
+                "suppressed" : false,
+                "id" : "MVJMTPg/7tNhLqnTy",
+                "type" : "CIRCULAR"
+            }
+        ```
+    Attributes:
+        seedToPatternInstances (dict[str, list[str]]): A mapping of seed instance IDs to their
+            corresponding pattern instance IDs.
+        name (str): The name of the pattern feature.
+        suppressed (bool): Indicates if the pattern feature is suppressed.
+        id (str): The unique identifier of the pattern feature.
+        type (PatternType): The type of the pattern (e.g., CIRCULAR, LINEAR).
     """
 
-    # TODO: Implement Pattern model
-    pass
+    seedToPatternInstances: dict[str, list[str]] = Field(
+        ..., description="A mapping of seed instance IDs to their corresponding pattern instance IDs."
+    )
+    name: str = Field(..., description="The name of the pattern feature.")
+    suppressed: bool = Field(..., description="Indicates if the pattern feature is suppressed.")
+    id: str = Field(..., description="The unique identifier of the pattern feature.")
+    type: PatternType = Field(..., description="The type of the pattern (e.g., CIRCULAR, LINEAR).")
 
 
 class SubAssembly(IDBase):

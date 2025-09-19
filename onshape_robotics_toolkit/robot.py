@@ -838,6 +838,7 @@ class Robot:
         max_depth: int = 0,
         use_user_defined_root: bool = False,
         robot_type: RobotType = RobotType.URDF,
+        log_assembly: bool = False,
     ) -> "Robot":
         """
         Load a robot model from an Onshape CAD assembly.
@@ -862,7 +863,7 @@ class Robot:
             wtype=document.wtype,
             wid=document.wid,
             eid=document.eid,
-            log_response=False,
+            log_response=log_assembly,
             with_meta_data=True,
         )
 
