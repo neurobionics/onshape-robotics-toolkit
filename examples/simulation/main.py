@@ -287,7 +287,7 @@ def stop_when_target_reached(study, trial):
         study.stop()
 
 
-def find_best_design_variables(trial):  # noqa: C901
+def find_best_design_variables(trial):
     # reset global PID error values
     wheel_diameter = trial.suggest_float("wheel_diameter", WHEEL_DIAMETER_BOUNDS[0], WHEEL_DIAMETER_BOUNDS[1])
     spacer_height = trial.suggest_float("spacer_height", SPACER_HEIGHT_BOUNDS[0], SPACER_HEIGHT_BOUNDS[1])

@@ -117,6 +117,8 @@ ignore = [
     "E731",
     "TRY003",
     "SIM115",
+    "C901",
+    "TRY300",
 ]
 
 [tool.ruff.format]

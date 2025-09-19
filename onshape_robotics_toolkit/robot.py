@@ -454,7 +454,7 @@ class Robot:
         """
         return ET.tostring(element, pretty_print=True, encoding="unicode")
 
-    def to_mjcf(self) -> str:  # noqa: C901
+    def to_mjcf(self) -> str:
         """Generate MJCF XML from the graph.
 
         Returns:
@@ -779,7 +779,7 @@ class Robot:
         LOGGER.info(f"Custom element added to parent '{parent_name}'.")
 
     @classmethod
-    def from_urdf(cls, file_name: str, robot_type: RobotType) -> "Robot":  # noqa: C901
+    def from_urdf(cls, file_name: str, robot_type: RobotType) -> "Robot":
         """Load a robot model from a URDF file.
 
         Args:

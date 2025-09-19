@@ -19,11 +19,13 @@ from onshape_robotics_toolkit.models.assembly import (
     AssemblyInstance,
     InstanceType,
     MatedCS,
+    MatedEntity,
     MateFeatureData,
     MateRelationFeatureData,
     Occurrence,
     Part,
     PartInstance,
+    Pattern,
     RelationType,
     RootAssembly,
     SubAssembly,
@@ -510,19 +512,32 @@ async def build_rigid_subassembly_occurrence_map(
     return occurrence_map
 
 
-async def process_features_async(  # noqa: C901
+async def process_features_async(
     features: list[AssemblyFeature],
+    patterns: list[Pattern],
     parts: dict[str, Part],
     id_to_name_map: dict[str, str],
     rigid_subassembly_occurrence_map: dict[str, dict[str, Occurrence]],
     rigid_subassemblies: dict[str, RootAssembly],
     subassembly_prefix: Optional[str],
+    occurrences: dict[str, Occurrence],
 ) -> tuple[dict[str, MateFeatureData], dict[str, MateRelationFeatureData]]:
     """
     Process assembly features asynchronously.
 
     Args:
         features: The assembly features to process.
+        patterns: The assembly patterns to process.
+        parts: A dictionary mapping instance IDs to their corresponding parts.
+        id_to_name_map: A dictionary mapping instance IDs to their sanitized names.
+        rigid_subassembly_occurrence_map: A dictionary mapping occurrence paths to their corresponding occurrences.
+        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
+        subassembly_prefix: The prefix for the subassembly.
+        occurrences: Dictionary mapping instance IDs to their occurrences with transforms.
+
+    Args:
+        features: The assembly features to process.
+        patterns: The assembly patterns to process.
         parts: A dictionary mapping instance IDs to their corresponding parts.
         id_to_name_map: A dictionary mapping instance IDs to their sanitized names.
         rigid_subassembly_occurrence_map: A dictionary mapping occurrence paths to their corresponding occurrences.
@@ -593,7 +608,285 @@ async def process_features_async(  # noqa: C901
 
             relations_map[child_joint_id] = feature.featureData
 
+    # Process patterns to expand mates for all pattern instances
+    pattern_expanded_mates = await _process_assembly_patterns_async(
+        patterns=patterns,
+        features=features,
+        parts=parts,
+        id_to_name_map=id_to_name_map,
+        rigid_subassembly_occurrence_map=rigid_subassembly_occurrence_map,
+        rigid_subassemblies=rigid_subassemblies,
+        subassembly_prefix=subassembly_prefix,
+        occurrences=occurrences,
+    )
+    mates_map.update(pattern_expanded_mates)
+
     return mates_map, relations_map
+
+
+async def _process_assembly_patterns_async(
+    patterns: list[Pattern],
+    features: list[AssemblyFeature],
+    parts: dict[str, Part],
+    id_to_name_map: dict[str, str],
+    rigid_subassembly_occurrence_map: dict[str, dict[str, Occurrence]],
+    rigid_subassemblies: dict[str, RootAssembly],
+    subassembly_prefix: Optional[str],
+    occurrences: dict[str, Occurrence],
+) -> dict[str, MateFeatureData]:
+    """
+    Process assembly patterns to expand mates for all pattern instances.
+
+    Args:
+        patterns: The assembly patterns to process.
+        features: The assembly features to process.
+        parts: A dictionary mapping instance IDs to their corresponding parts.
+        id_to_name_map: A dictionary mapping instance IDs to their sanitized names.
+        rigid_subassembly_occurrence_map: A dictionary mapping occurrence paths to their corresponding occurrences.
+        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
+        subassembly_prefix: The prefix for the subassembly.
+        occurrences: Dictionary mapping instance IDs to their occurrences with transforms.
+
+    Returns:
+        A dictionary mapping occurrence paths to their corresponding pattern-expanded mates.
+    """
+    pattern_expanded_mates: dict[str, MateFeatureData] = {}
+
+    if not patterns:
+        return pattern_expanded_mates
+
+    # Create a mapping of seed instance IDs to their pattern instances for quick lookup
+    seed_to_pattern_map: dict[str, list[str]] = {}
+    for pattern in patterns:
+        if pattern.suppressed:
+            continue
+        for seed_id, pattern_instances in pattern.seedToPatternInstances.items():
+            seed_to_pattern_map[seed_id] = pattern_instances
+
+    # Process each mate feature to see if it involves a seed instance
+    for feature in features:
+        if feature.suppressed or feature.featureType != AssemblyFeatureType.MATE:
+            continue
+
+        if len(feature.featureData.matedEntities) < 2:
+            continue
+
+        try:
+            child_occurrences = feature.featureData.matedEntities[CHILD].matedOccurrence
+            parent_occurrences = feature.featureData.matedEntities[PARENT].matedOccurrence
+        except Exception as e:
+            LOGGER.warning(f"Failed to extract occurrences from mate feature {feature.id}: {e}")
+            continue
+
+        # Check if either the child or parent is a seed instance in any pattern
+        child_seed_id = child_occurrences[0] if child_occurrences else None
+        parent_seed_id = parent_occurrences[0] if parent_occurrences else None
+
+        child_pattern_instances = seed_to_pattern_map.get(child_seed_id, [])
+        parent_pattern_instances = seed_to_pattern_map.get(parent_seed_id, [])
+
+        # If neither child nor parent is a seed instance, skip this mate
+        if not child_pattern_instances and not parent_pattern_instances:
+            continue
+
+        # Generate expanded mates for pattern instances
+        if child_pattern_instances and not parent_pattern_instances:
+            # Child is patterned, parent is not
+            for pattern_instance_id in child_pattern_instances:
+                if pattern_instance_id not in id_to_name_map:
+                    continue
+                expanded_mate = await _create_pattern_mate_async(
+                    original_feature=feature,
+                    child_instance_id=pattern_instance_id,
+                    parent_instance_id=parent_seed_id,
+                    parts=parts,
+                    id_to_name_map=id_to_name_map,
+                    rigid_subassembly_occurrence_map=rigid_subassembly_occurrence_map,
+                    rigid_subassemblies=rigid_subassemblies,
+                    subassembly_prefix=subassembly_prefix,
+                    occurrences=occurrences,
+                )
+                if expanded_mate:
+                    pattern_expanded_mates.update(expanded_mate)
+
+        elif parent_pattern_instances and not child_pattern_instances:
+            # Parent is patterned, child is not
+            for pattern_instance_id in parent_pattern_instances:
+                if pattern_instance_id not in id_to_name_map:
+                    continue
+                expanded_mate = await _create_pattern_mate_async(
+                    original_feature=feature,
+                    child_instance_id=child_seed_id,
+                    parent_instance_id=pattern_instance_id,
+                    parts=parts,
+                    id_to_name_map=id_to_name_map,
+                    rigid_subassembly_occurrence_map=rigid_subassembly_occurrence_map,
+                    rigid_subassemblies=rigid_subassemblies,
+                    subassembly_prefix=subassembly_prefix,
+                    occurrences=occurrences,
+                )
+                if expanded_mate:
+                    pattern_expanded_mates.update(expanded_mate)
+
+        elif child_pattern_instances and parent_pattern_instances:
+            # Both child and parent are patterned (same pattern)
+            # Match corresponding pattern instances (1:1 mapping)
+            min_length = min(len(child_pattern_instances), len(parent_pattern_instances))
+            for i in range(min_length):
+                child_pattern_id = child_pattern_instances[i]
+                parent_pattern_id = parent_pattern_instances[i]
+
+                if child_pattern_id not in id_to_name_map or parent_pattern_id not in id_to_name_map:
+                    continue
+
+                expanded_mate = await _create_pattern_mate_async(
+                    original_feature=feature,
+                    child_instance_id=child_pattern_id,
+                    parent_instance_id=parent_pattern_id,
+                    parts=parts,
+                    id_to_name_map=id_to_name_map,
+                    rigid_subassembly_occurrence_map=rigid_subassembly_occurrence_map,
+                    rigid_subassemblies=rigid_subassemblies,
+                    subassembly_prefix=subassembly_prefix,
+                    occurrences=occurrences,
+                )
+                if expanded_mate:
+                    pattern_expanded_mates.update(expanded_mate)
+
+    return pattern_expanded_mates
+
+
+async def _create_pattern_mate_async(
+    original_feature: AssemblyFeature,
+    child_instance_id: str,
+    parent_instance_id: str,
+    parts: dict[str, Part],
+    id_to_name_map: dict[str, str],
+    rigid_subassembly_occurrence_map: dict[str, dict[str, Occurrence]],
+    rigid_subassemblies: dict[str, RootAssembly],
+    subassembly_prefix: Optional[str],
+    occurrences: dict[str, Occurrence],
+) -> Optional[dict[str, MateFeatureData]]:
+    """
+    Create a pattern-expanded mate from an original mate feature.
+
+    Args:
+        original_feature: The original mate feature to expand.
+        child_instance_id: The instance ID of the child in the pattern.
+        parent_instance_id: The instance ID of the parent in the pattern.
+        parts: A dictionary mapping instance IDs to their corresponding parts.
+        id_to_name_map: A dictionary mapping instance IDs to their sanitized names.
+        rigid_subassembly_occurrence_map: A dictionary mapping occurrence paths to their corresponding occurrences.
+        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
+        subassembly_prefix: The prefix for the subassembly.
+        occurrences: Dictionary mapping instance IDs to their occurrences with transforms.
+
+    Returns:
+        A dictionary containing the expanded mate, or None if creation failed.
+    """
+    try:
+        # Get the original seed instance IDs
+        original_child_id = original_feature.featureData.matedEntities[CHILD].matedOccurrence[0]
+        original_parent_id = original_feature.featureData.matedEntities[PARENT].matedOccurrence[0]
+
+        # Get the original mate coordinate systems
+        child_mated_cs = original_feature.featureData.matedEntities[CHILD].matedCS
+        parent_mated_cs = original_feature.featureData.matedEntities[PARENT].matedCS
+
+        # Transform coordinate systems based on pattern transformations
+        if (
+            child_instance_id != original_child_id
+            and child_instance_id in occurrences
+            and original_child_id in occurrences
+        ):
+            # Calculate relative transformation from seed to pattern instance
+            seed_transform = np.array(occurrences[original_child_id].transform).reshape(4, 4)
+            pattern_transform = np.array(occurrences[child_instance_id].transform).reshape(4, 4)
+            relative_transform = pattern_transform @ np.linalg.inv(seed_transform)
+
+            # Apply transformation to child mated CS
+            child_cs_matrix = child_mated_cs.part_to_mate_tf
+            transformed_cs_matrix = relative_transform @ child_cs_matrix
+            child_mated_cs = MatedCS.from_tf(transformed_cs_matrix)
+
+        if (
+            parent_instance_id != original_parent_id
+            and parent_instance_id in occurrences
+            and original_parent_id in occurrences
+        ):
+            # Calculate relative transformation from seed to pattern instance
+            seed_transform = np.array(occurrences[original_parent_id].transform).reshape(4, 4)
+            pattern_transform = np.array(occurrences[parent_instance_id].transform).reshape(4, 4)
+            relative_transform = pattern_transform @ np.linalg.inv(seed_transform)
+
+            # Apply transformation to parent mated CS
+            parent_cs_matrix = parent_mated_cs.part_to_mate_tf
+            transformed_cs_matrix = relative_transform @ parent_cs_matrix
+            parent_mated_cs = MatedCS.from_tf(transformed_cs_matrix)
+
+        # Create a copy of the original feature data with transformed coordinate systems
+        child_entity_kwargs = {
+            "matedOccurrence": [child_instance_id],
+            "matedCS": child_mated_cs,
+        }
+        if original_feature.featureData.matedEntities[CHILD].parentCS is not None:
+            child_entity_kwargs["parentCS"] = original_feature.featureData.matedEntities[CHILD].parentCS
+
+        parent_entity_kwargs = {
+            "matedOccurrence": [parent_instance_id],
+            "matedCS": parent_mated_cs,
+        }
+        if original_feature.featureData.matedEntities[PARENT].parentCS is not None:
+            parent_entity_kwargs["parentCS"] = original_feature.featureData.matedEntities[PARENT].parentCS
+
+        expanded_feature_data = MateFeatureData(
+            matedEntities=[
+                MatedEntity(**child_entity_kwargs),
+                MatedEntity(**parent_entity_kwargs),
+            ],
+            mateType=original_feature.featureData.mateType,
+            name=f"{original_feature.featureData.name}_pattern_{child_instance_id}_{parent_instance_id}",
+            id=f"{original_feature.id}_pattern_{child_instance_id}_{parent_instance_id}",
+        )
+
+        # Convert instance IDs to occurrence names
+        child_occurrences = [id_to_name_map[child_instance_id]]
+        parent_occurrences = [id_to_name_map[parent_instance_id]]
+
+        # Handle rigid subassemblies for child - replicate the logic from original process_features_async
+        original_child_occurrences = expanded_feature_data.matedEntities[CHILD].matedOccurrence
+        if len(original_child_occurrences) > 1 and child_occurrences[0] in rigid_subassemblies:
+            _occurrence = rigid_subassembly_occurrence_map[child_occurrences[0]].get(original_child_occurrences[1])
+            if _occurrence:
+                child_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
+                parts[child_occurrences[0]].rigidAssemblyToPartTF[original_child_occurrences[1]] = (
+                    child_parentCS.part_tf
+                )
+                expanded_feature_data.matedEntities[CHILD].parentCS = child_parentCS
+
+        # Handle rigid subassemblies for parent - replicate the logic from original process_features_async
+        original_parent_occurrences = expanded_feature_data.matedEntities[PARENT].matedOccurrence
+        if len(original_parent_occurrences) > 1 and parent_occurrences[0] in rigid_subassemblies:
+            _occurrence = rigid_subassembly_occurrence_map[parent_occurrences[0]].get(original_parent_occurrences[1])
+            if _occurrence:
+                parent_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
+                parts[parent_occurrences[0]].rigidAssemblyToPartTF[original_parent_occurrences[1]] = (
+                    parent_parentCS.part_tf
+                )
+                expanded_feature_data.matedEntities[PARENT].parentCS = parent_parentCS
+
+        # Create the mate occurrence key
+        mate_key = join_mate_occurrences(
+            parent=parent_occurrences,
+            child=child_occurrences,
+            prefix=subassembly_prefix,
+        )
+
+        return {mate_key: expanded_feature_data}
+
+    except Exception as e:
+        LOGGER.warning(f"Failed to create pattern mate for {child_instance_id}-{parent_instance_id}: {e}")
+        return None
 
 
 async def get_mates_and_relations_async(
@@ -622,18 +915,32 @@ async def get_mates_and_relations_async(
         rigid_subassemblies, id_to_name_map, parts
     )
 
+    # Build occurrences map from root assembly occurrences
+    occurrences: dict[str, Occurrence] = {
+        occurrence.path[0]: occurrence for occurrence in assembly.rootAssembly.occurrences
+    }
+
     mates_map, relations_map = await process_features_async(
         assembly.rootAssembly.features,
+        assembly.rootAssembly.patterns,
         parts,
         id_to_name_map,
         rigid_subassembly_occurrence_map,
         rigid_subassemblies,
         None,
+        occurrences,
     )
 
     for key, subassembly in subassemblies.items():
         sub_mates, sub_relations = await process_features_async(
-            subassembly.features, parts, id_to_name_map, rigid_subassembly_occurrence_map, rigid_subassemblies, key
+            subassembly.features,
+            subassembly.patterns,
+            parts,
+            id_to_name_map,
+            rigid_subassembly_occurrence_map,
+            rigid_subassemblies,
+            key,
+            occurrences,
         )
         mates_map.update(sub_mates)
         relations_map.update(sub_relations)
