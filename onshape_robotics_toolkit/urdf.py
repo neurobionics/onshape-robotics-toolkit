@@ -236,6 +236,7 @@ def get_robot_joint(
                 limits=JointLimits(
                     effort=1.0,
                     velocity=1.0,
+                    # TODO: add support for joint limits from Onshape
                     lower=-2 * np.pi,
                     upper=2 * np.pi,
                 ),
