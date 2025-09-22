@@ -575,15 +575,17 @@ async def process_features_async(
             child_occurrence = feature.featureData.matedEntities[CHILD].matedOccurrence[0]
             parent_occurrence = feature.featureData.matedEntities[PARENT].matedOccurrence[0]
 
-            # Check if child, parent, or both are in patterns
+            # Check if child or parent is in a pattern
             child_in_pattern = child_occurrence in seed_to_pattern_map
             parent_in_pattern = parent_occurrence in seed_to_pattern_map
 
             if child_in_pattern and parent_in_pattern:
-                # Both entities are in patterns - store mate with both seed info
-                mate_key = f"{child_occurrence}:{parent_occurrence}"
-                seed_to_mate_map[mate_key] = feature.featureData
-                seed_to_mate_occurrence_map[mate_key] = "BOTH"
+                # Both entities in patterns is unrealistic in practice - log warning and skip
+                LOGGER.warning(
+                    f"Mate {feature.featureData.name} has both child and parent in patterns. "
+                    f"This scenario is not supported. Skipping mate."
+                )
+                continue
             elif child_in_pattern:
                 seed_to_mate_map[child_occurrence] = feature.featureData
                 seed_to_mate_occurrence_map[child_occurrence] = CHILD
@@ -651,9 +653,6 @@ async def process_features_async(
         occurrences=occurrences,
     )
     mates_map.update(pattern_expanded_mates)
-
-    print(mates_map)
-
     return mates_map, relations_map
 
 
@@ -694,67 +693,44 @@ async def _process_assembly_patterns_async(
     for occurrence_id in seed_to_mate_map:
         occurrence_type = seed_to_mate_occurrence_map[occurrence_id]
 
-        if occurrence_type == "BOTH":
-            # Handle case where both child and parent are in patterns
-            child_seed, parent_seed = occurrence_id.split(":")
-            child_instances = seed_to_pattern_map[child_seed]
-            parent_instances = seed_to_pattern_map[parent_seed]
-
-            # Create mates for corresponding instances (assuming same pattern length)
-            for index, (child_instance, parent_instance) in enumerate(zip(child_instances, parent_instances)):
-                # Create a deep copy of the original mate to avoid mutation
-                instance_mate = copy.deepcopy(seed_to_mate_map[occurrence_id])
-
-                # Update both child and parent occurrences
-                instance_mate.matedEntities[CHILD].matedOccurrence = [child_instance]
-                instance_mate.matedEntities[PARENT].matedOccurrence = [parent_instance]
-
-                # For now, we'll keep the original coordinate systems
-                # TODO: Apply transformations for both entities if needed
-                instance_mate.name = f"{seed_to_mate_map[occurrence_id].name}_{index + 1}"
-
-                try:
-                    child_occurrences = [
-                        id_to_name_map[path] for path in instance_mate.matedEntities[CHILD].matedOccurrence
-                    ]
-                    parent_occurrences = [
-                        id_to_name_map[path] for path in instance_mate.matedEntities[PARENT].matedOccurrence
-                    ]
-                except KeyError as e:
-                    LOGGER.warning(e)
-                    LOGGER.warning(f"Key not found in {id_to_name_map.keys()}")
-                    continue
-
-                instance_mate_key = join_mate_occurrences(
-                    parent=parent_occurrences,
-                    child=child_occurrences,
-                    prefix=subassembly_prefix,
-                )
-                pattern_expanded_mates[instance_mate_key] = instance_mate
-
-        else:
-            # Handle case where only one entity is in a pattern
+        # Handle case where one entity (child or parent) is in a pattern
+        if occurrence_type in [CHILD, PARENT]:
             for index, pattern_instance_id in enumerate(seed_to_pattern_map[occurrence_id]):
                 # Create a deep copy of the original mate to avoid mutation
                 instance_mate = copy.deepcopy(seed_to_mate_map[occurrence_id])
+                other_entity_index = PARENT if occurrence_type == CHILD else CHILD
 
-                # Get the original mate coordinate system
-                original_cs = (
+                # Get the original mate coordinate systems for both entities
+                pattern_entity_cs = (
                     seed_to_mate_map[occurrence_id].matedEntities[seed_to_mate_occurrence_map[occurrence_id]].matedCS
                 )
+                other_entity_cs = seed_to_mate_map[occurrence_id].matedEntities[other_entity_index].matedCS
+                (seed_to_mate_map[occurrence_id].matedEntities[other_entity_index].matedOccurrence[0])
 
-                # The part_to_mate_tf represents the intrinsic relationship between part origin and mate CS
-                # This should remain the same for all pattern instances
-                part_to_mate_tf = original_cs.part_to_mate_tf
+                # Get occurrence transforms
+                seed_occurrence_tf = np.matrix(occurrences.get(occurrence_id).transform).reshape(4, 4)
+                pattern_entity_occurrence_tf = np.matrix(occurrences.get(pattern_instance_id).transform).reshape(4, 4)
 
-                # Create new mate CS with the same part_to_mate_tf (intrinsic relationship preserved)
-                instance_mated_cs = MatedCS.from_tf(part_to_mate_tf)
+                # Calculate relative transform from seed to pattern instance
+                relative_tf = pattern_entity_occurrence_tf @ np.linalg.inv(seed_occurrence_tf)
 
-                # Update the instance mate with new occurrence and transformed coordinate system
+                # Apply relative transform to pattern entity mate CS
+                pattern_entity_mate_tf = relative_tf @ pattern_entity_cs.part_to_mate_tf
+                pattern_entity_transformed_cs = MatedCS.from_tf(pattern_entity_mate_tf)
+
+                # For the other entity (non-pattern), we need to maintain spatial relationship
+                # by transforming its mate CS by the same relative transform
+                other_entity_mate_tf = relative_tf @ other_entity_cs.part_to_mate_tf
+                other_entity_transformed_cs = MatedCS.from_tf(other_entity_mate_tf)
+
+                # Update the instance mate with new occurrence and transformed coordinate systems
                 instance_mate.matedEntities[seed_to_mate_occurrence_map[occurrence_id]].matedOccurrence = [
                     pattern_instance_id
                 ]
-                instance_mate.matedEntities[seed_to_mate_occurrence_map[occurrence_id]].matedCS = instance_mated_cs
+                instance_mate.matedEntities[
+                    seed_to_mate_occurrence_map[occurrence_id]
+                ].matedCS = pattern_entity_transformed_cs
+                instance_mate.matedEntities[other_entity_index].matedCS = other_entity_transformed_cs
                 instance_mate.name = f"{seed_to_mate_map[occurrence_id].name}_{index + 1}"
 
                 try:
