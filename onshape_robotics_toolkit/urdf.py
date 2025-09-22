@@ -97,18 +97,30 @@ def get_robot_link(
     _link_to_stl_tf = np.eye(4)
 
     if mate is None:
-        _link_to_stl_tf[:3, 3] = np.array(part.MassProperty.center_of_mass).reshape(3)
+        try:
+            _link_to_stl_tf[:3, 3] = np.array(part.MassProperty.center_of_mass).reshape(3)
+        except AttributeError:
+            LOGGER.warning(f"Part {part.partId} has no mass properties, using identity transform")
+
     elif mate.matedEntities[CHILD].parentCS:
         _link_to_stl_tf = mate.matedEntities[CHILD].parentCS.part_tf @ mate.matedEntities[CHILD].matedCS.part_to_mate_tf
     else:
         _link_to_stl_tf = mate.matedEntities[CHILD].matedCS.part_to_mate_tf
 
     _stl_to_link_tf = np.matrix(np.linalg.inv(_link_to_stl_tf))
-    _mass = part.MassProperty.mass[0]
     _origin = Origin.zero_origin()
-    _com = part.MassProperty.center_of_mass_wrt(_stl_to_link_tf)
-    _inertia = part.MassProperty.inertia_wrt(np.matrix(_stl_to_link_tf[:3, :3]))
     _principal_axes_rotation = (0.0, 0.0, 0.0)
+
+    # Check if part has mass properties
+    if part.MassProperty is None:
+        LOGGER.warning(f"Part {part.partId} has no mass properties, using default values")
+        _mass = 1.0  # Default mass
+        _com = (0.0, 0.0, 0.0)  # Default center of mass at origin
+        _inertia = np.eye(3)  # Default identity inertia matrix
+    else:
+        _mass = part.MassProperty.mass[0]
+        _com = part.MassProperty.center_of_mass_wrt(_stl_to_link_tf)
+        _inertia = part.MassProperty.inertia_wrt(np.matrix(_stl_to_link_tf[:3, :3]))
 
     LOGGER.info(f"Creating robot link for {name}")
 

@@ -257,6 +257,32 @@ def add_edges_to_graph(graph: nx.Graph, mates: dict[str, Union[MateFeatureData]]
             exit(1)
 
 
+def _print_graph_tree(graph: nx.Graph) -> None:
+    """Print a text-based tree representation of the graph structure."""
+    if not graph.nodes:
+        print("  (empty graph)")
+        return
+
+    # Show connected components
+    components = list(nx.connected_components(graph))
+    for i, component in enumerate(components):
+        print(f"  Component {i + 1} ({len(component)} nodes):")
+        for j, node in enumerate(sorted(component)):
+            prefix = "    ├── " if j < len(component) - 1 else "    └── "
+            neighbors = list(graph.neighbors(node))
+            neighbor_info = f" -> {len(neighbors)} connections" if neighbors else ""
+            try:
+                print(f"{prefix}{node}{neighbor_info}")
+            except UnicodeEncodeError:
+                # Handle Unicode characters in node names that can't be encoded
+                # Use LOGGER instead of print to avoid console encoding issues
+                from onshape_robotics_toolkit.log import LOGGER
+
+                LOGGER.info(f"Node: {node} ({len(neighbors)} connections)")
+        if i < len(components) - 1:
+            print()
+
+
 def remove_unconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
     """
     Remove unconnected subgraphs from the graph.
@@ -269,9 +295,19 @@ def remove_unconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
     """
     if not nx.is_connected(graph):
         LOGGER.warning("Graph has one or more unconnected subgraphs")
+
+        # Show tree visualization of original graph
+        LOGGER.info("Original graph structure:")
+        _print_graph_tree(graph)
+
         sub_graphs = list(nx.connected_components(graph))
         main_graph_nodes = max(sub_graphs, key=len)
         main_graph = graph.subgraph(main_graph_nodes).copy()
+
+        # Show tree visualization of reduced graph
+        LOGGER.info("Reduced graph structure:")
+        _print_graph_tree(main_graph)
+
         LOGGER.warning(f"Reduced graph nodes from {len(graph.nodes)} to {len(main_graph.nodes)}")
         LOGGER.warning(f"Reduced graph edges from {len(graph.edges)} to {len(main_graph.edges)}")
         return main_graph

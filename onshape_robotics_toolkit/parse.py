@@ -85,7 +85,8 @@ async def traverse_instances_async(
             instance_map[instance_id].isRigid = isRigid
 
         # Handle subassemblies concurrently
-        if instance.type == InstanceType.ASSEMBLY:
+        # Only traverse into subassemblies if they are not rigid (i.e., we haven't reached max depth)
+        if instance.type == InstanceType.ASSEMBLY and not isRigid:
             tasks = [
                 traverse_instances_async(
                     sub_assembly, instance_id, current_depth + 1, max_depth, assembly, id_to_name_map, instance_map
@@ -397,6 +398,27 @@ async def _get_parts_async(
 
     await asyncio.gather(*tasks)
 
+    # Convert rigid subassemblies to parts
+    for assembly_key, rigid_subassembly in rigid_subassemblies.items():
+        if rigid_subassembly.MassProperty is None:
+            LOGGER.warning(f"Rigid subassembly {assembly_key} has no mass properties")
+
+        part_map[assembly_key] = Part(
+            isStandardContent=False,
+            fullConfiguration=rigid_subassembly.fullConfiguration,
+            configuration=rigid_subassembly.configuration,
+            documentId=rigid_subassembly.documentId,
+            elementId=rigid_subassembly.elementId,
+            documentMicroversion=rigid_subassembly.documentMicroversion,
+            documentVersion="",
+            partId="",
+            bodyType="",
+            MassProperty=rigid_subassembly.MassProperty,
+            isRigidAssembly=True,
+            rigidAssemblyWorkspaceId=rigid_subassembly.documentMetaData.defaultWorkspace.id,
+            rigidAssemblyToPartTF={},
+        )
+
     return part_map
 
 
@@ -491,22 +513,6 @@ async def build_rigid_subassembly_occurrence_map(
             except KeyError:
                 LOGGER.warning(f"Occurrence path {occurrence.path} not found")
 
-        # Populate parts data
-        parts[assembly_key] = Part(
-            isStandardContent=False,
-            fullConfiguration=rigid_subassembly.fullConfiguration,
-            configuration=rigid_subassembly.configuration,
-            documentId=rigid_subassembly.documentId,
-            elementId=rigid_subassembly.elementId,
-            documentMicroversion=rigid_subassembly.documentMicroversion,
-            documentVersion="",
-            partId="",
-            bodyType="",
-            MassProperty=rigid_subassembly.MassProperty,
-            isRigidAssembly=True,
-            rigidAssemblyWorkspaceId=rigid_subassembly.documentMetaData.defaultWorkspace.id,
-            rigidAssemblyToPartTF={},
-        )
         occurrence_map[assembly_key] = sub_occurrences
 
     return occurrence_map

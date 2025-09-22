@@ -9,18 +9,22 @@ TRANSFORMS = (
 PATTERNS = (
     "https://cad.onshape.com/documents/1291b9c12b545eeed2d7b739/w/97037c8205b8249da5568aaf/e/d882e512e798aab4133f091c"
 )
+OMNI_WHEEL = (
+    "https://cad.onshape.com/documents/8cf89c7fb04f06a2a1a9339c/w/469fb5dc035724877067135b/e/d8e06be046d7497ed45d0045"
+)
 
 if __name__ == "__main__":
     LOGGER.set_file_name("patterns.log")
-    LOGGER.set_stream_level(LogLevel.CRITICAL)
+    LOGGER.set_stream_level(LogLevel.INFO)
     client = Client(env=".env")
 
     robot = Robot.from_url(
         name="patterns",
-        url=PATTERNS,
+        url=OMNI_WHEEL,
         client=client,
         max_depth=0,
         use_user_defined_root=False,
+        log_assembly=True,
     )
 
     save_model_as_json(robot.assembly, "patterns.json")
