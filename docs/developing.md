@@ -211,6 +211,107 @@ origin = Origin.from_matrix(stl_to_mate_tf)
 
 This systematic approach ensures that the resulting URDF maintains proper kinematic relationships while respecting Onshape's coordinate system conventions.
 
+# Assembly Pattern Support
+
+## Overview
+
+Assembly patterns in Onshape allow users to create multiple instances of parts or subassemblies in regular arrangements (linear, circular, etc.). The onshape-robotics-toolkit supports these patterns by automatically expanding mate features to connect all pattern instances to their target parts.
+
+## Pattern Processing Workflow
+
+### 1. Pattern Detection and Mapping
+
+The toolkit first identifies:
+
+- **Seed entities**: The original parts/subassemblies that are patterned
+- **Pattern instances**: All the generated copies from the pattern
+- **Seed mates**: Mate features that connect seed entities to other parts
+
+### 2. Mate Expansion Strategy
+
+For each seed mate that involves a patterned entity:
+
+1. Create a deep copy of the original mate for each pattern instance
+2. Update the mate to reference the pattern instance instead of the seed
+3. Calculate the new mate coordinate system for the pattern instance
+4. Preserve the relative relationship between the pattern instance and the connected part
+
+## Transform Calculations for Pattern Mates
+
+### The Challenge
+
+When parts are patterned, their mate connections need to be updated to account for the new positions of pattern instances. The key challenge is maintaining the correct relative positioning between patterned parts and their connected (non-patterned) parts, regardless of where the assembly is positioned in world space.
+
+### Coordinate System Flow
+
+The transformation pipeline for pattern mate expansion follows this sequence:
+
+```python
+# 1. Get world transforms for seed, pattern, and connected entities
+seed_entity_occurrence_tf = occurrences.get(seed_occurrence_id).transform
+pattern_entity_occurrence_tf = occurrences.get(pattern_instance_id).transform
+other_entity_occurrence_tf = occurrences.get(other_entity_occurrence_id).transform
+
+# 2. Calculate relative transform from seed to pattern position
+seed_to_pattern_relative_tf = pattern_entity_occurrence_tf @ np.linalg.inv(seed_entity_occurrence_tf)
+
+# 3. Transform through coordinate spaces: local → world → pattern_relative → local
+other_entity_mate_world_tf = other_entity_occurrence_tf @ original_mate_cs.part_to_mate_tf
+pattern_transformed_world_tf = seed_to_pattern_relative_tf @ other_entity_mate_world_tf
+final_mate_cs = np.linalg.inv(other_entity_occurrence_tf) @ pattern_transformed_world_tf
+```
+
+### Key Transform Matrices
+
+| Matrix                         | Description                                   | Purpose                                 |
+| ------------------------------ | --------------------------------------------- | --------------------------------------- |
+| `seed_entity_occurrence_tf`    | Seed entity's world transform                 | Establishes original world position     |
+| `pattern_entity_occurrence_tf` | Pattern instance's world transform            | New world position for pattern instance |
+| `other_entity_occurrence_tf`   | Connected entity's world transform            | Reference frame for mate coordinates    |
+| `seed_to_pattern_relative_tf`  | Relative transform: `M_pattern * M_seed^(-1)` | Captures the pattern transformation     |
+
+### Relative Pose Calculation
+
+The relative transformation between seed and pattern positions uses the formula:
+
+```
+M_relative = M_pattern * M_seed^(-1)
+```
+
+Where:
+
+- `M_seed` is the seed entity's world transformation matrix
+- `M_pattern` is the pattern instance's world transformation matrix
+- `M_relative` captures how to transform from seed position to pattern position
+
+### Coordinate System Preservation
+
+The critical insight is that mate coordinates must remain **relative to the connected entity**, not world origin. The transformation pipeline ensures this by:
+
+1. **Local → World**: Transform original mate coordinates to world space using the connected entity's world transform
+2. **Apply Pattern Transform**: Apply the seed-to-pattern relative transformation in world coordinates
+3. **World → Local**: Transform back to the connected entity's local coordinate system
+
+This approach ensures that:
+
+- Joint locations remain consistent regardless of assembly world position
+- Pattern transformations are applied correctly in world space
+- Final mate coordinates are properly expressed relative to the connected part
+
+### Floating Point Precision Handling
+
+Pattern transformations involve matrix inversion and multiplication chains that can introduce floating point precision errors. The toolkit applies numerical tolerance cleanup:
+
+```python
+tolerance = 1e-10
+# Clean up intermediate results
+seed_to_pattern_relative_tf[np.abs(seed_to_pattern_relative_tf) < tolerance] = 0.0
+# Clean up final transformation
+final_mate_cs[np.abs(final_mate_cs) < tolerance] = 0.0
+```
+
+This ensures that near-zero values (from floating point artifacts) are set to exactly zero, preventing small joint location errors in the generated URDF.
+
 ## Key Classes and Their Roles
 
 ### Client Class
