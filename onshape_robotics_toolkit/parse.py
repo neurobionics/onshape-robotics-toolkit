@@ -85,8 +85,7 @@ async def traverse_instances_async(
             instance_map[instance_id].isRigid = isRigid
 
         # Handle subassemblies concurrently
-        # Only traverse into subassemblies if they are not rigid (i.e., we haven't reached max depth)
-        if instance.type == InstanceType.ASSEMBLY and not isRigid:
+        if instance.type == InstanceType.ASSEMBLY:
             tasks = [
                 traverse_instances_async(
                     sub_assembly, instance_id, current_depth + 1, max_depth, assembly, id_to_name_map, instance_map
