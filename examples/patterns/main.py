@@ -7,7 +7,7 @@ TRANSFORMS = (
     "https://cad.onshape.com/documents/1291b9c12b545eeed2d7b739/w/97037c8205b8249da5568aaf/e/9ba9186fc14f9c065161678e"
 )
 PATTERNS = (
-    "https://cad.onshape.com/documents/1291b9c12b545eeed2d7b739/w/97037c8205b8249da5568aaf/e/b90f507e0ecc91fb355c64c9"
+    "https://cad.onshape.com/documents/1291b9c12b545eeed2d7b739/w/97037c8205b8249da5568aaf/e/d882e512e798aab4133f091c"
 )
 
 if __name__ == "__main__":
@@ -17,7 +17,7 @@ if __name__ == "__main__":
 
     robot = Robot.from_url(
         name="patterns",
-        url=TRANSFORMS,
+        url=PATTERNS,
         client=client,
         max_depth=0,
         use_user_defined_root=False,
