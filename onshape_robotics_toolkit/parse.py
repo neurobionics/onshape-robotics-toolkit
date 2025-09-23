@@ -993,6 +993,25 @@ async def _process_assembly_patterns_async(
                     LOGGER.warning(f"Key not found in {id_to_name_map.keys()}")
                     continue
 
+                # Handle rigid subassemblies for pattern instances
+                if parent_occurrences[0] in rigid_subassemblies:
+                    _occurrence = rigid_subassembly_occurrence_map[parent_occurrences[0]].get(parent_occurrences[1])
+                    if _occurrence:
+                        parent_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
+                        parts[parent_occurrences[0]].rigidAssemblyToPartTF[parent_occurrences[1]] = (
+                            parent_parentCS.part_tf
+                        )
+                        pattern_mate.matedEntities[PARENT].parentCS = parent_parentCS
+                    parent_occurrences = [parent_occurrences[0]]
+
+                if child_occurrences[0] in rigid_subassemblies:
+                    _occurrence = rigid_subassembly_occurrence_map[child_occurrences[0]].get(child_occurrences[1])
+                    if _occurrence:
+                        child_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
+                        parts[child_occurrences[0]].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
+                        pattern_mate.matedEntities[CHILD].parentCS = child_parentCS
+                    child_occurrences = [child_occurrences[0]]
+
                 pattern_mate_key = join_mate_occurrences(
                     parent=parent_occurrences,
                     child=child_occurrences,
