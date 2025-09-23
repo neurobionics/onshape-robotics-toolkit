@@ -6,6 +6,7 @@ from onshape_robotics_toolkit.parse import (
     get_instances,
     get_mates_and_relations,
     get_parts,
+    get_parts_without_mass_properties,
     get_subassemblies,
 )
 from onshape_robotics_toolkit.robot import get_robot
@@ -34,11 +35,23 @@ if __name__ == "__main__":
     instances, occurrences, id_to_name_map = get_instances(assembly, max_depth=1)
 
     subassemblies, rigid_subassemblies = get_subassemblies(assembly, client, instances)
-    parts = get_parts(assembly, rigid_subassemblies, client, instances)
 
-    mates, relations = get_mates_and_relations(assembly, subassemblies, rigid_subassemblies, id_to_name_map, parts)
+    # Create parts without mass properties first (for mates processing)
+    parts_temp = get_parts_without_mass_properties(assembly, rigid_subassemblies, instances)
 
-    graph, root_node = create_graph(occurrences=occurrences, instances=instances, parts=parts, mates=mates)
+    mates, relations = get_mates_and_relations(assembly, subassemblies, rigid_subassemblies, id_to_name_map, parts_temp)
+
+    graph, root_node = create_graph(occurrences=occurrences, instances=instances, parts=parts_temp, mates=mates)
+
+    # Now use the optimized get_parts with graph for efficient mass property fetching
+    parts = get_parts(
+        assembly=assembly,
+        rigid_subassemblies=rigid_subassemblies,
+        client=client,
+        instances=instances,
+        graph=graph,
+        include_rigid_subassembly_parts=False,  # Default behavior - excludes rigid subassembly parts
+    )
     robot = get_robot(assembly, graph, root_node, parts, mates, relations, client, "test")
     robot.show_tree()
     robot.show_graph("bike.png")

@@ -47,6 +47,7 @@ from onshape_robotics_toolkit.parse import (
     get_instances,
     get_mates_and_relations,
     get_parts,
+    get_parts_without_mass_properties,
     get_subassemblies,
 )
 from onshape_robotics_toolkit.urdf import get_joint_name, get_robot_joint, get_robot_link, get_topological_mates
@@ -839,6 +840,7 @@ class Robot:
         use_user_defined_root: bool = False,
         robot_type: RobotType = RobotType.URDF,
         log_assembly: bool = False,
+        include_rigid_subassembly_parts: bool = False,
     ) -> "Robot":
         """
         Load a robot model from an Onshape CAD assembly.
@@ -850,6 +852,8 @@ class Robot:
             max_depth: The maximum depth to process the assembly.
             use_user_defined_root: Whether to use the user-defined root.
             robot_type: The type of the robot.
+            log_assembly: Whether to log the assembly response.
+            include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies.
 
         Returns:
             The robot model.
@@ -870,23 +874,35 @@ class Robot:
         instances, occurrences, id_to_name_map = get_instances(assembly=assembly, max_depth=max_depth)
         subassemblies, rigid_subassemblies = get_subassemblies(assembly=assembly, client=client, instances=instances)
 
-        parts = get_parts(
-            assembly=assembly, rigid_subassemblies=rigid_subassemblies, client=client, instances=instances
+        # Create parts without mass properties first (for mates processing)
+        parts_temp = get_parts_without_mass_properties(
+            assembly=assembly, rigid_subassemblies=rigid_subassemblies, instances=instances
         )
+
         mates, relations = get_mates_and_relations(
             assembly=assembly,
             subassemblies=subassemblies,
             rigid_subassemblies=rigid_subassemblies,
             id_to_name_map=id_to_name_map,
-            parts=parts,
+            parts=parts_temp,
         )
 
         graph, root_node = create_graph(
             occurrences=occurrences,
             instances=instances,
-            parts=parts,
+            parts=parts_temp,
             mates=mates,
             use_user_defined_root=use_user_defined_root,
+        )
+
+        # Now use the optimized get_parts with graph for efficient mass property fetching
+        parts = get_parts(
+            assembly=assembly,
+            rigid_subassemblies=rigid_subassemblies,
+            client=client,
+            instances=instances,
+            graph=graph,
+            include_rigid_subassembly_parts=include_rigid_subassembly_parts,
         )
 
         robot = get_robot(

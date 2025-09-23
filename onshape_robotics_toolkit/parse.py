@@ -9,6 +9,7 @@ import copy
 import uuid
 from typing import Optional, Union
 
+import networkx as nx
 import numpy as np
 
 from onshape_robotics_toolkit.connect import Client
@@ -336,6 +337,7 @@ async def _fetch_mass_properties_async(
     client: Client,
     rigid_subassemblies: dict[str, RootAssembly],
     parts: dict[str, Part],
+    include_rigid_subassembly_parts: bool = True,
 ):
     """
     Asynchronously fetch mass properties for a part.
@@ -346,8 +348,9 @@ async def _fetch_mass_properties_async(
         client: The Onshape client object.
         rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
         parts: The dictionary to store fetched parts.
+        include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies.
     """
-    if key.split(SUBASSEMBLY_JOINER)[0] not in rigid_subassemblies:
+    if include_rigid_subassembly_parts or key.split(SUBASSEMBLY_JOINER)[0] not in rigid_subassemblies:
         try:
             LOGGER.info(f"Fetching mass properties for part: {part.uid}, {part.partId}")
             part.MassProperty = await asyncio.to_thread(
@@ -364,6 +367,95 @@ async def _fetch_mass_properties_async(
     parts[key] = part
 
 
+async def _get_parts_with_selective_mass_properties_async(
+    parts: dict[str, Part],
+    graph: nx.Graph,
+    client: Client,
+    rigid_subassemblies: dict[str, RootAssembly],
+    include_rigid_subassembly_parts: bool = True,
+) -> None:
+    """
+    Asynchronously fetch mass properties for specific parts only.
+
+    Args:
+        parts: Dictionary of parts to potentially update with mass properties.
+        graph: Graph of the robot.
+        client: The Onshape client object.
+        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
+        include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies.
+    """
+    tasks = []
+    for key in graph.nodes:
+        if key in parts:
+            part = parts[key]
+            # Check if we should skip parts from rigid subassemblies
+            if not include_rigid_subassembly_parts and key.split(SUBASSEMBLY_JOINER)[0] in rigid_subassemblies:
+                continue
+
+            # Skip if this is a rigid subassembly (already has mass properties)
+            if part.isRigidAssembly:
+                continue
+
+            tasks.append(
+                _fetch_mass_properties_async(
+                    part, key, client, rigid_subassemblies, parts, include_rigid_subassembly_parts
+                )
+            )
+
+    if tasks:
+        await asyncio.gather(*tasks)
+
+
+async def _get_parts_without_mass_properties_async(
+    assembly: Assembly,
+    rigid_subassemblies: dict[str, RootAssembly],
+    instances: dict[str, Union[PartInstance, AssemblyInstance]],
+) -> dict[str, Part]:
+    """
+    Asynchronously get parts of an Onshape assembly without fetching mass properties.
+
+    Args:
+        assembly: The Onshape assembly object to use for extracting parts.
+        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
+        instances: Mapping of instance IDs to their corresponding instances.
+
+    Returns:
+        A dictionary mapping part IDs to their corresponding part objects.
+    """
+    part_instance_map: dict[str, list[str]] = {}
+    part_map: dict[str, Part] = {}
+
+    for key, instance in instances.items():
+        if instance.type == InstanceType.PART:
+            part_instance_map.setdefault(instance.uid, []).append(key)
+
+    # Create Part objects without mass properties
+    for part in assembly.parts:
+        if part.uid in part_instance_map:
+            for key in part_instance_map[part.uid]:
+                part_map[key] = part
+
+    # Convert rigid subassemblies to parts
+    for assembly_key, rigid_subassembly in rigid_subassemblies.items():
+        part_map[assembly_key] = Part(
+            isStandardContent=False,
+            fullConfiguration=rigid_subassembly.fullConfiguration,
+            configuration=rigid_subassembly.configuration,
+            documentId=rigid_subassembly.documentId,
+            elementId=rigid_subassembly.elementId,
+            documentMicroversion=rigid_subassembly.documentMicroversion,
+            documentVersion="",
+            partId="",
+            bodyType="",
+            MassProperty=rigid_subassembly.MassProperty,
+            isRigidAssembly=True,
+            rigidAssemblyWorkspaceId=rigid_subassembly.documentMetaData.defaultWorkspace.id,
+            rigidAssemblyToPartTF={},
+        )
+
+    return part_map
+
+
 async def _get_parts_async(
     assembly: Assembly,
     rigid_subassemblies: dict[str, RootAssembly],
@@ -371,7 +463,13 @@ async def _get_parts_async(
     instances: dict[str, Union[PartInstance, AssemblyInstance]],
 ) -> dict[str, Part]:
     """
-    Asynchronously get parts of an Onshape assembly.
+    Asynchronously get parts of an Onshape assembly using the legacy workflow.
+
+    WARNING: This function fetches mass properties for ALL parts in the assembly,
+    which can be very slow for complex assemblies with many parts.
+
+    Consider using the optimized workflow with _get_parts_without_mass_properties_async()
+    and _get_parts_with_selective_mass_properties_async() instead.
 
     Args:
         assembly: The Onshape assembly object to use for extracting parts.
@@ -393,7 +491,11 @@ async def _get_parts_async(
     for part in assembly.parts:
         if part.uid in part_instance_map:
             for key in part_instance_map[part.uid]:
-                tasks.append(_fetch_mass_properties_async(part, key, client, rigid_subassemblies, part_map))
+                tasks.append(
+                    _fetch_mass_properties_async(
+                        part, key, client, rigid_subassemblies, part_map, include_rigid_subassembly_parts=False
+                    )
+                )
 
     await asyncio.gather(*tasks)
 
@@ -426,9 +528,62 @@ def get_parts(
     rigid_subassemblies: dict[str, RootAssembly],
     client: Client,
     instances: dict[str, Union[PartInstance, AssemblyInstance]],
+    graph: nx.Graph = None,
+    include_rigid_subassembly_parts: bool = False,
 ) -> dict[str, Part]:
     """
-    Get parts of an Onshape assembly.
+    Get parts of an Onshape assembly with optimized mass property fetching.
+
+    This function uses a two-phase approach by default:
+    1. Create Part objects without mass properties (fast)
+    2. Only fetch mass properties for parts that become URDF links (graph nodes)
+
+    Args:
+        assembly: The Onshape assembly object to use for extracting parts.
+        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
+        client: The Onshape client object to use for sending API requests.
+        instances: Mapping of instance IDs to their corresponding instances.
+        graph: Graph of the robot. If provided, only fetches mass properties for graph nodes.
+               If None, falls back to legacy behavior (fetches all mass properties).
+        include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies.
+
+    Returns:
+        A dictionary mapping part IDs to their corresponding part objects.
+    """
+    if graph is not None:
+        # Optimized workflow: two-phase approach
+        parts = get_parts_without_mass_properties(assembly, rigid_subassemblies, instances)
+        get_parts_with_selective_mass_properties(
+            parts, graph, client, rigid_subassemblies, include_rigid_subassembly_parts
+        )
+        return parts
+    else:
+        # Legacy workflow: fetch all mass properties
+        import warnings
+
+        warnings.warn(
+            "Calling get_parts() without a graph parameter uses the legacy workflow that fetches "
+            "mass properties for ALL parts, which can be very slow for complex assemblies. "
+            "Consider passing a graph parameter or use get_parts_legacy() explicitly.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return get_parts_legacy(assembly, rigid_subassemblies, client, instances)
+
+
+def get_parts_legacy(
+    assembly: Assembly,
+    rigid_subassemblies: dict[str, RootAssembly],
+    client: Client,
+    instances: dict[str, Union[PartInstance, AssemblyInstance]],
+) -> dict[str, Part]:
+    """
+    Get parts of an Onshape assembly using the legacy workflow.
+
+    WARNING: This function fetches mass properties for ALL parts in the assembly,
+    which can be very slow for complex assemblies with many parts.
+
+    Consider using get_parts() with a graph parameter for better performance.
 
     Args:
         assembly: The Onshape assembly object to use for extracting parts.
@@ -439,7 +594,90 @@ def get_parts(
     Returns:
         A dictionary mapping part IDs to their corresponding part objects.
     """
+    import warnings
+
+    warnings.warn(
+        "get_parts_legacy() fetches mass properties for ALL parts, which can be very slow. "
+        "Consider using get_parts() with a graph parameter for better performance.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return asyncio.run(_get_parts_async(assembly, rigid_subassemblies, client, instances))
+
+
+def get_parts_without_mass_properties(
+    assembly: Assembly,
+    rigid_subassemblies: dict[str, RootAssembly],
+    instances: dict[str, Union[PartInstance, AssemblyInstance]],
+) -> dict[str, Part]:
+    """
+    Get parts of an Onshape assembly without fetching mass properties.
+
+    Args:
+        assembly: The Onshape assembly object to use for extracting parts.
+        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
+        instances: Mapping of instance IDs to their corresponding instances.
+
+    Returns:
+        A dictionary mapping part IDs to their corresponding part objects.
+    """
+    return asyncio.run(_get_parts_without_mass_properties_async(assembly, rigid_subassemblies, instances))
+
+
+def get_parts_with_selective_mass_properties(
+    parts: dict[str, Part],
+    graph: nx.Graph,
+    client: Client,
+    rigid_subassemblies: dict[str, RootAssembly],
+    include_rigid_subassembly_parts: bool = False,
+) -> None:
+    """
+    Fetch mass properties for specific parts only.
+
+    Args:
+        parts: Dictionary of parts to potentially update with mass properties.
+        graph: Graph of the robot.
+        client: The Onshape client object.
+        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
+        include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies.
+    """
+    return asyncio.run(
+        _get_parts_with_selective_mass_properties_async(
+            parts, graph, client, rigid_subassemblies, include_rigid_subassembly_parts
+        )
+    )
+
+
+def get_parts_optimized(
+    assembly: Assembly,
+    rigid_subassemblies: dict[str, RootAssembly],
+    client: Client,
+    instances: dict[str, Union[PartInstance, AssemblyInstance]],
+    graph: nx.Graph = None,
+    include_rigid_subassembly_parts: bool = False,
+) -> dict[str, Part]:
+    """
+    Get parts of an Onshape assembly with optimized mass property fetching.
+
+    This function uses a two-phase approach:
+    1. Create Part objects without mass properties
+    2. Only fetch mass properties for parts that become URDF links (graph nodes)
+
+    Args:
+        assembly: The Onshape assembly object to use for extracting parts.
+        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
+        client: The Onshape client object to use for sending API requests.
+        instances: Mapping of instance IDs to their corresponding instances.
+        graph: Graph of the robot.
+        include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies.
+
+    Returns:
+        A dictionary mapping part IDs to their corresponding part objects.
+    """
+    parts = get_parts_without_mass_properties(assembly, rigid_subassemblies, instances)
+    get_parts_with_selective_mass_properties(parts, graph, client, rigid_subassemblies, include_rigid_subassembly_parts)
+
+    return parts
 
 
 def get_occurrence_name(occurrences: list[str], subassembly_prefix: Optional[str] = None) -> str:
