@@ -312,6 +312,147 @@ final_mate_cs[np.abs(final_mate_cs) < tolerance] = 0.0
 
 This ensures that near-zero values (from floating point artifacts) are set to exactly zero, preventing small joint location errors in the generated URDF.
 
+# Hierarchical Rigid Subassembly Support
+
+## Overview
+
+The onshape-robotics-toolkit supports complex scenarios where parts are buried multiple levels deep within rigid subassemblies. This is a common CAD modeling pattern where parts are organized within nested sub-assemblies that are then marked as rigid for kinematic purposes.
+
+## The Challenge
+
+Consider this assembly hierarchy:
+
+```
+Root Assembly
+├── Mobile Part A
+├── Rigid Subassembly X
+│   ├── Sub-Assembly Level 1
+│   │   ├── Sub-Assembly Level 2
+│   │   │   └── Target Part B
+│   │   └── Other Parts...
+│   └── Other Sub-Assemblies...
+└── Mobile Part C (mated to Target Part B)
+```
+
+When a mate connects `Mobile Part C` to `Target Part B`, the toolkit needs to calculate the proper transform chain from the `Rigid Subassembly X` root down to `Target Part B` through all intermediate sub-assembly levels.
+
+## Coordinate System Considerations
+
+### Global vs. Local Coordinate Systems
+
+The key insight is distinguishing between two types of occurrence transforms:
+
+1. **Global Occurrences**: Transforms in the main assembly's world coordinate system
+2. **Rigid Subassembly Occurrences**: Transforms relative to the rigid subassembly's root coordinate system
+
+For proper URDF generation, we need transforms **relative to the rigid subassembly root**, not global world coordinates.
+
+### Transform Chain Calculation
+
+The hierarchical transform calculation follows this pattern:
+
+```python
+# For occurrences_list = [rigid_sub, level1, level2, target_part]
+parent_tf = np.eye(4)
+
+# Build hierarchical keys and multiply transforms
+for i in range(len(occurrences_list) - 1):
+    # Key construction excludes rigid subassembly name
+    hierarchical_key = SUBASSEMBLY_JOINER.join(occurrences_list[1:i+2])
+    # Keys: "level1", "level1_JOINER_level2"
+
+    occurrence_tf = rigid_subassembly_occurrences[hierarchical_key].transform
+    parent_tf = parent_tf @ occurrence_tf  # Sequential multiplication
+```
+
+## Implementation Details
+
+### Hierarchical Key Construction
+
+The rigid subassembly occurrence map stores keys **relative to the rigid subassembly**:
+
+| Assembly Structure                  | Global Key                                          | Rigid Subassembly Key              |
+| ----------------------------------- | --------------------------------------------------- | ---------------------------------- |
+| `[rigid_sub, level1]`               | `rigid_sub_JOINER_level1`                           | `level1`                           |
+| `[rigid_sub, level1, level2]`       | `rigid_sub_JOINER_level1_JOINER_level2`             | `level1_JOINER_level2`             |
+| `[rigid_sub, level1, level2, part]` | `rigid_sub_JOINER_level1_JOINER_level2_JOINER_part` | `level1_JOINER_level2_JOINER_part` |
+
+### Transform Chain Building
+
+```python
+def build_hierarchical_transform_for_rigid_subassembly(
+    occurrences_list: list[str],
+    rigid_subassembly_occurrence_map: dict[str, dict[str, Occurrence]],
+) -> np.matrix:
+    """
+    Build hierarchical transform chain for a part buried within a rigid subassembly.
+
+    Returns: Transform matrix from rigid subassembly root to part coordinate system
+    """
+```
+
+The function:
+
+1. **Validates input**: Ensures the rigid subassembly exists in the occurrence map
+2. **Iterates through levels**: Processes each sub-assembly level (excluding final part)
+3. **Builds cumulative transform**: Multiplies transforms sequentially
+4. **Returns final matrix**: Complete transform from rigid subassembly root to part
+
+### Usage in Mate Processing
+
+The hierarchical transform is applied in multiple contexts:
+
+#### Regular Mate Processing
+
+```python
+if child_occurrences[0] in rigid_subassemblies:
+    parent_tf = build_hierarchical_transform_for_rigid_subassembly(
+        child_occurrences, rigid_subassembly_occurrence_map
+    )
+    child_parentCS = MatedCS.from_tf(parent_tf)
+    feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
+```
+
+#### Pattern Mate Processing
+
+The same logic applies to pattern-expanded mates, ensuring consistent transform handling for both seed entities and pattern instances.
+
+#### Parent and Child Entities
+
+Both parent and child entities in mates receive hierarchical transform support when they reside within rigid subassemblies.
+
+## Depth Agnostic Design
+
+The implementation automatically handles any nesting depth:
+
+- **2 levels**: `[rigid_sub, part]` - Single iteration, direct transform
+- **3 levels**: `[rigid_sub, level1, part]` - One intermediate level
+- **N levels**: `[rigid_sub, level1, ..., levelN-1, part]` - N-2 intermediate levels
+
+The algorithm scales without modification as `range(len(occurrences_list) - 1)` automatically adapts to the hierarchy depth.
+
+## Integration with URDF Generation
+
+The calculated `parentCS` transforms integrate with the existing URDF generation pipeline:
+
+### Link Transform Calculation
+
+```python
+if mate.matedEntities[CHILD].parentCS:
+    _link_to_stl_tf = mate.matedEntities[CHILD].parentCS.part_tf @ mate.matedEntities[CHILD].matedCS.part_to_mate_tf
+```
+
+### Joint Transform Calculation
+
+```python
+parent_to_mate_tf = (
+    mate.matedEntities[PARENT].parentCS.part_tf @
+    mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+)
+```
+
+This ensures that parts buried within complex rigid subassembly hierarchies are positioned correctly in the final URDF, maintaining proper kinematic relationships regardless of their nesting depth within the CAD assembly structure.
+
 ## Key Classes and Their Roles
 
 ### Client Class
