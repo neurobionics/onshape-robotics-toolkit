@@ -226,7 +226,7 @@ def get_occurrences(assembly: Assembly, id_to_name_map: dict[str, str], max_dept
             id_to_name_map[path] for path in occurrence.path if path in id_to_name_map
         ]): occurrence
         for occurrence in assembly.rootAssembly.occurrences
-        if len(occurrence.path) <= max_depth + 1
+        # if len(occurrence.path) <= max_depth + 1 # let's get all occurrences regardless of depth
     }
 
 
@@ -289,6 +289,8 @@ async def get_subassemblies_async(
                 subassembly_instance_map.setdefault(instance.uid, []).append(instance_key)
 
     # Process subassemblies concurrently
+    # TODO: currently we parse rigid-subassemblies within a rigid-subassemly too, this could be bad
+    # and cause random mates using wrong references and ending up in numberous sub-graphs
     tasks = []
     for subassembly in assembly.subAssemblies:
         uid = subassembly.uid
@@ -726,6 +728,45 @@ def join_mate_occurrences(parent: list[str], child: list[str], prefix: Optional[
     return f"{parent_occurrence}{MATE_JOINER}{child_occurrence}"
 
 
+def build_hierarchical_transform_for_rigid_subassembly(
+    occurrences_list: list[str],
+    rigid_subassembly_occurrence_map: dict[str, dict[str, Occurrence]],
+) -> np.matrix:
+    """
+    Build hierarchical transform chain for a part buried within a rigid subassembly.
+
+    Args:
+        occurrences_list: List like [rigid_sub_name, level1, level2, ..., part_name]
+        rigid_subassembly_occurrence_map: Map of rigid subassembly occurrences
+
+    Returns:
+        Transform matrix from rigid subassembly root to the part's coordinate system
+    """
+    if len(occurrences_list) < 2:
+        return np.eye(4)
+
+    rigid_sub_name = occurrences_list[0]
+    if rigid_sub_name not in rigid_subassembly_occurrence_map:
+        LOGGER.warning(f"Rigid subassembly {rigid_sub_name} not found in occurrence map")
+        return np.eye(4)
+
+    parent_tf = np.eye(4)
+    rigid_sub_occurrences = rigid_subassembly_occurrence_map[rigid_sub_name]
+
+    # Traverse through each sub-assembly level (excluding the final part)
+    for i in range(len(occurrences_list) - 1):
+        # Build key relative to this rigid subassembly (exclude the rigid subassembly name itself)
+        hierarchical_key = SUBASSEMBLY_JOINER.join(occurrences_list[1 : i + 2])
+        _occurrence_data = rigid_sub_occurrences.get(hierarchical_key)
+        if _occurrence_data is None:
+            LOGGER.warning(f"No occurrence data found for hierarchical key: {hierarchical_key}")
+            continue
+        _occurrence_tf = np.matrix(_occurrence_data.transform).reshape(4, 4)
+        parent_tf = parent_tf @ _occurrence_tf
+
+    return parent_tf
+
+
 async def build_rigid_subassembly_occurrence_map(
     rigid_subassemblies: dict[str, RootAssembly], id_to_name_map: dict[str, str], parts: dict[str, Part]
 ) -> dict[str, dict[str, Occurrence]]:
@@ -850,19 +891,25 @@ async def process_features_async(
 
             # Handle rigid subassemblies
             if parent_occurrences[0] in rigid_subassemblies:
-                _occurrence = rigid_subassembly_occurrence_map[parent_occurrences[0]].get(parent_occurrences[1])
-                if _occurrence:
-                    parent_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
-                    parts[parent_occurrences[0]].rigidAssemblyToPartTF[parent_occurrences[1]] = parent_parentCS.part_tf
-                    feature.featureData.matedEntities[PARENT].parentCS = parent_parentCS
+                # Build hierarchical transform chain from rigid subassembly root to the part
+                parent_tf = build_hierarchical_transform_for_rigid_subassembly(
+                    parent_occurrences, rigid_subassembly_occurrence_map
+                )
+                parent_parentCS = MatedCS.from_tf(parent_tf)
+                parts[parent_occurrences[0]].rigidAssemblyToPartTF[parent_occurrences[1]] = parent_parentCS.part_tf
+                feature.featureData.matedEntities[PARENT].parentCS = parent_parentCS
+
                 parent_occurrences = [parent_occurrences[0]]
 
             if child_occurrences[0] in rigid_subassemblies:
-                _occurrence = rigid_subassembly_occurrence_map[child_occurrences[0]].get(child_occurrences[1])
-                if _occurrence:
-                    child_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
-                    parts[child_occurrences[0]].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
-                    feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
+                # Build hierarchical transform chain from rigid subassembly root to the part
+                parent_tf = build_hierarchical_transform_for_rigid_subassembly(
+                    child_occurrences, rigid_subassembly_occurrence_map
+                )
+                child_parentCS = MatedCS.from_tf(parent_tf)
+                parts[child_occurrences[0]].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
+                feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
+
                 child_occurrences = [child_occurrences[0]]
 
             mates_map[
@@ -995,21 +1042,21 @@ async def _process_assembly_patterns_async(
 
                 # Handle rigid subassemblies for pattern instances
                 if parent_occurrences[0] in rigid_subassemblies:
-                    _occurrence = rigid_subassembly_occurrence_map[parent_occurrences[0]].get(parent_occurrences[1])
-                    if _occurrence:
-                        parent_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
-                        parts[parent_occurrences[0]].rigidAssemblyToPartTF[parent_occurrences[1]] = (
-                            parent_parentCS.part_tf
-                        )
-                        pattern_mate.matedEntities[PARENT].parentCS = parent_parentCS
+                    parent_tf = build_hierarchical_transform_for_rigid_subassembly(
+                        parent_occurrences, rigid_subassembly_occurrence_map
+                    )
+                    parent_parentCS = MatedCS.from_tf(parent_tf)
+                    parts[parent_occurrences[0]].rigidAssemblyToPartTF[parent_occurrences[1]] = parent_parentCS.part_tf
+                    pattern_mate.matedEntities[PARENT].parentCS = parent_parentCS
                     parent_occurrences = [parent_occurrences[0]]
 
                 if child_occurrences[0] in rigid_subassemblies:
-                    _occurrence = rigid_subassembly_occurrence_map[child_occurrences[0]].get(child_occurrences[1])
-                    if _occurrence:
-                        child_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
-                        parts[child_occurrences[0]].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
-                        pattern_mate.matedEntities[CHILD].parentCS = child_parentCS
+                    parent_tf = build_hierarchical_transform_for_rigid_subassembly(
+                        child_occurrences, rigid_subassembly_occurrence_map
+                    )
+                    child_parentCS = MatedCS.from_tf(parent_tf)
+                    parts[child_occurrences[0]].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
+                    pattern_mate.matedEntities[CHILD].parentCS = child_parentCS
                     child_occurrences = [child_occurrences[0]]
 
                 pattern_mate_key = join_mate_occurrences(
@@ -1024,6 +1071,7 @@ async def _process_assembly_patterns_async(
 
 async def get_mates_and_relations_async(
     assembly: Assembly,
+    occurrences: dict[str, Occurrence],
     subassemblies: dict[str, SubAssembly],
     rigid_subassemblies: dict[str, RootAssembly],
     id_to_name_map: dict[str, str],
@@ -1047,11 +1095,6 @@ async def get_mates_and_relations_async(
     rigid_subassembly_occurrence_map = await build_rigid_subassembly_occurrence_map(
         rigid_subassemblies, id_to_name_map, parts
     )
-
-    # Build occurrences map from root assembly occurrences
-    occurrences: dict[str, Occurrence] = {
-        occurrence.path[0]: occurrence for occurrence in assembly.rootAssembly.occurrences
-    }
 
     mates_map, relations_map = await process_features_async(
         assembly.rootAssembly.features,
@@ -1083,6 +1126,7 @@ async def get_mates_and_relations_async(
 
 def get_mates_and_relations(
     assembly: Assembly,
+    occurrences: dict[str, Occurrence],
     subassemblies: dict[str, SubAssembly],
     rigid_subassemblies: dict[str, RootAssembly],
     id_to_name_map: dict[str, str],
@@ -1104,5 +1148,5 @@ def get_mates_and_relations(
         - A dictionary mapping occurrence paths to their corresponding relations.
     """
     return asyncio.run(
-        get_mates_and_relations_async(assembly, subassemblies, rigid_subassemblies, id_to_name_map, parts)
+        get_mates_and_relations_async(assembly, occurrences, subassemblies, rigid_subassemblies, id_to_name_map, parts)
     )

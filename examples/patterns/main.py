@@ -10,7 +10,7 @@ PATTERNS = (
     "https://cad.onshape.com/documents/1291b9c12b545eeed2d7b739/w/97037c8205b8249da5568aaf/e/d882e512e798aab4133f091c"
 )
 OMNI_WHEEL = (
-    "https://cad.onshape.com/documents/8cf89c7fb04f06a2a1a9339c/w/469fb5dc035724877067135b/e/d8e06be046d7497ed45d0045"
+    "https://cad.onshape.com/documents/8cf89c7fb04f06a2a1a9339c/w/469fb5dc035724877067135b/e/e63ee1f9bd0bd7e034ac2595"
 )
 
 if __name__ == "__main__":

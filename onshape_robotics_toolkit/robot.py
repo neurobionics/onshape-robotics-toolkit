@@ -881,6 +881,7 @@ class Robot:
 
         mates, relations = get_mates_and_relations(
             assembly=assembly,
+            occurrences=occurrences,
             subassemblies=subassemblies,
             rigid_subassemblies=rigid_subassemblies,
             id_to_name_map=id_to_name_map,

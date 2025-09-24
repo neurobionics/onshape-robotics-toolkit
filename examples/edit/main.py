@@ -39,7 +39,9 @@ if __name__ == "__main__":
     # Create parts without mass properties first (for mates processing)
     parts_temp = get_parts_without_mass_properties(assembly, rigid_subassemblies, instances)
 
-    mates, relations = get_mates_and_relations(assembly, subassemblies, rigid_subassemblies, id_to_name_map, parts_temp)
+    mates, relations = get_mates_and_relations(
+        assembly, occurrences, subassemblies, rigid_subassemblies, id_to_name_map, parts_temp
+    )
 
     graph, root_node = create_graph(occurrences=occurrences, instances=instances, parts=parts_temp, mates=mates)
 

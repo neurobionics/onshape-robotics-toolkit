@@ -95,7 +95,7 @@ instances, occurrences, id_to_name_map = get_instances(assembly, max_depth=1)
 subassemblies, rigid_subassemblies = get_subassemblies(assembly, client, instances)
 parts = get_parts(assembly, rigid_subassemblies, client, instances)
 
-mates, relations = get_mates_and_relations(assembly, subassemblies, rigid_subassemblies, id_to_name_map, parts)
+mates, relations = get_mates_and_relations(assembly, occurrences, subassemblies, rigid_subassemblies, id_to_name_map, parts)
 ```
 
 ---

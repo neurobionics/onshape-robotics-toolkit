@@ -136,6 +136,28 @@ def get_topological_order(graph: nx.DiGraph) -> tuple[str]:
     return order
 
 
+def get_parts_involved_in_mates(mates: dict[str, Union[MateFeatureData]]) -> set[str]:
+    """
+    Extract all part IDs that are involved in mates.
+
+    Args:
+        mates: Dictionary of mates in the assembly.
+
+    Returns:
+        Set of part IDs that are involved in mates.
+    """
+    involved_parts = set()
+    for mate_key in mates:
+        try:
+            child, parent = mate_key.split(MATE_JOINER)
+            involved_parts.add(child)
+            involved_parts.add(parent)
+        except ValueError:
+            LOGGER.warning(f"Mate key: {mate_key} is not in the correct format")
+            continue
+    return involved_parts
+
+
 def create_graph(
     occurrences: dict[str, Occurrence],
     instances: dict[str, Union[PartInstance, AssemblyInstance]],
@@ -169,7 +191,11 @@ def create_graph(
     """
 
     graph = nx.Graph()
-    user_defined_root = add_nodes_to_graph(graph, occurrences, instances, parts, use_user_defined_root)
+
+    # First, get all parts involved in mates
+    involved_parts = get_parts_involved_in_mates(mates)
+
+    user_defined_root = add_nodes_to_graph(graph, occurrences, instances, parts, involved_parts, use_user_defined_root)
 
     if user_defined_root and user_defined_root.split(SUBASSEMBLY_JOINER)[0] in parts:
         # this means that the user defined root is a rigid subassembly
@@ -198,30 +224,33 @@ def add_nodes_to_graph(
     occurrences: dict[str, Occurrence],
     instances: dict[str, Union[PartInstance, AssemblyInstance]],
     parts: dict[str, Part],
+    involved_parts: set[str],
     use_user_defined_root: bool,
 ) -> str:
     """
-    Add nodes to the graph.
+    Add nodes to the graph for parts that are involved in mates.
 
     Args:
         graph: The graph to add nodes to.
         occurrences: Dictionary of occurrences in the assembly.
         instances: Dictionary of instances in the assembly.
         parts: Dictionary of parts in the assembly.
+        involved_parts: Set of part IDs that are involved in mates.
         use_user_defined_root: Whether to use the user defined root node.
 
     Returns:
         The user defined root node if it exists.
 
     Examples:
-        >>> add_nodes_to_graph(graph, occurrences, instances, parts, use_user_defined_root=True)
+        >>> add_nodes_to_graph(graph, occurrences, instances, parts, involved_parts, use_user_defined_root=True)
     """
     user_defined_root = None
     for occurrence in occurrences:
         if use_user_defined_root and occurrences[occurrence].fixed:
             user_defined_root = occurrence
 
-        if instances[occurrence].type == InstanceType.PART:
+        # Only add nodes for parts that are involved in mates
+        if instances[occurrence].type == InstanceType.PART and occurrence in involved_parts:
             try:
                 if occurrences[occurrence].hidden:
                     continue
