@@ -704,6 +704,29 @@ def get_occurrence_name(occurrences: list[str], subassembly_prefix: Optional[str
     return f"{prefix}{SUBASSEMBLY_JOINER.join(occurrences)}"
 
 
+def find_occurrence_by_id(occurrence_id: str, occurrences: dict[str, Occurrence]) -> Optional[Occurrence]:
+    """
+    Find occurrence by ID, handling both direct keys and IDs within occurrence paths.
+
+    Args:
+        occurrence_id: The occurrence ID to search for
+        occurrences: Dictionary of occurrences keyed by occurrence paths
+
+    Returns:
+        The occurrence if found, None otherwise
+    """
+    # First try direct key lookup (most common case for root-level entities)
+    if occurrence_id in occurrences:
+        return occurrences[occurrence_id]
+
+    # Search through all occurrences to find one that contains this ID in its path
+    for occurrence in occurrences.values():
+        if occurrence_id in occurrence.path:
+            return occurrence
+
+    return None
+
+
 def join_mate_occurrences(parent: list[str], child: list[str], prefix: Optional[str] = None) -> str:
     """
     Join two occurrence paths with a mate joiner.
@@ -996,11 +1019,24 @@ async def _process_assembly_patterns_async(
 
                 # Get occurrence transforms for the seed, pattern entity,
                 # and other entity, these are in world coordinates
-                seed_entity_occurrence_tf = np.matrix(occurrences.get(occurrence_id).transform).reshape(4, 4)
-                pattern_entity_occurrence_tf = np.matrix(occurrences.get(pattern_instance_id).transform).reshape(4, 4)
-                other_entity_occurrence_tf = np.matrix(
-                    occurrences.get(pattern_mate.matedEntities[other_entity_index].matedOccurrence[0]).transform
-                ).reshape(4, 4)
+                seed_occurrence = find_occurrence_by_id(occurrence_id, occurrences)
+                pattern_occurrence = find_occurrence_by_id(pattern_instance_id, occurrences)
+                other_entity_id = pattern_mate.matedEntities[other_entity_index].matedOccurrence[0]
+                other_occurrence = find_occurrence_by_id(other_entity_id, occurrences)
+
+                if seed_occurrence is None:
+                    LOGGER.warning(f"Could not find occurrence for seed entity: {occurrence_id}")
+                    continue
+                if pattern_occurrence is None:
+                    LOGGER.warning(f"Could not find occurrence for pattern entity: {pattern_instance_id}")
+                    continue
+                if other_occurrence is None:
+                    LOGGER.warning(f"Could not find occurrence for other entity: {other_entity_id}")
+                    continue
+
+                seed_entity_occurrence_tf = np.matrix(seed_occurrence.transform).reshape(4, 4)
+                pattern_entity_occurrence_tf = np.matrix(pattern_occurrence.transform).reshape(4, 4)
+                other_entity_occurrence_tf = np.matrix(other_occurrence.transform).reshape(4, 4)
 
                 # Calculate the relative transform from seed to pattern position: M_rel = M_pattern * M_seed^(-1)
                 seed_to_pattern_relative_tf = pattern_entity_occurrence_tf @ np.linalg.inv(seed_entity_occurrence_tf)
