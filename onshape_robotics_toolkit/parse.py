@@ -1243,6 +1243,72 @@ async def get_mates_and_relations_async(
     return mates_map, relations_map
 
 
+def ensure_unique_mate_names(mates: dict[str, MateFeatureData]) -> None:
+    """
+    Ensure all mate names are unique by appending suffixes to duplicates.
+
+    This function modifies the mate names in-place to ensure URDF joint name uniqueness.
+    Pattern-expanded mates and regular mates might have conflicting names, so we need
+    to detect and resolve these conflicts iteratively until all names are unique.
+
+    Args:
+        mates: Dictionary mapping mate keys to mate feature data
+
+    Examples:
+        >>> mates = {
+        ...     "key1": MateFeatureData(name="joint1", ...),
+        ...     "key2": MateFeatureData(name="joint1", ...),  # duplicate
+        ...     "key3": MateFeatureData(name="joint1_2", ...),  # conflicts with renamed
+        ... }
+        >>> ensure_unique_mate_names(mates)
+        >>> # Result: "joint1", "joint1_2", "joint1_3"
+    """
+    max_iterations = 10  # Prevent infinite loops
+    iteration = 0
+
+    while iteration < max_iterations:
+        name_counts = {}
+        mate_keys_by_name = {}
+
+        # Count occurrences of each current name
+        for mate_key, mate in mates.items():
+            name = mate.name
+            name_counts[name] = name_counts.get(name, 0) + 1
+            if name not in mate_keys_by_name:
+                mate_keys_by_name[name] = []
+            mate_keys_by_name[name].append(mate_key)
+
+        # Check if we have any duplicates
+        duplicates_found = False
+        for name, count in name_counts.items():
+            if count > 1:
+                duplicates_found = True
+                mate_keys = mate_keys_by_name[name]
+
+                # Generate unique names for all duplicates except the first
+                for i, mate_key in enumerate(mate_keys[1:], start=2):
+                    # Find a unique name by trying sequential suffixes
+                    base_name = name
+                    suffix = i
+                    new_name = f"{base_name}_{suffix}"
+
+                    # Keep incrementing suffix until we find a unique name
+                    while new_name in name_counts:
+                        suffix += 1
+                        new_name = f"{base_name}_{suffix}"
+
+                    mates[mate_key].name = new_name
+                    LOGGER.debug(f"Renamed duplicate mate '{name}' to '{new_name}' for key {mate_key}")
+
+        if not duplicates_found:
+            break
+
+        iteration += 1
+
+    if iteration >= max_iterations:
+        LOGGER.warning(f"Could not resolve all mate name conflicts after {max_iterations} iterations")
+
+
 def get_mates_and_relations(
     assembly: Assembly,
     instance_proxy_map: dict[str, str],
@@ -1267,8 +1333,13 @@ def get_mates_and_relations(
         - A dictionary mapping occurrence paths to their corresponding mates.
         - A dictionary mapping occurrence paths to their corresponding relations.
     """
-    return asyncio.run(
+    mates, relations = asyncio.run(
         get_mates_and_relations_async(
             assembly, instance_proxy_map, occurrences, subassemblies, rigid_subassemblies, id_to_name_map, parts
         )
     )
+
+    # Ensure all mate names are unique for valid URDF generation
+    ensure_unique_mate_names(mates)
+
+    return mates, relations

@@ -453,6 +453,164 @@ parent_to_mate_tf = (
 
 This ensures that parts buried within complex rigid subassembly hierarchies are positioned correctly in the final URDF, maintaining proper kinematic relationships regardless of their nesting depth within the CAD assembly structure.
 
+# Disconnected Graph Resolution
+
+## Overview
+
+When processing assemblies at shallow depths (e.g., `max_depth=1`), the toolkit may encounter scenarios where mate features reference individual parts within rigid subassemblies instead of the rigid subassembly roots. This creates disconnected subgraphs that result in incomplete robot models with missing parts and joints.
+
+## The Problem
+
+### Root Cause
+
+At `max_depth=1`, rigid subassemblies are downloaded as single parts to optimize performance. However, mate features still contain references to the individual parts that existed before the subassembly was treated as rigid. This mismatch causes:
+
+1. **Graph Disconnection**: Mate keys reference non-existent individual parts instead of rigid subassembly roots
+2. **Component Removal**: The graph processing routine removes disconnected components
+3. **Incomplete Models**: Final URDF lacks parts and joints that should be included
+
+### Example Scenario
+
+```
+Assembly Structure (max_depth=1):
+├── Motor (individual part)
+├── Wheel Subassembly (rigid, downloaded as single part)
+│   ├── Hub (not individually accessible)
+│   └── Rollers (not individually accessible)
+└── Mate: Motor ↔ Hub (references non-accessible Hub part)
+```
+
+The mate references `Hub` which doesn't exist at `max_depth=1`, causing the connection to fail.
+
+## The Solution: Instance Proxy Mapping
+
+### Proxy Map Generation
+
+The `get_instances()` function creates an `instance_proxy_map` that maps individual part instance keys to their rigid subassembly container names:
+
+```python
+instance_proxy_map = {
+    "wheel_subassembly_JOINER_hub": "wheel_subassembly",
+    "wheel_subassembly_JOINER_roller_1": "wheel_subassembly",
+    # ... other mappings
+}
+```
+
+### Mate Key Resolution
+
+#### Core Functions
+
+**`get_proxy_occurrence_name()`**: Maps occurrence paths to their proxy names using the instance proxy map.
+
+```python
+def get_proxy_occurrence_name(
+    occurrences: list[str],
+    instance_proxy_map: dict[str, str],
+    subassembly_prefix: Optional[str] = None
+) -> str:
+    # Build full occurrence key
+    prefix = f"{subassembly_prefix}{SUBASSEMBLY_JOINER}" if subassembly_prefix else ""
+    occurrence_key = f"{prefix}{SUBASSEMBLY_JOINER.join(occurrences)}"
+
+    # Use proxy mapping if available, otherwise use original path
+    return instance_proxy_map.get(occurrence_key, SUBASSEMBLY_JOINER.join(occurrences))
+```
+
+**`join_mate_occurrences_with_proxy()`**: Creates mate keys using proxy-mapped occurrence names.
+
+```python
+def join_mate_occurrences_with_proxy(
+    parent_occurrences: list[str],
+    child_occurrences: list[str],
+    instance_proxy_map: dict[str, str],
+    subassembly_prefix: Optional[str] = None
+) -> str:
+    parent_name = get_proxy_occurrence_name(parent_occurrences, instance_proxy_map, subassembly_prefix)
+    child_name = get_proxy_occurrence_name(child_occurrences, instance_proxy_map, subassembly_prefix)
+    return f"{parent_name}{MATE_JOINER}{child_name}"
+```
+
+### Integration Points
+
+#### Regular Mate Processing
+
+```python
+# In process_features_async()
+mate_key = join_mate_occurrences_with_proxy(
+    parent_occurrences,
+    child_occurrences,
+    instance_proxy_map,
+    subassembly_prefix
+)
+```
+
+#### Pattern Mate Processing
+
+```python
+# In process_patterns_async()
+for pattern_instance in pattern_instances:
+    pattern_mate_key = join_mate_occurrences_with_proxy(
+        pattern_parent_occurrences,
+        pattern_child_occurrences,
+        instance_proxy_map,
+        subassembly_prefix
+    )
+```
+
+## Unique Mate Name Resolution
+
+### The Challenge
+
+Pattern expansion can create multiple mates with identical names (e.g., `Revolute_1` appearing twice), making the URDF invalid since joint names must be unique.
+
+### Solution: Iterative Conflict Resolution
+
+The `ensure_unique_mate_names()` function implements an iterative approach to resolve naming conflicts:
+
+```python
+def ensure_unique_mate_names(mates: dict[str, MateFeatureData]) -> None:
+    max_iterations = 10
+    iteration = 0
+
+    while iteration < max_iterations:
+        # Count occurrences of each mate name
+        name_counts = Counter(mate.featureData.name for mate in mates.values())
+
+        # Find and resolve conflicts
+        for name, count in name_counts.items():
+            if count > 1:
+                # Generate unique suffixes for duplicates
+                # Ensure new names don't conflict with existing names
+```
+
+#### Key Features
+
+1. **Iterative Resolution**: Handles complex chains of naming conflicts
+2. **Conflict Avoidance**: Ensures new names don't create additional conflicts
+3. **Deterministic Ordering**: Processes mates in consistent order for reproducible results
+4. **Bounded Execution**: Limits iterations to prevent infinite loops
+
+## Workflow Integration
+
+### Processing Pipeline
+
+1. **Instance Mapping**: `get_instances()` creates `instance_proxy_map`
+2. **Feature Processing**: Pass `instance_proxy_map` through processing pipeline
+3. **Mate Key Generation**: Use proxy-aware functions for all mate key creation
+4. **Name Uniqueness**: Apply `ensure_unique_mate_names()` before URDF generation
+5. **Graph Construction**: Connected graph with proper rigid subassembly references
+
+### Result Validation
+
+The solution ensures:
+
+- **Connected Graphs**: All parts properly linked through proxy-mapped mate keys
+- **Unique Joint Names**: URDF compliance with distinct joint identifiers
+- **Consistent Transforms**: Proper coordinate system handling for rigid subassemblies
+- **Pattern Support**: Correct expansion of mates for patterned components
+
+This comprehensive approach resolves disconnected graph issues while maintaining the performance benefits of shallow assembly processing depths.
+
 ## Key Classes and Their Roles
 
 ### Client Class
