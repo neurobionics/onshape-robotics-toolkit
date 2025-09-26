@@ -103,8 +103,10 @@ def get_robot_link(
             LOGGER.warning(f"Part {part.partId} has no mass properties, using identity transform")
 
     elif mate.matedEntities[CHILD].parentCS:
+        LOGGER.debug(f"DEBUG: Link {name} has parentCS, applying hierarchical transform")
         _link_to_stl_tf = mate.matedEntities[CHILD].parentCS.part_tf @ mate.matedEntities[CHILD].matedCS.part_to_mate_tf
     else:
+        LOGGER.debug(f"DEBUG: Link {name} using direct part_to_mate_tf")
         _link_to_stl_tf = mate.matedEntities[CHILD].matedCS.part_to_mate_tf
 
     _stl_to_link_tf = np.matrix(np.linalg.inv(_link_to_stl_tf))
@@ -224,20 +226,29 @@ def get_robot_joint(
     """
     links = []
     if isinstance(mate, MateFeatureData):
-        if not is_rigid_assembly:
-            parent_to_mate_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+        # Check if we have a parentCS (hierarchical transform) regardless of rigid assembly status
+        # This handles the case where flexible assemblies contain parts from collapsed rigid subassemblies
+        if mate.matedEntities[PARENT].parentCS is not None:
+            LOGGER.debug(f"DEBUG: Using parentCS for joint {mate.name} from {parent} to {child}")
+            LOGGER.debug(f"DEBUG: parentCS.part_tf = {mate.matedEntities[PARENT].parentCS.part_tf}")
+            LOGGER.debug(
+                f"DEBUG: parent matedCS.part_to_mate_tf = {mate.matedEntities[PARENT].matedCS.part_to_mate_tf}"
+            )
+            parent_to_mate_tf = (
+                mate.matedEntities[PARENT].parentCS.part_tf @ mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+            )
+            LOGGER.debug(f"DEBUG: combined parent_to_mate_tf = {parent_to_mate_tf}")
         else:
-            # for rigid assemblies, get the parentCS and transform it to the mateCS
-            if mate.matedEntities[PARENT].parentCS is not None:
-                parent_to_mate_tf = (
-                    mate.matedEntities[PARENT].parentCS.part_tf @ mate.matedEntities[PARENT].matedCS.part_to_mate_tf
-                )
-            else:
-                # If parentCS is None, the rigid assembly itself is the parent, use direct transformation
-                parent_to_mate_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+            LOGGER.debug(f"DEBUG: No parentCS for joint {mate.name} from {parent} to {child}, using direct transform")
+            # No hierarchical transform needed, use direct part-to-mate transformation
+            parent_to_mate_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+            LOGGER.debug(f"DEBUG: direct parent_to_mate_tf = {parent_to_mate_tf}")
 
+    LOGGER.debug(f"DEBUG: stl_to_parent_tf = {stl_to_parent_tf}")
     stl_to_mate_tf = stl_to_parent_tf @ parent_to_mate_tf
+    LOGGER.debug(f"DEBUG: final stl_to_mate_tf = {stl_to_mate_tf}")
     origin = Origin.from_matrix(stl_to_mate_tf)
+    LOGGER.debug(f"DEBUG: final origin = {origin.xyz} rpy={origin.rpy}")
     sanitized_name = get_sanitized_name(mate.name)
 
     LOGGER.info(f"Creating robot joint from {parent} to {child}")

@@ -840,13 +840,23 @@ def build_hierarchical_transform_for_rigid_subassembly(
     Returns:
         Transform matrix from rigid subassembly root to the part's coordinate system
     """
+    LOGGER.debug(
+        f"DEBUG: build_hierarchical_transform_for_rigid_subassembly called with occurrences_list={occurrences_list}"
+    )
+
     if len(occurrences_list) < 2:
+        LOGGER.debug("DEBUG: Short occurrences_list, returning identity matrix")
         return np.eye(4)
 
     rigid_sub_name = occurrences_list[0]
     if rigid_sub_name not in rigid_subassembly_occurrence_map:
         LOGGER.warning(f"Rigid subassembly {rigid_sub_name} not found in occurrence map")
         return np.eye(4)
+
+    LOGGER.debug(
+        f"DEBUG: Found rigid subassembly {rigid_sub_name}, \
+            available keys: {list(rigid_subassembly_occurrence_map[rigid_sub_name].keys())}"
+    )
 
     parent_tf = np.eye(4)
     rigid_sub_occurrences = rigid_subassembly_occurrence_map[rigid_sub_name]
@@ -855,14 +865,157 @@ def build_hierarchical_transform_for_rigid_subassembly(
     for i in range(len(occurrences_list) - 1):
         # Build key relative to this rigid subassembly (exclude the rigid subassembly name itself)
         hierarchical_key = SUBASSEMBLY_JOINER.join(occurrences_list[1 : i + 2])
+        LOGGER.debug(f"DEBUG: Looking for hierarchical_key: {hierarchical_key}")
         _occurrence_data = rigid_sub_occurrences.get(hierarchical_key)
         if _occurrence_data is None:
             LOGGER.warning(f"No occurrence data found for hierarchical key: {hierarchical_key}")
             continue
         _occurrence_tf = np.matrix(_occurrence_data.transform).reshape(4, 4)
+        LOGGER.debug(f"DEBUG: Found occurrence transform for {hierarchical_key}: {_occurrence_tf}")
         parent_tf = parent_tf @ _occurrence_tf
+        LOGGER.debug(f"DEBUG: Cumulative parent_tf after {hierarchical_key}: {parent_tf}")
 
+    LOGGER.debug(f"DEBUG: Final hierarchical transform: {parent_tf}")
     return parent_tf
+
+
+def build_hierarchical_transform_with_flexible_parents(
+    occurrences_list: list[str],
+    rigid_subassembly_occurrence_map: dict[str, dict[str, Occurrence]],
+    flexible_occurrences: dict[str, Occurrence],
+    rigid_subassemblies: dict[str, RootAssembly],
+    subassembly_prefix: Optional[str] = None,
+) -> np.matrix:
+    """
+    Build hierarchical transform chain for a part that may be within a rigid subassembly
+    that itself is nested within flexible parent components.
+
+    This handles the mixed flexible-rigid scenario that occurs at intermediate max_depth values.
+
+    Args:
+        occurrences_list: List like [flexible_parent, rigid_sub_name, level1, part_name]
+        rigid_subassembly_occurrence_map: Map of rigid subassembly occurrences
+        flexible_occurrences: Map of flexible assembly occurrences with transforms
+        rigid_subassemblies: Map of rigid subassembly instances
+        subassembly_prefix: Optional prefix for subassembly keys
+
+    Returns:
+        Transform matrix from assembly root to the part's coordinate system
+    """
+    if len(occurrences_list) < 2:
+        return np.eye(4)
+
+    # Find the first rigid subassembly in the occurrence path
+    rigid_start_idx = None
+    for i, occurrence_name in enumerate(occurrences_list):
+        if occurrence_name in rigid_subassemblies:
+            rigid_start_idx = i
+            break
+
+    if rigid_start_idx is None:
+        # No rigid subassembly found, shouldn't happen but handle gracefully
+        LOGGER.warning(f"No rigid subassembly found in occurrences: {occurrences_list}")
+        return np.eye(4)
+
+    # Build transform from root to the rigid subassembly through flexible parents
+    flexible_to_rigid_tf = np.eye(4)
+
+    # Apply transforms for flexible parents leading to the rigid subassembly
+    for i in range(rigid_start_idx):
+        # Build the occurrence key for flexible components
+        if subassembly_prefix:
+            occurrence_key = f"{subassembly_prefix}_25B5_{occurrences_list[i]}"
+        else:
+            occurrence_key = occurrences_list[i]
+
+        if occurrence_key in flexible_occurrences:
+            flexible_tf = np.matrix(flexible_occurrences[occurrence_key].transform).reshape(4, 4)
+            flexible_to_rigid_tf = flexible_to_rigid_tf @ flexible_tf
+        else:
+            LOGGER.warning(f"Flexible occurrence {occurrence_key} not found in occurrences map")
+
+    # Build transform within the rigid subassembly
+    rigid_occurrences_sublist = occurrences_list[rigid_start_idx:]
+    rigid_internal_tf = build_hierarchical_transform_for_rigid_subassembly(
+        rigid_occurrences_sublist, rigid_subassembly_occurrence_map
+    )
+
+    # Combine the transforms: flexible_to_rigid @ rigid_internal
+    total_tf = flexible_to_rigid_tf @ rigid_internal_tf
+
+    return total_tf
+
+
+def build_hierarchical_transform_with_flexible_parents_v2(
+    occurrences_list: list[str],
+    rigid_subassembly_occurrence_map: dict[str, dict[str, Occurrence]],
+    flexible_occurrences: dict[str, Occurrence],
+    rigid_subassembly_sanitized_to_prefixed: dict[str, str],
+    subassembly_prefix: Optional[str] = None,
+) -> np.matrix:
+    """
+    Build hierarchical transform chain for a part that may be within a rigid subassembly
+    that itself is nested within flexible parent components.
+
+    This handles the mixed flexible-rigid scenario that occurs at intermediate max_depth values.
+    Updated version that uses sanitized-to-prefixed mapping for proper name resolution.
+
+    Args:
+        occurrences_list: List like [flexible_parent, rigid_sub_name, level1, part_name]
+        rigid_subassembly_occurrence_map: Map of rigid subassembly occurrences
+        flexible_occurrences: Map of flexible assembly occurrences with transforms
+        rigid_subassembly_sanitized_to_prefixed: Mapping from sanitized to prefixed names
+        subassembly_prefix: Optional prefix for subassembly keys
+
+    Returns:
+        Transform matrix from assembly root to the part's coordinate system
+    """
+    if len(occurrences_list) < 2:
+        return np.eye(4)
+
+    # Find the first rigid subassembly in the occurrence path
+    rigid_start_idx = None
+    for i, occurrence_name in enumerate(occurrences_list):
+        if occurrence_name in rigid_subassembly_sanitized_to_prefixed:
+            rigid_start_idx = i
+            break
+
+    if rigid_start_idx is None:
+        # No rigid subassembly found, shouldn't happen but handle gracefully
+        LOGGER.warning(f"No rigid subassembly found in occurrences: {occurrences_list}")
+        return np.eye(4)
+
+    # Build transform from root to the rigid subassembly through flexible parents
+    flexible_to_rigid_tf = np.eye(4)
+
+    # Apply transforms for flexible parents leading to the rigid subassembly
+    for i in range(rigid_start_idx):
+        # Build the occurrence key for flexible components
+        if subassembly_prefix:
+            occurrence_key = f"{subassembly_prefix}_25B5_{occurrences_list[i]}"
+        else:
+            occurrence_key = occurrences_list[i]
+
+        if occurrence_key in flexible_occurrences:
+            flexible_tf = np.matrix(flexible_occurrences[occurrence_key].transform).reshape(4, 4)
+            flexible_to_rigid_tf = flexible_to_rigid_tf @ flexible_tf
+        else:
+            LOGGER.warning(f"Flexible occurrence {occurrence_key} not found in occurrences map")
+
+    # Build transform within the rigid subassembly
+    rigid_occurrences_sublist = occurrences_list[rigid_start_idx:]
+    # Update the first occurrence to use the prefixed name
+    rigid_sanitized_name = rigid_occurrences_sublist[0]
+    rigid_prefixed_name = rigid_subassembly_sanitized_to_prefixed[rigid_sanitized_name]
+    prefixed_rigid_occurrences_sublist = [rigid_prefixed_name] + rigid_occurrences_sublist[1:]
+    rigid_internal_tf = build_hierarchical_transform_for_rigid_subassembly(
+        prefixed_rigid_occurrences_sublist, rigid_subassembly_occurrence_map
+    )
+
+    # Combine the transforms: flexible_to_rigid @ rigid_internal
+    total_tf = flexible_to_rigid_tf @ rigid_internal_tf
+
+    return total_tf
 
 
 async def build_rigid_subassembly_occurrence_map(
@@ -988,28 +1141,178 @@ async def process_features_async(
                 LOGGER.warning(f"Key not found in {id_to_name_map.keys()}")
                 continue
 
+            LOGGER.debug(f"Processing mate: parent_occurrences={parent_occurrences}")
+            LOGGER.debug(f"rigid_subassemblies keys: {list(rigid_subassemblies.keys())}")
+
+            # Create a mapping from sanitized names to prefixed names for rigid subassemblies
+            rigid_subassembly_sanitized_to_prefixed = {}
+            for prefixed_key in rigid_subassemblies:
+                # Extract the sanitized name from the prefixed key
+                sanitized_name = prefixed_key.split(SUBASSEMBLY_JOINER)[-1]
+                rigid_subassembly_sanitized_to_prefixed[sanitized_name] = prefixed_key
+
+            LOGGER.debug(f"Rigid subassembly name mapping: {rigid_subassembly_sanitized_to_prefixed}")
+            LOGGER.debug(
+                f"Parent[0] in rigid_subassemblies: {parent_occurrences[0] in rigid_subassembly_sanitized_to_prefixed}"
+            )
+            LOGGER.debug(f"Len parent_occurrences: {len(parent_occurrences)}")
+            if len(parent_occurrences) > 1:
+                LOGGER.debug(
+                    f"Any parent occ in rigid_subassemblies: \
+                        {any(occ in rigid_subassembly_sanitized_to_prefixed for occ in parent_occurrences)}"
+                )
+
             # Handle rigid subassemblies
-            if parent_occurrences[0] in rigid_subassemblies:
+            if parent_occurrences[0] in rigid_subassembly_sanitized_to_prefixed:
+                # Get the prefixed name for rigid subassembly lookups
+                prefixed_parent_name = rigid_subassembly_sanitized_to_prefixed[parent_occurrences[0]]
+
                 # Build hierarchical transform chain from rigid subassembly root to the part
+                # Update the occurrence list to use prefixed names for rigid subassembly lookup
+                prefixed_parent_occurrences = [prefixed_parent_name] + parent_occurrences[1:]
                 parent_tf = build_hierarchical_transform_for_rigid_subassembly(
-                    parent_occurrences, rigid_subassembly_occurrence_map
+                    prefixed_parent_occurrences, rigid_subassembly_occurrence_map
                 )
                 parent_parentCS = MatedCS.from_tf(parent_tf)
-                parts[parent_occurrences[0]].rigidAssemblyToPartTF[parent_occurrences[1]] = parent_parentCS.part_tf
+                parts[prefixed_parent_name].rigidAssemblyToPartTF[parent_occurrences[1]] = parent_parentCS.part_tf
                 feature.featureData.matedEntities[PARENT].parentCS = parent_parentCS
 
-                parent_occurrences = [parent_occurrences[0]]
+                # Use the prefixed name for the mate connection
+                parent_occurrences = [prefixed_parent_name]
+            elif len(parent_occurrences) > 1 and any(
+                occ in rigid_subassembly_sanitized_to_prefixed for occ in parent_occurrences
+            ):
+                # Handle nested rigid subassemblies within flexible parents
+                # Pass the sanitized-to-prefixed mapping instead of using direct rigid_subassemblies check
+                parent_tf = build_hierarchical_transform_with_flexible_parents_v2(
+                    parent_occurrences,
+                    rigid_subassembly_occurrence_map,
+                    occurrences,
+                    rigid_subassembly_sanitized_to_prefixed,
+                    subassembly_prefix,
+                )
+                parent_parentCS = MatedCS.from_tf(parent_tf)
+                # Find the rigid subassembly in the path and get its prefixed name
+                rigid_idx = next(
+                    i for i, occ in enumerate(parent_occurrences) if occ in rigid_subassembly_sanitized_to_prefixed
+                )
+                prefixed_rigid_name = rigid_subassembly_sanitized_to_prefixed[parent_occurrences[rigid_idx]]
+                parts[prefixed_rigid_name].rigidAssemblyToPartTF[parent_occurrences[-1]] = parent_parentCS.part_tf
+                feature.featureData.matedEntities[PARENT].parentCS = parent_parentCS
 
-            if child_occurrences[0] in rigid_subassemblies:
+                # Use the prefixed name for the mate connection
+                parent_occurrences = [prefixed_rigid_name]
+
+            LOGGER.debug(f"Processing mate: child_occurrences={child_occurrences}")
+            LOGGER.debug(
+                f"Child[0] in rigid_subassemblies: {child_occurrences[0] in rigid_subassembly_sanitized_to_prefixed}"
+            )
+            LOGGER.debug(f"Len child_occurrences: {len(child_occurrences)}")
+            if len(child_occurrences) > 1:
+                LOGGER.debug(
+                    f"Any child occ in rigid_subassemblies: \
+                        {any(occ in rigid_subassembly_sanitized_to_prefixed for occ in child_occurrences)}"
+                )
+
+            if child_occurrences[0] in rigid_subassembly_sanitized_to_prefixed:
+                # Get the prefixed name for rigid subassembly lookups
+                prefixed_child_name = rigid_subassembly_sanitized_to_prefixed[child_occurrences[0]]
+
                 # Build hierarchical transform chain from rigid subassembly root to the part
+                # Update the occurrence list to use prefixed names for rigid subassembly lookup
+                prefixed_child_occurrences = [prefixed_child_name] + child_occurrences[1:]
                 parent_tf = build_hierarchical_transform_for_rigid_subassembly(
-                    child_occurrences, rigid_subassembly_occurrence_map
+                    prefixed_child_occurrences, rigid_subassembly_occurrence_map
                 )
                 child_parentCS = MatedCS.from_tf(parent_tf)
-                parts[child_occurrences[0]].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
+                parts[prefixed_child_name].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
                 feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
 
-                child_occurrences = [child_occurrences[0]]
+                # Use the prefixed name for the mate connection
+                child_occurrences = [prefixed_child_name]
+            elif len(child_occurrences) > 1 and any(
+                occ in rigid_subassembly_sanitized_to_prefixed for occ in child_occurrences
+            ):
+                # Handle nested rigid subassemblies within flexible parents
+                # Pass the sanitized-to-prefixed mapping instead of using direct rigid_subassemblies check
+                parent_tf = build_hierarchical_transform_with_flexible_parents_v2(
+                    child_occurrences,
+                    rigid_subassembly_occurrence_map,
+                    occurrences,
+                    rigid_subassembly_sanitized_to_prefixed,
+                    subassembly_prefix,
+                )
+                child_parentCS = MatedCS.from_tf(parent_tf)
+                # Find the rigid subassembly in the path and get its prefixed name
+                rigid_idx = next(
+                    i for i, occ in enumerate(child_occurrences) if occ in rigid_subassembly_sanitized_to_prefixed
+                )
+                prefixed_rigid_name = rigid_subassembly_sanitized_to_prefixed[child_occurrences[rigid_idx]]
+                parts[prefixed_rigid_name].rigidAssemblyToPartTF[child_occurrences[-1]] = child_parentCS.part_tf
+                feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
+
+                # Use the prefixed name for the mate connection
+                child_occurrences = [prefixed_rigid_name]
+            else:
+                # Check if child is in a flexible assembly that contains rigid subassemblies
+                # This handles the case where child parts are siblings of rigid subassemblies
+                # within the same flexible assembly and need coordinate system adjustments
+
+                # Look for a parent occurrence that contains both the child and rigid subassemblies
+                child_needs_coordinate_adjustment = False
+                parent_assembly_prefix = None
+
+                # Check if any parent occurrences contain rigid subassemblies as siblings
+                if any(occ in rigid_subassembly_sanitized_to_prefixed for occ in parent_occurrences):  # noqa: SIM102
+                    # The parent side has rigid subassemblies, check if child is a sibling
+                    if len(parent_occurrences) > 1:
+                        # Parent is like ['wheel_1', 'double-wheel_1', 'single-wheel_X', 'Part_5_X']
+                        # Child is like ['Part_3_X'] - they're siblings in wheel_1 assembly
+                        parent_assembly_prefix = parent_occurrences[0]  # 'wheel_1'
+                        child_needs_coordinate_adjustment = True
+
+                        LOGGER.debug(
+                            f"DEBUG: Child {child_occurrences} needs coordinate adjustment \
+                                relative to parent assembly {parent_assembly_prefix}"
+                        )
+
+                if child_needs_coordinate_adjustment and parent_assembly_prefix:
+                    # Build the child occurrence path relative to the parent assembly
+                    # For child 'Part_3_1' in assembly 'wheel_1', need to get its transform relative to wheel_1
+                    child_occurrence_key = child_occurrences[0]
+
+                    # Build the full occurrence key - need to match the pattern from rigid subassemblies
+                    # Looking at rigid keys like 'wheel_1_EF24_double-wheel_1', the pattern is:
+                    # {parent_assembly}_{JOINER}_{child_name}
+                    if subassembly_prefix:
+                        full_child_key = f"{subassembly_prefix}{SUBASSEMBLY_JOINER} \
+                            {parent_assembly_prefix}{SUBASSEMBLY_JOINER}{child_occurrence_key}"
+                    else:
+                        # Find the joiner from rigid subassembly keys to use consistent naming
+                        # Look at any rigid subassembly key to extract the joiner pattern
+                        sample_rigid_key = next(iter(rigid_subassembly_sanitized_to_prefixed.values()))
+                        # Extract joiner pattern: wheel_1_XXXX_double-wheel_1 -> XXXX is the joiner
+                        parts_of_key = sample_rigid_key.split(SUBASSEMBLY_JOINER)
+                        if len(parts_of_key) >= 2:
+                            # Extract the middle part which is the joiner
+                            key_joiner = parts_of_key[1].split("_")[0] if "_" in parts_of_key[1] else parts_of_key[1]
+                            full_child_key = (
+                                f"{parent_assembly_prefix}_{key_joiner}{SUBASSEMBLY_JOINER}{child_occurrence_key}"
+                            )
+                        else:
+                            full_child_key = f"{parent_assembly_prefix}{SUBASSEMBLY_JOINER}{child_occurrence_key}"
+
+                    LOGGER.debug(f"DEBUG: Looking for child occurrence key: {full_child_key}")
+                    LOGGER.debug(f"DEBUG: Available occurrence keys: {list(occurrences.keys())}")
+
+                    # Get the child's transform relative to the parent assembly
+                    if full_child_key in occurrences:
+                        child_occurrence_tf = np.matrix(occurrences[full_child_key].transform).reshape(4, 4)
+                        child_parentCS = MatedCS.from_tf(child_occurrence_tf)
+                        feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
+                        LOGGER.debug(f"DEBUG: Set child parentCS for {child_occurrence_key}: {child_occurrence_tf}")
+                    else:
+                        LOGGER.debug(f"DEBUG: Child occurrence key {full_child_key} not found in occurrences")
 
             mates_map[
                 join_mate_occurrences_with_proxy(

@@ -611,6 +611,205 @@ The solution ensures:
 
 This comprehensive approach resolves disconnected graph issues while maintaining the performance benefits of shallow assembly processing depths.
 
+# Mixed Flexible-Rigid Assembly Support
+
+## Overview
+
+The onshape-robotics-toolkit supports complex scenarios that occur at intermediate `max_depth` values (typically `max_depth=1`) where assemblies contain a mixture of flexible components and rigid subassemblies. This creates a challenging coordinate system scenario where mates reference parts using different naming conventions and hierarchical structures.
+
+## The Challenge: Name Mapping Mismatch
+
+### Problem Description
+
+At `max_depth=1`, the toolkit encounters a specific challenge:
+
+1. **Flexible assemblies** remain expanded and their individual parts are accessible
+2. **Rigid subassemblies** are collapsed and treated as single entities
+3. **Mate features** reference individual parts using sanitized names (e.g., `double-wheel_1`)
+4. **Rigid subassembly keys** use prefixed names (e.g., `wheel_1_78C6_double-wheel_1`)
+
+This mismatch prevents the hierarchical transform logic from correctly identifying when rigid subassembly transforms need to be applied.
+
+### Example Scenario
+
+```
+Assembly at max_depth=1:
+├── Part_1_1 (individual part, flexible)
+├── wheel_1 (flexible assembly)
+│   ├── double-wheel_1 (rigid subassembly → wheel_1_78C6_double-wheel_1)
+│   │   ├── Part_4_1 (internal part)
+│   │   ├── single-wheel_1 (rigid subassembly → wheel_1_78C6_double-wheel_1_78C6_single-wheel_1)
+│   │   └── single-wheel_2 (rigid subassembly → wheel_1_78C6_double-wheel_1_78C6_single-wheel_2)
+│   └── Part_3_1 (individual part, flexible)
+└── Mate: Part_1_1 ↔ ['wheel_1', 'double-wheel_1', 'Part_4_1']
+```
+
+The mate references `double-wheel_1` but the rigid subassembly map contains `wheel_1_78C6_double-wheel_1`, causing the hierarchical transform detection to fail.
+
+## The Solution: Sanitized-to-Prefixed Name Mapping
+
+### Dynamic Name Mapping Creation
+
+The mate processing logic now creates a dynamic mapping from sanitized names to prefixed names:
+
+```python
+# Create a mapping from sanitized names to prefixed names for rigid subassemblies
+rigid_subassembly_sanitized_to_prefixed = {}
+for prefixed_key in rigid_subassemblies.keys():
+    # Extract the sanitized name from the prefixed key
+    sanitized_name = prefixed_key.split(SUBASSEMBLY_JOINER)[-1]
+    rigid_subassembly_sanitized_to_prefixed[sanitized_name] = prefixed_key
+```
+
+Example mapping:
+
+```python
+{
+    'double-wheel_1': 'wheel_1_78C6_double-wheel_1',
+    'single-wheel_1': 'wheel_1_78C6_double-wheel_1_78C6_single-wheel_1',
+    'single-wheel_2': 'wheel_1_78C6_double-wheel_1_78C6_single-wheel_2'
+}
+```
+
+### Updated Detection Logic
+
+The rigid subassembly detection logic now uses the sanitized names for checking:
+
+```python
+# Before: Failed to detect rigid subassemblies
+if parent_occurrences[0] in rigid_subassemblies:
+    # This would fail because 'double-wheel_1' != 'wheel_1_78C6_double-wheel_1'
+
+# After: Correctly detects rigid subassemblies
+if parent_occurrences[0] in rigid_subassembly_sanitized_to_prefixed:
+    # This succeeds because 'double-wheel_1' is in the mapping
+    prefixed_parent_name = rigid_subassembly_sanitized_to_prefixed[parent_occurrences[0]]
+```
+
+### Hierarchical Transform Application
+
+When hierarchical transforms are needed, the system:
+
+1. **Maps sanitized to prefixed names** for rigid subassembly lookups
+2. **Updates occurrence lists** to use prefixed names in transform functions
+3. **Sets parentCS transforms** using the correct coordinate systems
+4. **Updates mate occurrence paths** to point to rigid subassembly components
+
+```python
+# Apply hierarchical transform using prefixed names
+prefixed_parent_occurrences = [prefixed_parent_name] + parent_occurrences[1:]
+parent_tf = build_hierarchical_transform_for_rigid_subassembly(
+    prefixed_parent_occurrences, rigid_subassembly_occurrence_map
+)
+parent_parentCS = MatedCS.from_tf(parent_tf)
+feature.featureData.matedEntities[PARENT].parentCS = parent_parentCS
+
+# Use prefixed name for mate connection graph
+parent_occurrences = [prefixed_parent_name]
+```
+
+## Enhanced Function Support
+
+### Updated build_hierarchical_transform_with_flexible_parents_v2()
+
+A new version of the flexible parents transform function accepts the sanitized-to-prefixed mapping:
+
+```python
+def build_hierarchical_transform_with_flexible_parents_v2(
+    occurrences_list: list[str],
+    rigid_subassembly_occurrence_map: dict[str, dict[str, Occurrence]],
+    flexible_occurrences: dict[str, Occurrence],
+    rigid_subassembly_sanitized_to_prefixed: dict[str, str],
+    subassembly_prefix: Optional[str] = None,
+) -> np.matrix:
+```
+
+Key improvements:
+
+- Uses sanitized-to-prefixed mapping for rigid subassembly detection
+- Updates occurrence lists with prefixed names before calling hierarchical transform functions
+- Maintains proper coordinate system relationships
+
+### Coordinate System Resolution
+
+The fix ensures proper coordinate system resolution by:
+
+1. **Detecting mixed scenarios**: Identifying when mates span flexible-rigid boundaries
+2. **Applying correct transforms**: Using hierarchical transforms for rigid subassembly parts
+3. **Maintaining graph connectivity**: Ensuring mate keys reference correct rigid subassembly components
+4. **Preserving coordinate accuracy**: Applying parentCS transforms to fix coordinate offsets
+
+## Impact on URDF Generation
+
+### Transform Correction
+
+The fix resolves coordinate system issues that previously caused:
+
+- **Incorrect joint origins**: 20mm offsets due to missing hierarchical transforms
+- **Disconnected graphs**: Parts not properly connected due to name mismatches
+- **Missing components**: Rigid subassembly parts excluded from final URDF
+
+### Example Results
+
+**Before (Incorrect coordinates):**
+
+```xml
+<joint name="Revolute_1_2" type="revolute">
+  <origin xyz="0 0.036 -0.024" rpy="0 0 0"/>  <!-- Wrong: -24mm offset -->
+</joint>
+```
+
+**After (Correct coordinates):**
+
+```xml
+<joint name="Revolute_1_2" type="revolute">
+  <origin xyz="0 0.036 0" rpy="0 0 0"/>  <!-- Correct: proper coordinate -->
+</joint>
+```
+
+## Debugging and Validation
+
+### Debug Logging
+
+The implementation includes comprehensive debug logging:
+
+```python
+LOGGER.debug(f"Rigid subassembly name mapping: {rigid_subassembly_sanitized_to_prefixed}")
+LOGGER.debug(f"Parent[0] in rigid_subassemblies: {parent_occurrences[0] in rigid_subassembly_sanitized_to_prefixed}")
+LOGGER.debug(f"Using parentCS for joint from {parent} to {child}")
+```
+
+### Validation Criteria
+
+The fix ensures:
+
+- **Hierarchical transforms applied**: parentCS transforms are set when needed
+- **Correct coordinate systems**: Joint origins use proper coordinate calculations
+- **Connected component graphs**: All parts properly linked in assembly graph
+- **Unique naming**: Rigid subassembly components have distinct prefixed names
+
+## Integration with Existing Systems
+
+### Backward Compatibility
+
+The mixed flexible-rigid support integrates seamlessly with existing systems:
+
+- **Pattern processing**: Works with both regular and pattern-expanded mates
+- **Rigid subassembly hierarchies**: Compatible with existing hierarchical transform logic
+- **Graph processing**: Maintains existing graph construction and validation
+- **URDF generation**: Uses established coordinate transformation pipeline
+
+### Performance Considerations
+
+The name mapping approach:
+
+- **Minimal overhead**: O(n) mapping creation where n = number of rigid subassemblies
+- **Memory efficient**: Small dictionaries with string mappings
+- **Processing optimized**: Single pass through mate features with cached mappings
+- **Deterministic results**: Consistent mapping ensures reproducible URDF output
+
+This comprehensive solution enables accurate URDF generation for complex mixed flexible-rigid assemblies at intermediate max_depth values while maintaining compatibility with all existing assembly processing features.
+
 ## Key Classes and Their Roles
 
 ### Client Class
