@@ -871,7 +871,9 @@ class Robot:
             with_meta_data=True,
         )
 
-        instances, occurrences, id_to_name_map = get_instances(assembly=assembly, max_depth=max_depth)
+        instances, instance_proxy_map, occurrences, id_to_name_map = get_instances(
+            assembly=assembly, max_depth=max_depth
+        )
         subassemblies, rigid_subassemblies = get_subassemblies(assembly=assembly, client=client, instances=instances)
 
         # Create parts without mass properties first (for mates processing)
@@ -881,6 +883,7 @@ class Robot:
 
         mates, relations = get_mates_and_relations(
             assembly=assembly,
+            instance_proxy_map=instance_proxy_map,
             occurrences=occurrences,
             subassemblies=subassemblies,
             rigid_subassemblies=rigid_subassemblies,

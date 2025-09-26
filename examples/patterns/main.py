@@ -22,8 +22,8 @@ if __name__ == "__main__":
         name="patterns",
         url=OMNI_WHEEL,
         client=client,
-        max_depth=0,
-        use_user_defined_root=False,
+        max_depth=1,
+        use_user_defined_root=True,
         log_assembly=True,
     )
 

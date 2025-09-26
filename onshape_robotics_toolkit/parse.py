@@ -55,6 +55,8 @@ async def traverse_instances_async(
     assembly: Assembly,
     id_to_name_map: dict[str, str],
     instance_map: dict[str, Union[PartInstance, AssemblyInstance]],
+    instance_proxy_map: dict[str, str],
+    rigid_subassembly_prefix: str = "",
 ) -> None:
     """
     Asynchronously traverse the assembly structure to get instances.
@@ -82,14 +84,34 @@ async def traverse_instances_async(
         id_to_name_map[instance.id] = sanitized_name
         instance_map[instance_id] = instance
 
+        # Determine proxy mapping based on rigid subassembly hierarchy
+        if rigid_subassembly_prefix:
+            # We're inside a rigid subassembly, map to the rigid subassembly root
+            instance_proxy_map[instance_id] = rigid_subassembly_prefix
+        else:
+            # Not in a rigid subassembly, map to self
+            instance_proxy_map[instance_id] = instance_id
+
         if instance.type == InstanceType.ASSEMBLY:
             instance_map[instance_id].isRigid = isRigid
 
-        # Handle subassemblies concurrently
-        if instance.type == InstanceType.ASSEMBLY:
+            # Determine the rigid subassembly prefix for child traversal
+            child_rigid_prefix = rigid_subassembly_prefix
+            if isRigid and not rigid_subassembly_prefix:
+                # This is the first rigid subassembly we encounter, set it as the prefix
+                child_rigid_prefix = instance_id
+
             tasks = [
                 traverse_instances_async(
-                    sub_assembly, instance_id, current_depth + 1, max_depth, assembly, id_to_name_map, instance_map
+                    sub_assembly,
+                    instance_id,
+                    current_depth + 1,
+                    max_depth,
+                    assembly,
+                    id_to_name_map,
+                    instance_map,
+                    instance_proxy_map,
+                    child_rigid_prefix,
                 )
                 for sub_assembly in assembly.subAssemblies
                 if sub_assembly.uid == instance.uid
@@ -99,7 +121,7 @@ async def traverse_instances_async(
 
 def get_instances(
     assembly: Assembly, max_depth: int = 0
-) -> tuple[dict[str, Union[PartInstance, AssemblyInstance]], dict[str, Occurrence], dict[str, str]]:
+) -> tuple[dict[str, Union[PartInstance, AssemblyInstance]], dict[str, str], dict[str, Occurrence], dict[str, str]]:
     """
     Optimized synchronous wrapper for `get_instances`.
 
@@ -114,19 +136,14 @@ def get_instances(
     """
     instance_map: dict[str, Union[PartInstance, AssemblyInstance]] = {}
     id_to_name_map: dict[str, str] = {}
+    instance_proxy_map: dict[str, str] = {}
     asyncio.run(
         traverse_instances_async(
-            assembly.rootAssembly,
-            "",
-            0,
-            max_depth,
-            assembly,
-            id_to_name_map,
-            instance_map,
+            assembly.rootAssembly, "", 0, max_depth, assembly, id_to_name_map, instance_map, instance_proxy_map
         )
     )
     occurrence_map = get_occurrences(assembly, id_to_name_map, max_depth)
-    return instance_map, occurrence_map, id_to_name_map
+    return instance_map, instance_proxy_map, occurrence_map, id_to_name_map
 
 
 def get_instances_sync(
@@ -704,6 +721,40 @@ def get_occurrence_name(occurrences: list[str], subassembly_prefix: Optional[str
     return f"{prefix}{SUBASSEMBLY_JOINER.join(occurrences)}"
 
 
+def get_proxy_occurrence_name(
+    occurrences: list[str], instance_proxy_map: dict[str, str], subassembly_prefix: Optional[str] = None
+) -> str:
+    """
+    Get the mapping name for an occurrence path using proxy mappings for rigid subassemblies.
+
+    Args:
+        occurrences: Occurrence path.
+        instance_proxy_map: Mapping of instance IDs to their proxy names (rigid subassembly roots).
+        subassembly_prefix: Prefix for the subassembly.
+
+    Returns:
+        The mapping name using proxy for rigid subassemblies.
+
+    Examples:
+        >>> get_proxy_occurrence_name(["rigid_sub", "part1"], {"rigid_sub_JOINER_part1": "rigid_sub"}, "subassembly1")
+        "subassembly1-SUB-rigid_sub"
+    """
+    # Build the full occurrence path key
+    prefix = f"{subassembly_prefix}{SUBASSEMBLY_JOINER}" if subassembly_prefix else ""
+    occurrence_key = f"{prefix}{SUBASSEMBLY_JOINER.join(occurrences)}"
+
+    # Use proxy mapping if available, otherwise use the original occurrence name
+    proxy_name = instance_proxy_map.get(occurrence_key, SUBASSEMBLY_JOINER.join(occurrences))
+
+    # Handle case where proxy_name includes subassembly prefix already
+    if subassembly_prefix and proxy_name.startswith(f"{subassembly_prefix}{SUBASSEMBLY_JOINER}"):
+        return proxy_name
+    elif subassembly_prefix:
+        return f"{subassembly_prefix}{SUBASSEMBLY_JOINER}{proxy_name}"
+    else:
+        return proxy_name
+
+
 def find_occurrence_by_id(occurrence_id: str, occurrences: dict[str, Occurrence]) -> Optional[Occurrence]:
     """
     Find occurrence by ID, handling both direct keys and IDs within occurrence paths.
@@ -748,6 +799,30 @@ def join_mate_occurrences(parent: list[str], child: list[str], prefix: Optional[
     """
     parent_occurrence = get_occurrence_name(parent, prefix)
     child_occurrence = get_occurrence_name(child, prefix)
+    return f"{parent_occurrence}{MATE_JOINER}{child_occurrence}"
+
+
+def join_mate_occurrences_with_proxy(
+    parent: list[str], child: list[str], instance_proxy_map: dict[str, str], prefix: Optional[str] = None
+) -> str:
+    """
+    Join two occurrence paths with a mate joiner using proxy mappings for rigid subassemblies.
+
+    Args:
+        parent: Occurrence path of the parent entity.
+        child: Occurrence path of the child entity.
+        instance_proxy_map: Mapping of instance IDs to their proxy names (rigid subassembly roots).
+        prefix: Prefix to add to the occurrence path.
+
+    Returns:
+        The joined occurrence path using proxy for rigid subassemblies.
+
+    Examples:
+        >>> join_mate_occurrences_with_proxy(["rigid_sub", "part1"], ["part2"], {"rigid_sub_JOINER_part1": "rigid_sub"})
+        "rigid_sub-MATE-part2"
+    """
+    parent_occurrence = get_proxy_occurrence_name(parent, instance_proxy_map, prefix)
+    child_occurrence = get_proxy_occurrence_name(child, instance_proxy_map, prefix)
     return f"{parent_occurrence}{MATE_JOINER}{child_occurrence}"
 
 
@@ -828,6 +903,7 @@ async def process_features_async(
     rigid_subassemblies: dict[str, RootAssembly],
     subassembly_prefix: Optional[str],
     occurrences: dict[str, Occurrence],
+    instance_proxy_map: dict[str, str],
 ) -> tuple[dict[str, MateFeatureData], dict[str, MateRelationFeatureData]]:
     """
     Process assembly features asynchronously.
@@ -936,9 +1012,10 @@ async def process_features_async(
                 child_occurrences = [child_occurrences[0]]
 
             mates_map[
-                join_mate_occurrences(
+                join_mate_occurrences_with_proxy(
                     parent=parent_occurrences,
                     child=child_occurrences,
+                    instance_proxy_map=instance_proxy_map,
                     prefix=subassembly_prefix,
                 )
             ] = feature.featureData
@@ -964,6 +1041,7 @@ async def process_features_async(
         rigid_subassemblies=rigid_subassemblies,
         subassembly_prefix=subassembly_prefix,
         occurrences=occurrences,
+        instance_proxy_map=instance_proxy_map,
     )
     mates_map.update(pattern_expanded_mates)
     return mates_map, relations_map
@@ -981,6 +1059,7 @@ async def _process_assembly_patterns_async(
     rigid_subassemblies: dict[str, RootAssembly],
     subassembly_prefix: Optional[str],
     occurrences: dict[str, Occurrence],
+    instance_proxy_map: dict[str, str],
 ) -> dict[str, MateFeatureData]:
     """
     Process assembly patterns to expand mates for all pattern instances.
@@ -1095,9 +1174,10 @@ async def _process_assembly_patterns_async(
                     pattern_mate.matedEntities[CHILD].parentCS = child_parentCS
                     child_occurrences = [child_occurrences[0]]
 
-                pattern_mate_key = join_mate_occurrences(
+                pattern_mate_key = join_mate_occurrences_with_proxy(
                     parent=parent_occurrences,
                     child=child_occurrences,
+                    instance_proxy_map=instance_proxy_map,
                     prefix=subassembly_prefix,
                 )
                 pattern_expanded_mates[pattern_mate_key] = pattern_mate
@@ -1107,6 +1187,7 @@ async def _process_assembly_patterns_async(
 
 async def get_mates_and_relations_async(
     assembly: Assembly,
+    instance_proxy_map: dict[str, str],
     occurrences: dict[str, Occurrence],
     subassemblies: dict[str, SubAssembly],
     rigid_subassemblies: dict[str, RootAssembly],
@@ -1141,6 +1222,7 @@ async def get_mates_and_relations_async(
         rigid_subassemblies,
         None,
         occurrences,
+        instance_proxy_map,
     )
 
     for key, subassembly in subassemblies.items():
@@ -1153,6 +1235,7 @@ async def get_mates_and_relations_async(
             rigid_subassemblies,
             key,
             occurrences,
+            instance_proxy_map,
         )
         mates_map.update(sub_mates)
         relations_map.update(sub_relations)
@@ -1162,6 +1245,7 @@ async def get_mates_and_relations_async(
 
 def get_mates_and_relations(
     assembly: Assembly,
+    instance_proxy_map: dict[str, str],
     occurrences: dict[str, Occurrence],
     subassemblies: dict[str, SubAssembly],
     rigid_subassemblies: dict[str, RootAssembly],
@@ -1184,5 +1268,7 @@ def get_mates_and_relations(
         - A dictionary mapping occurrence paths to their corresponding relations.
     """
     return asyncio.run(
-        get_mates_and_relations_async(assembly, occurrences, subassemblies, rigid_subassemblies, id_to_name_map, parts)
+        get_mates_and_relations_async(
+            assembly, instance_proxy_map, occurrences, subassemblies, rigid_subassemblies, id_to_name_map, parts
+        )
     )

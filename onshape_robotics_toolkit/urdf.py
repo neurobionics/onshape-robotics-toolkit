@@ -228,9 +228,13 @@ def get_robot_joint(
             parent_to_mate_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
         else:
             # for rigid assemblies, get the parentCS and transform it to the mateCS
-            parent_to_mate_tf = (
-                mate.matedEntities[PARENT].parentCS.part_tf @ mate.matedEntities[PARENT].matedCS.part_to_mate_tf
-            )
+            if mate.matedEntities[PARENT].parentCS is not None:
+                parent_to_mate_tf = (
+                    mate.matedEntities[PARENT].parentCS.part_tf @ mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+                )
+            else:
+                # If parentCS is None, the rigid assembly itself is the parent, use direct transformation
+                parent_to_mate_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
 
     stl_to_mate_tf = stl_to_parent_tf @ parent_to_mate_tf
     origin = Origin.from_matrix(stl_to_mate_tf)
