@@ -208,3 +208,4 @@ playground
 !examples/simulation/**/ball.xml
 
 *.USD
+*.pkl

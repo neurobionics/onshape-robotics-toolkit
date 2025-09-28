@@ -26,6 +26,9 @@ from pydantic import BaseModel
 
 from onshape_robotics_toolkit.log import LOGGER
 
+# New unified key system for assembly parsing
+Key = tuple[str, ...]
+
 
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -340,6 +343,31 @@ def get_sanitized_name(name: str, replace_with: str = "_", remove_onshape_tags: 
     sanitized_name = re.sub(f"{re.escape(replace_with)}{{2,}}", replace_with, sanitized_name)
 
     return sanitized_name
+
+
+def clean_name_for_urdf(name: str) -> str:
+    """
+    Clean a name to be URDF-safe by replacing problematic characters.
+
+    This is similar to get_sanitized_name but specifically for URDF compatibility,
+    following the reference implementation's approach.
+
+    Args:
+        name: Name to clean for URDF compatibility.
+
+    Returns:
+        URDF-safe name.
+
+    Examples:
+        >>> clean_name_for_urdf("wheel <1>")
+        "wheel_(1)"
+        >>> clean_name_for_urdf("joint/arm\\link")
+        "joint_arm_link"
+    """
+    name = name.replace("<", "(").replace(">", ")")
+    name = re.sub(r"\s+", "_", name)
+    name = re.sub(r"[/\\]+", "_", name)
+    return name
 
 
 def show_video(frames, framerate=60):
