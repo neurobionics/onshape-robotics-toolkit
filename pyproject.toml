@@ -24,6 +24,8 @@ dependencies = [
     "requests>=2.32.3",
     "plotly>=5.24.1",
     "scikit-learn>=1.6.1",
+    "types-regex>=2025.9.18.20250921",
+    "lxml-stubs>=0.5.1",
 ]
 
 [project.optional-dependencies]
@@ -61,6 +63,10 @@ dev-dependencies = [
     "tox>=4.11.1",
     "pymdown-extensions>=10.12",
     "types-lxml>=2024.12.13",
+    "types-requests>=2.32.4.20250913",
+    "types-networkx>=3.5.0.20250918",
+    "scipy-stubs>=1.15.3.0",
+    "pandas-stubs>=2.3.2.250926",
 ]
 
 [tool.mypy]

@@ -377,8 +377,11 @@ class Part(IDBase):
     isStandardContent: bool = Field(..., description="Indicates if the part is standard content.")
     partId: str = Field(..., description="The unique identifier of the part.")
     bodyType: str = Field(..., description="The type of the body (e.g., solid, surface).")
-    mateConnectors: list[PartMateConnector] = Field(None, description="The mate connectors that belong to the part.")
-    documentVersion: str = Field(None, description="The version of the document.")
+    mateConnectors: list[Union[PartMateConnector, None]] = Field(
+        default_factory=list,
+        description="The mate connectors that belong to the part.",
+    )
+    documentVersion: Union[str, None] = Field(None, description="The version of the document.")
     MassProperty: Union[MassProperties, None] = Field(
         None, description="The mass properties of the part, this is a retrieved via a separate API call."
     )
@@ -461,7 +464,7 @@ class PartInstance(IDBase):
 
     isStandardContent: bool = Field(..., description="Indicates if the part is standard content.")
     type: InstanceType = Field(..., description="The type of the instance, must be 'Part'.")
-    documentVersion: str = Field(None, description="The version of the document.")
+    documentVersion: Union[str, None] = Field(None, description="The version of the document.")
     id: str = Field(..., description="The unique identifier for the part instance.")
     name: str = Field(..., description="The name of the part instance.")
     suppressed: bool = Field(..., description="Indicates if the part instance is suppressed.")
@@ -611,7 +614,7 @@ class MatedCS(BaseModel):
     zAxis: list[float] = Field(..., description="The z-axis vector of the coordinate system.")
     origin: list[float] = Field(..., description="The origin point of the coordinate system.")
 
-    part_tf: np.matrix = Field(
+    part_tf: Union[np.matrix, None] = Field(
         None, description="The 4x4 transformation matrix from the part coordinate system to the mate coordinate system."
     )
 
@@ -717,7 +720,7 @@ class MatedEntity(BaseModel):
     matedOccurrence: list[str] = Field(..., description="A list of identifiers for the occurrences that are mated.")
     matedCS: MatedCS = Field(..., description="The coordinate system used for mating the parts.")
 
-    parentCS: MatedCS = Field(
+    parentCS: Union[MatedCS, None] = Field(
         None, description="The 4x4 transformation matrix for the mate feature, used for custom transformations."
     )
 
@@ -829,8 +832,7 @@ class MateGroupFeatureData(BaseModel):
         ..., description="A list of occurrences in the mate group feature."
     )
     name: str = Field(..., description="The name of the mate group feature.")
-
-    id: str = Field(None, description="The unique identifier of the feature.")
+    id: str = Field(..., description="The unique identifier of the feature.")
 
 
 class MateConnectorFeatureData(BaseModel):
@@ -890,7 +892,7 @@ class MateConnectorFeatureData(BaseModel):
     )
     name: str = Field(..., description="The name of the mate connector feature.")
 
-    id: str = Field(None, description="The unique identifier of the feature.")
+    id: str = Field(..., description="The unique identifier of the feature.")
 
 
 class MateRelationFeatureData(BaseModel):
@@ -956,7 +958,7 @@ class MateRelationFeatureData(BaseModel):
     )
     name: str = Field(..., description="The name of the mate relation feature.")
 
-    id: str = Field(None, description="The unique identifier of the feature.")
+    id: str = Field(..., description="The unique identifier of the feature.")
 
 
 class MateFeatureData(BaseModel):
@@ -1022,7 +1024,7 @@ class MateFeatureData(BaseModel):
     mateType: MateType = Field(..., description="The type of mate.")
     name: str = Field(..., description="The name of the mate feature.")
 
-    id: str = Field(None, description="The unique identifier of the feature.")
+    id: str = Field(..., description="The unique identifier of the feature.")
 
 
 class AssemblyFeature(BaseModel):
@@ -1364,14 +1366,12 @@ class Assembly(BaseModel):
 
 
 if __name__ == "__main__":
-    # mated_cs = MatedCS(
-    #     xAxis=[1.0, 2.0, 3.0],
-    #     yAxis=[4.0, 5.0, 6.0],
-    #     zAxis=[7.0, 8.0, 9.0],
-    #     origin=[10.0, 11.0, 12.0],
-    # )
+    mated_cs = MatedCS(
+        xAxis=[1.0, 2.0, 3.0],
+        yAxis=[4.0, 5.0, 6.0],
+        zAxis=[7.0, 8.0, 9.0],
+        origin=[10.0, 11.0, 12.0],
+        part_tf=None,
+    )
 
-    transform = [1.0, 0.0, 0.0, 0.1, 0.0, 1.0, 0.0, -0.15, 0.0, 0.0, 1.0, -0.01, 0.0, 0.0, 0.0, 1.0]
-
-    mated_cs = MatedCS.from_tf(np.matrix(transform).reshape(4, 4))
     print(mated_cs.xAxis, mated_cs.yAxis, mated_cs.zAxis, mated_cs.origin)

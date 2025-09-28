@@ -90,8 +90,8 @@ class Variable(BaseModel):
     type: str = Field(..., description="The type of the variable (LENGTH, ANGLE, NUMBER, ANY)")
     name: str = Field(..., description="The name of the variable")
     value: Union[str, None] = Field(None, description="The value of the variable")
-    description: str = Field(None, description="The description of the variable")
-    expression: str = Field(None, description="The expression of the variable")
+    description: Union[str, None] = Field(None, description="The description of the variable")
+    expression: Union[str, None] = Field(None, description="The expression of the variable")
 
     @field_validator("name")
     def validate_name(cls, value: str) -> str:

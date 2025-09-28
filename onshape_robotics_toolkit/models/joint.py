@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-import lxml.etree as ET
+from lxml.etree import Element, SubElement, _Element
 
 from onshape_robotics_toolkit.models.link import Axis, Origin
 from onshape_robotics_toolkit.utilities import format_number
@@ -97,7 +97,7 @@ class JointLimits:
     lower: float
     upper: float
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the joint limits to an XML element.
 
@@ -113,7 +113,7 @@ class JointLimits:
             <Element 'limit' at 0x7f8b3c0b4c70>
         """
 
-        limit = ET.Element("limit") if root is None else ET.SubElement(root, "limit")
+        limit = Element("limit") if root is None else SubElement(root, "limit")
         limit.set("effort", format_number(self.effort))
         limit.set("velocity", format_number(self.velocity))
         limit.set("lower", format_number(self.lower))
@@ -144,7 +144,7 @@ class JointMimic:
     multiplier: float = 1.0
     offset: float = 0.0
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the mimic information to an XML element.
 
@@ -160,14 +160,14 @@ class JointMimic:
             <Element 'mimic' at 0x7f8b3c0b4c70>
         """
 
-        mimic = ET.Element("mimic") if root is None else ET.SubElement(root, "mimic")
+        mimic = Element("mimic") if root is None else SubElement(root, "mimic")
         mimic.set("joint", self.joint)
         mimic.set("multiplier", format_number(self.multiplier))
         mimic.set("offset", format_number(self.offset))
         return mimic
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "JointMimic":
+    def from_xml(cls, element: _Element) -> "JointMimic":
         """
         Create a joint mimic from an XML element.
 
@@ -213,7 +213,7 @@ class JointDynamics:
     damping: float
     friction: float
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the dynamics information to an XML element.
 
@@ -229,12 +229,13 @@ class JointDynamics:
             <Element 'dynamics' at 0x7f8b3c0b4c70>
         """
 
-        joint = ET.Element("dynamics") if root is None else ET.SubElement(root, "dynamics")
+        joint = Element("dynamics") if root is None else SubElement(root, "dynamics")
         joint.set("damping", format_number(self.damping))
         joint.set("friction", format_number(self.friction))
         return joint
 
-    def from_xml(cls, element: ET.Element) -> "JointDynamics":
+    @classmethod
+    def from_xml(cls, element: _Element) -> "JointDynamics":
         """
         Create joint dynamics from an XML element.
 
@@ -280,7 +281,7 @@ class BaseJoint(ABC):
     child: str
     origin: Origin
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the joint to an XML element.
 
@@ -291,15 +292,15 @@ class BaseJoint(ABC):
             The XML element representing the joint.
         """
 
-        joint = ET.Element("joint") if root is None else ET.SubElement(root, "joint")
+        joint = Element("joint") if root is None else SubElement(root, "joint")
         joint.set("name", self.name)
         joint.set("type", self.joint_type)
         self.origin.to_xml(joint)
-        ET.SubElement(joint, "parent", link=self.parent)
-        ET.SubElement(joint, "child", link=self.child)
+        SubElement(joint, "parent", link=self.parent)
+        SubElement(joint, "child", link=self.child)
         return joint
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Converts the joint to an XML element and appends it to the given root element.
 
@@ -307,7 +308,7 @@ class BaseJoint(ABC):
             root: The root element to append the joint to.
         """
 
-        joint = ET.SubElement(root, "joint", name=self.name, type=MJCF_JOINT_MAP[self.joint_type])
+        joint: _Element = SubElement(root, "joint", name=self.name, type=MJCF_JOINT_MAP[JointType(self.joint_type)])
         joint.set("pos", " ".join(map(str, self.origin.xyz)))
 
     @property
@@ -316,7 +317,7 @@ class BaseJoint(ABC):
 
     @classmethod
     @abstractmethod
-    def from_xml(cls, element: ET.Element) -> "BaseJoint": ...
+    def from_xml(cls, element: _Element) -> "BaseJoint": ...
 
 
 @dataclass
@@ -340,7 +341,7 @@ class DummyJoint(BaseJoint):
     """
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "DummyJoint":
+    def from_xml(cls, element: _Element) -> "DummyJoint":
         """
         Create a dummy joint from an XML element.
 
@@ -363,9 +364,16 @@ class DummyJoint(BaseJoint):
         """
 
         name = element.attrib["name"]
-        parent = element.find("parent").attrib["link"]
-        child = element.find("child").attrib["link"]
-        origin = Origin.from_xml(element.find("origin"))
+        parent_elem = element.find("parent")
+        child_elem = element.find("child")
+        origin_elem = element.find("origin")
+
+        if parent_elem is None or child_elem is None or origin_elem is None:
+            raise ValueError("Missing required elements in joint XML")
+
+        parent = parent_elem.attrib["link"]
+        child = child_elem.attrib["link"]
+        origin = Origin.from_xml(origin_elem)
         return cls(name, parent, child, origin)
 
     @property
@@ -422,7 +430,7 @@ class RevoluteJoint(BaseJoint):
     dynamics: JointDynamics | None = None
     mimic: JointMimic | None = None
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the revolute joint to an XML element.
 
@@ -462,7 +470,7 @@ class RevoluteJoint(BaseJoint):
             self.mimic.to_xml(joint)
         return joint
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Converts the revolute joint to an XML element and appends it to the given root element.
 
@@ -470,7 +478,7 @@ class RevoluteJoint(BaseJoint):
             root: The root element to append the revolute joint to.
         """
 
-        joint = ET.SubElement(root, "joint", name=self.name, type=MJCF_JOINT_MAP[self.joint_type])
+        joint: _Element = SubElement(root, "joint", name=self.name, type=MJCF_JOINT_MAP[JointType(self.joint_type)])
         joint.set("pos", " ".join(map(str, self.origin.xyz)))
 
         self.axis.to_mjcf(joint)
@@ -482,7 +490,7 @@ class RevoluteJoint(BaseJoint):
             joint.set("frictionloss", str(self.dynamics.friction))
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "RevoluteJoint":
+    def from_xml(cls, element: _Element) -> "RevoluteJoint":
         """
         Create a revolute joint from an XML element.
 
@@ -519,9 +527,16 @@ class RevoluteJoint(BaseJoint):
         """
 
         name = element.attrib["name"]
-        parent = element.find("parent").attrib["link"]
-        child = element.find("child").attrib["link"]
-        origin = Origin.from_xml(element.find("origin"))
+        parent_elem = element.find("parent")
+        child_elem = element.find("child")
+        origin_elem = element.find("origin")
+
+        if parent_elem is None or child_elem is None or origin_elem is None:
+            raise ValueError("Missing required elements in joint XML")
+
+        parent = parent_elem.attrib["link"]
+        child = child_elem.attrib["link"]
+        origin = Origin.from_xml(origin_elem)
         # Handle limits
         limit_element = element.find("limit")
         if limit_element is not None:
@@ -604,7 +619,7 @@ class ContinuousJoint(BaseJoint):
 
     mimic: JointMimic | None = None
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the continuous joint to an XML element.
 
@@ -633,11 +648,11 @@ class ContinuousJoint(BaseJoint):
             self.mimic.to_xml(joint)
         return joint
 
-    def to_mjcf(self, root):
+    def to_mjcf(self, root: _Element) -> None:
         return super().to_mjcf(root)
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "ContinuousJoint":
+    def from_xml(cls, element: _Element) -> "ContinuousJoint":
         """
         Create a continuous joint from an XML element.
 
@@ -668,9 +683,16 @@ class ContinuousJoint(BaseJoint):
         """
 
         name = element.attrib["name"]
-        parent = element.find("parent").attrib["link"]
-        child = element.find("child").attrib["link"]
-        origin = Origin.from_xml(element.find("origin"))
+        parent_elem = element.find("parent")
+        child_elem = element.find("child")
+        origin_elem = element.find("origin")
+
+        if parent_elem is None or child_elem is None or origin_elem is None:
+            raise ValueError("Missing required elements in joint XML")
+
+        parent = parent_elem.attrib["link"]
+        child = child_elem.attrib["link"]
+        origin = Origin.from_xml(origin_elem)
 
         # Handle mimic
         mimic_element = element.find("mimic")
@@ -732,7 +754,7 @@ class PrismaticJoint(BaseJoint):
     dynamics: JointDynamics | None = None
     mimic: JointMimic | None = None
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the prismatic joint to an XML element.
 
@@ -773,7 +795,7 @@ class PrismaticJoint(BaseJoint):
         return joint
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "PrismaticJoint":
+    def from_xml(cls, element: _Element) -> "PrismaticJoint":
         """
         Create a prismatic joint from an XML element.
 
@@ -810,9 +832,16 @@ class PrismaticJoint(BaseJoint):
         """
 
         name = element.attrib["name"]
-        parent = element.find("parent").attrib["link"]
-        child = element.find("child").attrib["link"]
-        origin = Origin.from_xml(element.find("origin"))
+        parent_elem = element.find("parent")
+        child_elem = element.find("child")
+        origin_elem = element.find("origin")
+
+        if parent_elem is None or child_elem is None or origin_elem is None:
+            raise ValueError("Missing required elements in joint XML")
+
+        parent = parent_elem.attrib["link"]
+        child = child_elem.attrib["link"]
+        origin = Origin.from_xml(origin_elem)
 
         limit_element = element.find("limit")
         if limit_element is not None:
@@ -823,7 +852,7 @@ class PrismaticJoint(BaseJoint):
                 upper=float(limit_element.attrib.get("upper", 0)),
             )
         else:
-            limits = None
+            raise ValueError("PrismaticJoint requires limit element")
 
         axis = Axis.from_xml(element.find("axis"))
 
@@ -876,7 +905,7 @@ class FixedJoint(BaseJoint):
         <Element 'joint' at 0x7f8b3c0b4c70>
     """
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the fixed joint to an XML element.
 
@@ -902,7 +931,7 @@ class FixedJoint(BaseJoint):
         return joint
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "FixedJoint":
+    def from_xml(cls, element: _Element) -> "FixedJoint":
         """
         Create a fixed joint from an XML element.
 
@@ -926,9 +955,16 @@ class FixedJoint(BaseJoint):
         """
 
         name = element.attrib["name"]
-        parent = element.find("parent").attrib["link"]
-        child = element.find("child").attrib["link"]
-        origin = Origin.from_xml(element.find("origin"))
+        parent_elem = element.find("parent")
+        child_elem = element.find("child")
+        origin_elem = element.find("origin")
+
+        if parent_elem is None or child_elem is None or origin_elem is None:
+            raise ValueError("Missing required elements in joint XML")
+
+        parent = parent_elem.attrib["link"]
+        child = child_elem.attrib["link"]
+        origin = Origin.from_xml(origin_elem)
         return cls(name, parent, child, origin)
 
     @property
@@ -973,7 +1009,7 @@ class FloatingJoint(BaseJoint):
 
     mimic: JointMimic | None = None
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the floating joint to an XML element.
 
@@ -1003,7 +1039,7 @@ class FloatingJoint(BaseJoint):
         return joint
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "FloatingJoint":
+    def from_xml(cls, element: _Element) -> "FloatingJoint":
         """
         Create a floating joint from an XML element.
 
@@ -1034,9 +1070,16 @@ class FloatingJoint(BaseJoint):
         """
 
         name = element.attrib["name"]
-        parent = element.find("parent").attrib["link"]
-        child = element.find("child").attrib["link"]
-        origin = Origin.from_xml(element.find("origin"))
+        parent_elem = element.find("parent")
+        child_elem = element.find("child")
+        origin_elem = element.find("origin")
+
+        if parent_elem is None or child_elem is None or origin_elem is None:
+            raise ValueError("Missing required elements in joint XML")
+
+        parent = parent_elem.attrib["link"]
+        child = child_elem.attrib["link"]
+        origin = Origin.from_xml(origin_elem)
 
         mimic_element = element.find("mimic")
         mimic = JointMimic.from_xml(mimic_element) if mimic_element is not None else None
@@ -1093,7 +1136,7 @@ class PlanarJoint(BaseJoint):
     axis: Axis
     mimic: JointMimic | None = None
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the planar joint to an XML element.
 
@@ -1130,7 +1173,7 @@ class PlanarJoint(BaseJoint):
         return joint
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "PlanarJoint":
+    def from_xml(cls, element: _Element) -> "PlanarJoint":
         """
         Create a planar joint from an XML element.
 
@@ -1165,9 +1208,16 @@ class PlanarJoint(BaseJoint):
         """
 
         name = element.attrib["name"]
-        parent = element.find("parent").attrib["link"]
-        child = element.find("child").attrib["link"]
-        origin = Origin.from_xml(element.find("origin"))
+        parent_elem = element.find("parent")
+        child_elem = element.find("child")
+        origin_elem = element.find("origin")
+
+        if parent_elem is None or child_elem is None or origin_elem is None:
+            raise ValueError("Missing required elements in joint XML")
+
+        parent = parent_elem.attrib["link"]
+        child = child_elem.attrib["link"]
+        origin = Origin.from_xml(origin_elem)
 
         limit_element = element.find("limit")
         if limit_element is not None:
@@ -1178,7 +1228,7 @@ class PlanarJoint(BaseJoint):
                 upper=float(limit_element.attrib.get("upper", 0)),
             )
         else:
-            limits = None
+            raise ValueError("PlanarJoint requires limit element")
 
         axis = Axis.from_xml(element.find("axis"))
 

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-import lxml.etree as ET
+from lxml.etree import Element, SubElement, _Element
 
 from onshape_robotics_toolkit.utilities import format_number, xml_escape
 
@@ -53,14 +53,14 @@ class BaseGeometry(ABC):
     """
 
     @abstractmethod
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element: ...
+    def to_xml(self, root: Optional[_Element] = None) -> _Element: ...
 
     @abstractmethod
-    def to_mjcf(self, root: ET.Element) -> None: ...
+    def to_mjcf(self, root: _Element) -> None: ...
 
     @classmethod
     @abstractmethod
-    def from_xml(cls, element: ET.Element) -> "BaseGeometry": ...
+    def from_xml(cls, element: _Element) -> "BaseGeometry": ...
 
     @property
     @abstractmethod
@@ -86,7 +86,7 @@ class BoxGeometry(BaseGeometry):
 
     size: tuple[float, float, float]
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the box geometry to an XML element.
 
@@ -101,11 +101,11 @@ class BoxGeometry(BaseGeometry):
             >>> box.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
-        ET.SubElement(geometry, "box", size=" ".join(format_number(v) for v in self.size))
+        geometry = Element("geometry") if root is None else SubElement(root, "geometry")
+        SubElement(geometry, "box", size=" ".join(format_number(v) for v in self.size))
         return geometry
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the box geometry to an MJCF element.
 
@@ -120,12 +120,12 @@ class BoxGeometry(BaseGeometry):
             >>> box.to_mjcf()
             <Element 'geom' at 0x7f8b3c0b4c70>
         """
-        geom = root if root.tag == "geom" else ET.SubElement(root, "geom")
+        geom = root if root.tag == "geom" else SubElement(root, "geom")
         geom.set("type", GeometryType.BOX)
         geom.set("size", " ".join(format_number(v) for v in self.size))
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "BoxGeometry":
+    def from_xml(cls, element: _Element) -> "BoxGeometry":
         """
         Create a box geometry from an XML element.
 
@@ -136,12 +136,18 @@ class BoxGeometry(BaseGeometry):
             The box geometry created from the XML element.
 
         Examples:
-            >>> element = ET.Element("geometry")
-            >>> ET.SubElement(element, "box", size="1.0 2.0 3.0")
+            >>> element = Element("geometry")
+            >>> SubElement(element, "box", size="1.0 2.0 3.0")
             >>> BoxGeometry.from_xml(element)
             BoxGeometry(size=(1.0, 2.0, 3.0))
         """
-        size = tuple(float(v) for v in element.find("box").attrib["size"].split())
+        box_element = element.find("box")
+        if box_element is None:
+            raise ValueError("No box element found")
+        size_values = [float(v) for v in box_element.attrib["size"].split()]
+        if len(size_values) != 3:
+            raise ValueError("Box size must have exactly 3 values")
+        size = (size_values[0], size_values[1], size_values[2])
         return cls(size)
 
     @property
@@ -170,7 +176,7 @@ class CylinderGeometry(BaseGeometry):
     radius: float
     length: float
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the cylinder geometry to an XML element.
 
@@ -185,8 +191,8 @@ class CylinderGeometry(BaseGeometry):
             >>> cylinder.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
-        ET.SubElement(
+        geometry = Element("geometry") if root is None else SubElement(root, "geometry")
+        SubElement(
             geometry,
             "cylinder",
             radius=format_number(self.radius),
@@ -194,7 +200,7 @@ class CylinderGeometry(BaseGeometry):
         )
         return geometry
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the cylinder geometry to an MJCF element.
 
@@ -209,12 +215,12 @@ class CylinderGeometry(BaseGeometry):
             >>> cylinder.to_mjcf()
             <Element 'geom' at 0x7f8b3c0b4c70>
         """
-        geom = root if root is not None and root.tag == "geom" else ET.SubElement(root, "geom")
+        geom = root if root.tag == "geom" else SubElement(root, "geom")
         geom.set("type", GeometryType.CYLINDER)
         geom.set("size", f"{format_number(self.radius)} {format_number(self.length)}")
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "CylinderGeometry":
+    def from_xml(cls, element: _Element) -> "CylinderGeometry":
         """
         Create a cylinder geometry from an XML element.
 
@@ -225,13 +231,16 @@ class CylinderGeometry(BaseGeometry):
             The cylinder geometry created from the XML element.
 
         Examples:
-            >>> element = ET.Element("geometry")
-            >>> ET.SubElement(element, "cylinder", radius="1.0", length="2.0")
+            >>> element = Element("geometry")
+            >>> SubElement(element, "cylinder", radius="1.0", length="2.0")
             >>> CylinderGeometry.from_xml(element)
             CylinderGeometry(radius=1.0, length=2.0)
         """
-        radius = float(element.find("cylinder").attrib["radius"])
-        length = float(element.find("cylinder").attrib["length"])
+        cylinder_element = element.find("cylinder")
+        if cylinder_element is None:
+            raise ValueError("No cylinder element found")
+        radius = float(cylinder_element.attrib["radius"])
+        length = float(cylinder_element.attrib["length"])
         return cls(radius, length)
 
     @property
@@ -258,7 +267,7 @@ class SphereGeometry(BaseGeometry):
 
     radius: float
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the sphere geometry to an XML element.
 
@@ -273,11 +282,11 @@ class SphereGeometry(BaseGeometry):
             >>> sphere.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
-        ET.SubElement(geometry, "sphere", radius=format_number(self.radius))
+        geometry = Element("geometry") if root is None else SubElement(root, "geometry")
+        SubElement(geometry, "sphere", radius=format_number(self.radius))
         return geometry
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the sphere geometry to an MJCF element.
 
@@ -292,12 +301,12 @@ class SphereGeometry(BaseGeometry):
             >>> sphere.to_mjcf()
             <Element 'geom' at 0x7f8b3c0b4c70>
         """
-        geom = root if root is not None and root.tag == "geom" else ET.SubElement(root, "geom")
+        geom = root if root is not None and root.tag == "geom" else SubElement(root, "geom")
         geom.set("type", GeometryType.SPHERE)
         geom.set("size", format_number(self.radius))
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "SphereGeometry":
+    def from_xml(cls, element: _Element) -> "SphereGeometry":
         """
         Create a sphere geometry from an XML element.
 
@@ -308,12 +317,15 @@ class SphereGeometry(BaseGeometry):
             The sphere geometry created from the XML element.
 
         Examples:
-            >>> element = ET.Element("geometry")
-            >>> ET.SubElement(element, "sphere", radius="1.0")
+            >>> element = Element("geometry")
+            >>> SubElement(element, "sphere", radius="1.0")
             >>> SphereGeometry.from_xml(element)
             SphereGeometry(radius=1.0)
         """
-        radius = float(element.find("sphere").attrib["radius"])
+        sphere_element = element.find("sphere")
+        if sphere_element is None:
+            raise ValueError("No sphere element found")
+        radius = float(sphere_element.attrib["radius"])
         return cls(radius)
 
     @property
@@ -340,7 +352,7 @@ class MeshGeometry(BaseGeometry):
 
     filename: str
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the mesh geometry to an XML element.
 
@@ -355,11 +367,11 @@ class MeshGeometry(BaseGeometry):
             >>> mesh.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = ET.Element("geometry") if root is None else ET.SubElement(root, "geometry")
-        ET.SubElement(geometry, "mesh", filename=self.filename)
+        geometry = Element("geometry") if root is None else SubElement(root, "geometry")
+        SubElement(geometry, "mesh", filename=self.filename)
         return geometry
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the mesh geometry to an MJCF element.
 
@@ -374,12 +386,12 @@ class MeshGeometry(BaseGeometry):
             >>> mesh.to_mjcf()
             <Element 'geom' at 0x7f8b3c0b4c70>
         """
-        geom = root if root is not None and root.tag == "geom" else ET.SubElement(root, "geom")
+        geom = root if root is not None and root.tag == "geom" else SubElement(root, "geom")
         geom.set("type", GeometryType.MESH)
         geom.set("mesh", self.mesh_name)
 
     @classmethod
-    def from_xml(cls, element: ET.Element) -> "MeshGeometry":
+    def from_xml(cls, element: _Element) -> "MeshGeometry":
         """
         Create a mesh geometry from an XML element.
 
@@ -390,12 +402,15 @@ class MeshGeometry(BaseGeometry):
             The mesh geometry created from the XML element.
 
         Examples:
-            >>> element = ET.Element("geometry")
-            >>> ET.SubElement(element, "mesh", filename="mesh.stl")
+            >>> element = Element("geometry")
+            >>> SubElement(element, "mesh", filename="mesh.stl")
             >>> MeshGeometry.from_xml(element)
             MeshGeometry(filename="mesh.stl")
         """
-        filename = element.find("mesh").attrib["filename"]
+        mesh_element = element.find("mesh")
+        if mesh_element is None:
+            raise ValueError("No mesh element found")
+        filename = mesh_element.attrib["filename"]
         return cls(filename)
 
     def __post_init__(self) -> None:

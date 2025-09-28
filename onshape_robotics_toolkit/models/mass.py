@@ -16,6 +16,8 @@ Models:
 
 """
 
+from typing import cast
+
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
@@ -129,7 +131,7 @@ class MassProperties(BaseModel):
     mass: list[float] = Field(..., description="The mass of the part.")
     centroid: list[float] = Field(..., description="The centroid of the part.")
     inertia: list[float] = Field(..., description="The inertia of the part.")
-    principalInertia: list[float, float, float] = Field(..., description="The principal inertia of the part.")
+    principalInertia: list[float] = Field(..., description="The principal inertia of the part.")
     principalAxes: list[PrincipalAxis] = Field(..., description="The principal axes of the part.")
 
     @field_validator("principalAxes")
@@ -210,7 +212,8 @@ class MassProperties(BaseModel):
         if reference.shape != (3, 3):
             raise ValueError("Reference frame must be a 3x3 matrix")
 
-        return reference @ self.principal_axes
+        result = reference @ self.principal_axes
+        return cast(np.matrix, result)
 
     def inertia_wrt(self, reference: np.matrix) -> np.matrix:
         """
@@ -232,7 +235,8 @@ class MassProperties(BaseModel):
         if reference.shape != (3, 3):
             raise ValueError("Reference frame must be a 3x3 matrix")
 
-        return reference @ self.inertia_matrix @ reference.T
+        result = reference @ self.inertia_matrix @ reference.T
+        return cast(np.matrix, result)
 
     def center_of_mass_wrt(self, reference: np.matrix) -> np.ndarray:
         """

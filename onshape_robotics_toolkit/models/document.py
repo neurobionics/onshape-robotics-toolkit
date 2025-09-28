@@ -28,14 +28,14 @@ Enum:
 """
 
 from enum import Enum
-from typing import Union, cast
+from typing import Any, Union, cast
 
 import regex as re
 from pydantic import BaseModel, Field, field_validator
 
 BASE_URL = "https://cad.onshape.com"
 
-__all__ = ["WorkspaceType", "Document", "parse_url"]
+__all__ = ["Document", "WorkspaceType", "parse_url"]
 
 
 class WorkspaceType(str, Enum):
@@ -111,7 +111,7 @@ def generate_url(base_url: str, did: str, wtype: str, wid: str, eid: str) -> str
     return f"{base_url}/documents/{did}/{wtype}/{wid}/e/{eid}"
 
 
-def parse_url(url: str) -> str:
+def parse_url(url: str) -> tuple[str, str, WorkspaceType, str, str]:
     """
     Parse Onshape URL and return document ID, workspace type, workspace ID, and element ID
 
@@ -119,17 +119,20 @@ def parse_url(url: str) -> str:
         url: URL to an Onshape document element
 
     Returns:
-        did: The unique identifier of the document
-        wtype: The type of workspace (w, v, m)
-        wid: The unique identifier of the workspace
-        eid: The unique identifier of the element
+        Tuple containing:
+            - base_url: The base URL
+            - did: The unique identifier of the document
+            - wtype: The type of workspace (w, v, m)
+            - wid: The unique identifier of the workspace
+            - eid: The unique identifier of the element
 
     Raises:
         ValueError: If the URL does not match the expected pattern
 
     Examples:
         >>> parse_url("https://cad.onshape.com/documents/a1c1addf75444f54b504f25c/w/0d17b8ebb2a4c76be9fff3c7/e/a86aaf34d2f4353288df8812")
-        ("a1c1addf75444f54b504f25c", "w", "0d17b8ebb2a4c76be9fff3c7", "a86aaf34d2f4353288df8812")
+        ("https://cad.onshape.com", "a1c1addf75444f54b504f25c", "w",
+         "0d17b8ebb2a4c76be9fff3c7", "a86aaf34d2f4353288df8812")
     """
     pattern = re.match(
         DOCUMENT_PATTERN,
@@ -186,9 +189,9 @@ class Document(BaseModel):
     wtype: str = Field(..., description="The type of workspace (w, v, m)")
     wid: str = Field(..., description="The unique identifier of the workspace")
     eid: str = Field(..., description="The unique identifier of the element")
-    name: str = Field(None, description="The name of the document")
+    name: Union[str, None] = Field(None, description="The name of the document")
 
-    def __init__(self, **data):
+    def __init__(self, **data: Any):
         super().__init__(**data)
         if self.url is None:
             self.url = generate_url(self.base_url, self.did, self.wtype, self.wid, self.eid)

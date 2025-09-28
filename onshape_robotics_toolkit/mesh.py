@@ -6,10 +6,13 @@ This module contains functions for transforming meshes and inertia matrices.
 from functools import partial
 
 import numpy as np
+from numpy.typing import NDArray
 from stl.mesh import Mesh
 
 
-def transform_vectors(vectors: np.ndarray, rotation: np.ndarray, translation: np.ndarray) -> np.ndarray:
+def transform_vectors(
+    vectors: NDArray[np.floating], rotation: NDArray[np.floating], translation: NDArray[np.floating]
+) -> NDArray[np.floating]:
     """
     Apply a transformation matrix to a set of vectors.
 
@@ -54,7 +57,9 @@ def transform_mesh(mesh: Mesh, transform: np.ndarray) -> Mesh:
     return mesh
 
 
-def transform_inertia_matrix(inertia_matrix: np.matrix, rotation: np.matrix) -> np.matrix:
+def transform_inertia_matrix(
+    inertia_matrix: NDArray[np.floating], rotation: NDArray[np.floating]
+) -> NDArray[np.floating]:
     """
     Transform an inertia matrix
 

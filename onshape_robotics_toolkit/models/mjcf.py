@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, cast
 
 from lxml import etree as ET
+from lxml.etree import _Element
 
 
 @dataclass
@@ -33,14 +34,14 @@ class Light:
     direction: tuple[float, float, float]
     castshadow: bool
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Converts the light to an XML element and appends it to the given root element.
 
         Args:
             root: The root element to append the light to.
         """
-        light = ET.Element("light") if root is None else ET.SubElement(root, "light")
+        light = cast(_Element, ET.Element("light") if root is None else ET.SubElement(root, "light"))
         light.set("directional", str(self.directional).lower())
         light.set("diffuse", " ".join(map(str, self.diffuse)))
         light.set("specular", " ".join(map(str, self.specular)))
@@ -71,14 +72,14 @@ class Camera:
     pos: tuple[float, float, float]
     xyaxes: tuple[float, float, float, float, float, float]
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Converts the camera to an XML element and appends it to the given root element.
 
         Args:
             root: The root element to append the camera to.
         """
-        camera = ET.Element("camera") if root is None else ET.SubElement(root, "camera")
+        camera = cast(_Element, ET.Element("camera") if root is None else ET.SubElement(root, "camera"))
         camera.set("name", self.name)
         camera.set("mode", self.mode)
         camera.set("pos", " ".join(map(str, self.pos)))
@@ -110,14 +111,14 @@ class Actuator:
     gear: float = 1.0
     ctrlrange: tuple[float, float] = (0, 0)
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Converts the actuator to an XML element and appends it to the given root element.
 
         Args:
             root: The root element to append the actuator to.
         """
-        motor = ET.Element("motor") if root is None else ET.SubElement(root, "motor")
+        motor = cast(_Element, ET.Element("motor") if root is None else ET.SubElement(root, "motor"))
         motor.set("name", self.name)
         motor.set("joint", self.joint)
         motor.set("ctrllimited", str(self.ctrllimited).lower())
@@ -137,7 +138,7 @@ class Sensor(ABC):
         self.name = name
 
     @abstractmethod
-    def to_mjcf(self, root: ET.Element) -> None: ...
+    def to_mjcf(self, root: _Element) -> None: ...
 
 
 class IMU(Sensor):
@@ -161,14 +162,14 @@ class IMU(Sensor):
         self.reftype = reftype
         self.refname = refname
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Converts the IMU to an XML element and appends it to the given root element.
 
         Args:
             root: The root element to append the IMU to.
         """
-        framequat = ET.Element("framequat") if root is None else ET.SubElement(root, "framequat")
+        framequat = cast(_Element, ET.Element("framequat") if root is None else ET.SubElement(root, "framequat"))
         framequat.set("name", self.name)
         framequat.set("objtype", self.objtype)
         framequat.set("objname", self.objname)
@@ -192,14 +193,14 @@ class Gyro(Sensor):
         self.noise = noise
         self.cutoff = cutoff
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Converts the gyro to an XML element and appends it to the given root element.
 
         Args:
             root: The root element to append the gyro to.
         """
-        gyro = ET.Element("gyro") if root is None else ET.SubElement(root, "gyro")
+        gyro = cast(_Element, ET.Element("gyro") if root is None else ET.SubElement(root, "gyro"))
         gyro.set("name", self.name)
         gyro.set("site", self.site)
 
@@ -220,20 +221,20 @@ class Encoder(Sensor):
         self.actuator = actuator
         self.noise = noise
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Converts the encoder to an XML element and appends it to the given root element.
 
         Args:
             root: The root element to append the encoder to.
         """
-        encoder_pos = ET.Element("actuatorpos") if root is None else ET.SubElement(root, "actuatorpos")
+        encoder_pos = cast(_Element, ET.Element("actuatorpos") if root is None else ET.SubElement(root, "actuatorpos"))
         encoder_pos.set("name", self.name + "-pos")
         encoder_pos.set("actuator", self.actuator)
         if self.noise is not None:
             encoder_pos.set("noise", str(self.noise))
 
-        encoder_vel = ET.Element("actuatorvel") if root is None else ET.SubElement(root, "actuatorvel")
+        encoder_vel = cast(_Element, ET.Element("actuatorvel") if root is None else ET.SubElement(root, "actuatorvel"))
         encoder_vel.set("name", self.name + "-vel")
         encoder_vel.set("actuator", self.actuator)
         if self.noise is not None:
@@ -250,14 +251,14 @@ class ForceSensor(Sensor):
         self.actuator = actuator
         self.noise = noise
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Converts the force sensor to an XML element and appends it to the given root element.
 
         Args:
             root: The root element to append the force sensor to.
         """
-        force_sensor = ET.Element("actuatorfrc") if root is None else ET.SubElement(root, "actuatorfrc")
+        force_sensor = cast(_Element, ET.Element("actuatorfrc") if root is None else ET.SubElement(root, "actuatorfrc"))
         force_sensor.set("name", self.name)
         force_sensor.set("actuator", self.actuator)
         if self.noise is not None:

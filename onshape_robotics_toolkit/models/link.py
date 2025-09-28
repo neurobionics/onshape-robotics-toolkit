@@ -21,6 +21,7 @@ from typing import Optional, Union
 
 import numpy as np
 from lxml import etree as ET
+from lxml.etree import _Element
 from scipy.spatial.transform import Rotation
 from scipy.spatial.transform import Rotation as R
 
@@ -34,7 +35,7 @@ from onshape_robotics_toolkit.models.geometry import (
 from onshape_robotics_toolkit.utilities import format_number
 
 
-class Colors(tuple[float, float, float], Enum):
+class Colors(tuple[float, float, float, float], Enum):
     """
     Enumerates the possible colors in RGBA format for a link in the robot model.
 
@@ -134,13 +135,16 @@ class Origin:
         new_rotation_matrix = np.dot(matrix[:3, :3], current_rotation_matrix)
         new_rpy = Rotation.from_matrix(new_rotation_matrix).as_euler("xyz")
         if inplace:
-            self.xyz = tuple(new_xyz)
-            self.rpy = tuple(new_rpy)
+            self.xyz = (float(new_xyz[0]), float(new_xyz[1]), float(new_xyz[2]))
+            self.rpy = (float(new_rpy[0]), float(new_rpy[1]), float(new_rpy[2]))
             return None
 
-        return Origin(new_xyz, new_rpy)
+        return Origin(
+            (float(new_xyz[0]), float(new_xyz[1]), float(new_xyz[2])),
+            (float(new_rpy[0]), float(new_rpy[1]), float(new_rpy[2])),
+        )
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the origin to an XML element.
 
@@ -156,12 +160,12 @@ class Origin:
             <Element 'origin' at 0x7f8b3c0b4c70>
         """
 
-        origin = ET.Element("origin") if root is None else ET.SubElement(root, "origin")
+        origin: _Element = ET.Element("origin") if root is None else ET.SubElement(root, "origin")
         origin.set("xyz", " ".join(format_number(v) for v in self.xyz))
         origin.set("rpy", " ".join(format_number(v) for v in self.rpy))
         return origin
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the origin to a MuJoCo compatible XML element.
 
@@ -182,7 +186,7 @@ class Origin:
         root.set("euler", " ".join(format_number(v) for v in self.rpy))
 
     @classmethod
-    def from_xml(cls, xml: ET.Element) -> "Origin":
+    def from_xml(cls, xml: _Element) -> "Origin":
         """
         Create an origin from an XML element.
 
@@ -198,8 +202,20 @@ class Origin:
             Origin(xyz=(0.0, 0.0, 0.0), rpy=(0.0, 0.0, 0.0))
         """
 
-        xyz = tuple(map(float, xml.get("xyz").split()))
-        rpy = tuple(map(float, xml.get("rpy").split()))
+        xyz_str = xml.get("xyz")
+        rpy_str = xml.get("rpy")
+
+        if xyz_str is None or rpy_str is None:
+            raise ValueError("Missing xyz or rpy attributes in origin XML")
+
+        xyz_values = tuple(map(float, xyz_str.split()))
+        rpy_values = tuple(map(float, rpy_str.split()))
+
+        if len(xyz_values) != 3 or len(rpy_values) != 3:
+            raise ValueError("xyz and rpy must have exactly 3 values")
+
+        xyz = (xyz_values[0], xyz_values[1], xyz_values[2])
+        rpy = (rpy_values[0], rpy_values[1], rpy_values[2])
         return cls(xyz, rpy)
 
     def quat(self, sequence: str = "xyz") -> np.ndarray:
@@ -244,8 +260,8 @@ class Origin:
         x = float(matrix[0, 3])
         y = float(matrix[1, 3])
         z = float(matrix[2, 3])
-        roll, pitch, yaw = Rotation.from_matrix(matrix[:3, :3]).as_euler("xyz")
-        return cls((x, y, z), (roll, pitch, yaw))
+        euler_angles = Rotation.from_matrix(matrix[:3, :3]).as_euler("xyz")
+        return cls((x, y, z), (float(euler_angles[0]), float(euler_angles[1]), float(euler_angles[2])))
 
     @classmethod
     def zero_origin(cls) -> "Origin":
@@ -293,7 +309,7 @@ class Axis:
 
     xyz: tuple[float, float, float]
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the axis to an XML element.
 
@@ -309,11 +325,11 @@ class Axis:
             <Element 'axis' at 0x7f8b3c0b4c70>
         """
 
-        axis = ET.Element("axis") if root is None else ET.SubElement(root, "axis")
+        axis: _Element = ET.Element("axis") if root is None else ET.SubElement(root, "axis")
         axis.set("xyz", " ".join(format_number(v) for v in self.xyz))
         return axis
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the axis to an MuJoCo compatible XML element.
 
@@ -331,7 +347,7 @@ class Axis:
         root.set("axis", " ".join(format_number(v) for v in self.xyz))
 
     @classmethod
-    def from_xml(cls, xml: ET.Element) -> "Axis":
+    def from_xml(cls, xml: _Element) -> "Axis":
         """
         Create an axis from an XML element.
 
@@ -346,7 +362,17 @@ class Axis:
             >>> Axis.from_xml(xml)
             Axis(xyz=(0.0, 0.0, 0.0))
         """
-        xyz = tuple(map(float, xml.get("xyz").split()))
+        xyz_str = xml.get("xyz")
+
+        if xyz_str is None:
+            raise ValueError("Missing xyz attribute in axis XML")
+
+        xyz_values = tuple(map(float, xyz_str.split()))
+
+        if len(xyz_values) != 3:
+            raise ValueError("xyz must have exactly 3 values")
+
+        xyz = (xyz_values[0], xyz_values[1], xyz_values[2])
         return cls(xyz)
 
 
@@ -390,7 +416,7 @@ class Inertia:
     ixz: float
     iyz: float
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the inertia tensor to an XML element.
 
@@ -406,7 +432,7 @@ class Inertia:
             <Element 'inertia' at 0x7f8b3c0b4c70>
         """
 
-        inertia = ET.Element("inertia") if root is None else ET.SubElement(root, "inertia")
+        inertia: _Element = ET.Element("inertia") if root is None else ET.SubElement(root, "inertia")
         inertia.set("ixx", format_number(self.ixx))
         inertia.set("iyy", format_number(self.iyy))
         inertia.set("izz", format_number(self.izz))
@@ -415,7 +441,7 @@ class Inertia:
         inertia.set("iyz", format_number(self.iyz))
         return inertia
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the inertia tensor to an MuJoCo compatible XML element.
 
@@ -434,7 +460,7 @@ class Inertia:
         inertial.set("diaginertia", " ".join(format_number(v) for v in [self.ixx, self.iyy, self.izz]))
 
     @classmethod
-    def from_xml(cls, xml: ET.Element) -> "Inertia":
+    def from_xml(cls, xml: _Element) -> "Inertia":
         """
         Create an inertia tensor from an XML element.
 
@@ -449,12 +475,12 @@ class Inertia:
             >>> Inertia.from_xml(xml)
             Inertia(ixx=0.0, iyy=0.0, izz=0.0, ixy=0.0, ixz=0.0, iyz=0.0)
         """
-        ixx = float(xml.get("ixx"))
-        iyy = float(xml.get("iyy"))
-        izz = float(xml.get("izz"))
-        ixy = float(xml.get("ixy"))
-        ixz = float(xml.get("ixz"))
-        iyz = float(xml.get("iyz"))
+        ixx = float(xml.get("ixx", "0.0"))
+        iyy = float(xml.get("iyy", "0.0"))
+        izz = float(xml.get("izz", "0.0"))
+        ixy = float(xml.get("ixy", "0.0"))
+        ixz = float(xml.get("ixz", "0.0"))
+        iyz = float(xml.get("iyz", "0.0"))
         return cls(ixx, iyy, izz, ixy, ixz, iyz)
 
     @classmethod
@@ -472,7 +498,7 @@ class Inertia:
         return cls(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
 
     @property
-    def to_matrix(self) -> np.array:
+    def to_matrix(self) -> np.ndarray:
         """
         Returns the inertia tensor as a 3x3 numpy array.
 
@@ -520,7 +546,7 @@ class Material:
     name: str
     color: tuple[float, float, float, float]
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the material properties to an XML element.
 
@@ -536,12 +562,12 @@ class Material:
             <Element 'material' at 0x7f8b3c0b4c70>
         """
 
-        material = ET.Element("material") if root is None else ET.SubElement(root, "material")
+        material: _Element = ET.Element("material") if root is None else ET.SubElement(root, "material")
         material.set("name", self.name)
         ET.SubElement(material, "color", rgba=" ".join(format_number(v) for v in self.color))
         return material
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the material properties to an MuJoCo compatible XML element.
 
@@ -560,7 +586,7 @@ class Material:
         geom.set("rgba", " ".join(format_number(v) for v in self.color))
 
     @classmethod
-    def from_xml(cls, xml: ET.Element) -> "Material":
+    def from_xml(cls, xml: _Element) -> "Material":
         """
         Create a material from an XML element.
 
@@ -577,8 +603,22 @@ class Material:
         """
 
         name = xml.get("name")
-        color = tuple(map(float, xml.find("color").get("rgba").split()))
-        return cls(name, color)
+        color_elem = xml.find("color")
+
+        if color_elem is None:
+            raise ValueError("Missing color element in material XML")
+
+        rgba_str = color_elem.get("rgba")
+        if rgba_str is None:
+            raise ValueError("Missing rgba attribute in color element")
+
+        color_values = tuple(map(float, rgba_str.split()))
+
+        if len(color_values) != 4:
+            raise ValueError("rgba must have exactly 4 values")
+
+        color = (color_values[0], color_values[1], color_values[2], color_values[3])
+        return cls(name or "default", color)
 
     @classmethod
     def from_color(cls, name: str, color: Colors) -> "Material":
@@ -634,7 +674,7 @@ class InertialLink:
     inertia: Inertia
     origin: Origin
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the inertial properties to an XML element.
 
@@ -653,13 +693,13 @@ class InertialLink:
             >>> inertial.to_xml()
             <Element 'inertial' at 0x...>
         """
-        inertial = ET.Element("inertial") if root is None else ET.SubElement(root, "inertial")
+        inertial: _Element = ET.Element("inertial") if root is None else ET.SubElement(root, "inertial")
         ET.SubElement(inertial, "mass", value=format_number(self.mass))
         self.inertia.to_xml(inertial)
         self.origin.to_xml(inertial)
         return inertial
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the inertial properties to an MuJoCo compatible XML element.
 
@@ -724,7 +764,9 @@ class InertialLink:
         iyz_prime = I_transformed[1, 2]
 
         # Transform the Origin (Don't replace the original in case the user keeps the inplace flag false)
-        Origin_prime = self.origin.transform(tf_matrix)
+        Origin_prime = self.origin.transform(tf_matrix, inplace=False)
+        if Origin_prime is None:
+            raise RuntimeError("Origin transformation failed when inplace=False")
 
         # Update values and (if requested) put the extracted values into a new_InertialLink
         if inplace:
@@ -746,7 +788,7 @@ class InertialLink:
             return new_InertialLink
 
     @classmethod
-    def from_xml(cls, xml: ET.Element) -> "InertialLink":
+    def from_xml(cls, xml: _Element) -> "InertialLink":
         """
         Create inertial properties from an XML element.
 
@@ -761,18 +803,26 @@ class InertialLink:
             >>> InertialLink.from_xml(xml)
             InertialLink(mass=0.0, inertia=None, origin=None)
         """
-        mass = float(xml.find("mass").get("value"))
+        mass_element = xml.find("mass")
+        if mass_element is None:
+            raise ValueError("Missing mass element in inertial XML")
+
+        mass_value = mass_element.get("value")
+        if mass_value is None:
+            raise ValueError("Missing value attribute in mass element")
+
+        mass = float(mass_value)
 
         inertia_element = xml.find("inertia")
-        inertia = Inertia.from_xml(inertia_element) if inertia_element is not None else None
+        inertia = Inertia.from_xml(inertia_element) if inertia_element is not None else Inertia.zero_inertia()
 
         origin_element = xml.find("origin")
-        origin = Origin.from_xml(origin_element) if origin_element is not None else None
+        origin = Origin.from_xml(origin_element) if origin_element is not None else Origin.zero_origin()
 
         return cls(mass=mass, inertia=inertia, origin=origin)
 
 
-def set_geometry_from_xml(geometry: ET.Element) -> BaseGeometry | None:
+def set_geometry_from_xml(geometry: _Element) -> BaseGeometry | None:
     """
     Set the geometry from an XML element.
 
@@ -842,15 +892,16 @@ class VisualLink:
         # Apply translation and rotation to the origin position
         pos = np.array([self.origin.xyz[0], self.origin.xyz[1], self.origin.xyz[2], 1])
         new_pos = transformation_matrix @ pos
-        self.origin.xyz = tuple(new_pos[:3])  # Update position
+        self.origin.xyz = (float(new_pos[0]), float(new_pos[1]), float(new_pos[2]))  # Update position
 
         # Extract the rotation from the transformation matrix
         rotation_matrix = transformation_matrix[:3, :3]
         current_rotation = R.from_euler("xyz", self.origin.rpy)
         new_rotation = R.from_matrix(rotation_matrix @ current_rotation.as_matrix())
-        self.origin.rpy = new_rotation.as_euler("xyz").tolist()
+        euler_angles = new_rotation.as_euler("xyz")
+        self.origin.rpy = (float(euler_angles[0]), float(euler_angles[1]), float(euler_angles[2]))
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the visual properties to an XML element.
 
@@ -870,7 +921,7 @@ class VisualLink:
             >>> visual.to_xml()
             <Element 'visual' at 0x...>
         """
-        visual = ET.Element("visual") if root is None else ET.SubElement(root, "visual")
+        visual: _Element = ET.Element("visual") if root is None else ET.SubElement(root, "visual")
         if self.name:
             visual.set("name", self.name)
         self.origin.to_xml(visual)
@@ -878,7 +929,7 @@ class VisualLink:
         self.material.to_xml(visual)
         return visual
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the visual properties to an MuJoCo compatible XML element.
 
@@ -916,7 +967,7 @@ class VisualLink:
         visual.set("group", "1")
 
     @classmethod
-    def from_xml(cls, xml: ET.Element) -> "VisualLink":
+    def from_xml(cls, xml: _Element) -> "VisualLink":
         """
         Create a visual link from an XML element.
 
@@ -933,13 +984,19 @@ class VisualLink:
         """
         name = xml.get("name")
         origin_element = xml.find("origin")
-        origin = Origin.from_xml(origin_element) if origin_element is not None else None
-
         geometry_element = xml.find("geometry")
-        geometry = set_geometry_from_xml(geometry_element) if geometry_element is not None else None
-
         material_element = xml.find("material")
-        material = Material.from_xml(material_element) if material_element is not None else None
+
+        if origin_element is None or geometry_element is None or material_element is None:
+            raise ValueError("VisualLink requires origin, geometry, and material elements")
+
+        origin = Origin.from_xml(origin_element)
+        geometry = set_geometry_from_xml(geometry_element)
+        material = Material.from_xml(material_element)
+
+        if geometry is None:
+            raise ValueError("Failed to parse geometry element")
+
         return cls(name=name, origin=origin, geometry=geometry, material=material)
 
 
@@ -992,15 +1049,16 @@ class CollisionLink:
         # Apply translation and rotation to the origin position
         pos = np.array([self.origin.xyz[0], self.origin.xyz[1], self.origin.xyz[2], 1])
         new_pos = transformation_matrix @ pos
-        self.origin.xyz = tuple(new_pos[:3])  # Update position
+        self.origin.xyz = (float(new_pos[0]), float(new_pos[1]), float(new_pos[2]))  # Update position
 
         # Extract the rotation from the transformation matrix
         rotation_matrix = transformation_matrix[:3, :3]
         current_rotation = R.from_euler("xyz", self.origin.rpy)
         new_rotation = R.from_matrix(rotation_matrix @ current_rotation.as_matrix())
-        self.origin.rpy = new_rotation.as_euler("xyz").tolist()
+        euler_angles = new_rotation.as_euler("xyz")
+        self.origin.rpy = (float(euler_angles[0]), float(euler_angles[1]), float(euler_angles[2]))
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the collision properties to an XML element.
 
@@ -1015,14 +1073,14 @@ class CollisionLink:
             >>> collision.to_xml()
             <Element 'collision' at 0x7f8b3c0b4c70>
         """
-        collision = ET.Element("collision") if root is None else ET.SubElement(root, "collision")
+        collision: _Element = ET.Element("collision") if root is None else ET.SubElement(root, "collision")
         if self.name:
             collision.set("name", self.name)
         self.origin.to_xml(collision)
         self.geometry.to_xml(collision)
         return collision
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: _Element) -> None:
         """
         Convert the collision properties to an MuJoCo compatible XML element.
 
@@ -1066,7 +1124,7 @@ class CollisionLink:
             collision.set("friction", " ".join(format_number(v) for v in self.friction))
 
     @classmethod
-    def from_xml(cls, xml: ET.Element) -> "CollisionLink":
+    def from_xml(cls, xml: _Element) -> "CollisionLink":
         """
         Create a collision link from an XML element.
 
@@ -1084,10 +1142,16 @@ class CollisionLink:
         name = xml.get("name")
 
         origin_element = xml.find("origin")
-        origin = Origin.from_xml(origin_element) if origin_element is not None else None
-
         geometry_element = xml.find("geometry")
-        geometry = set_geometry_from_xml(geometry_element) if geometry_element is not None else None
+
+        if origin_element is None or geometry_element is None:
+            raise ValueError("CollisionLink requires origin and geometry elements")
+
+        origin = Origin.from_xml(origin_element)
+        geometry = set_geometry_from_xml(geometry_element)
+
+        if geometry is None:
+            raise ValueError("Failed to parse geometry element")
 
         return cls(name=name, origin=origin, geometry=geometry)
 
@@ -1140,7 +1204,7 @@ class Link:
     collision: CollisionLink | None = None
     inertial: InertialLink | None = None
 
-    def to_xml(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_xml(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the link to an XML element.
 
@@ -1160,7 +1224,7 @@ class Link:
             >>> link.to_xml()
             <Element 'link' at 0x...>
         """
-        link = ET.Element("link") if root is None else ET.SubElement(root, "link")
+        link: _Element = ET.Element("link") if root is None else ET.SubElement(root, "link")
         link.set("name", self.name)
         if self.visual is not None:
             self.visual.to_xml(link)
@@ -1170,7 +1234,7 @@ class Link:
             self.inertial.to_xml(link)
         return link
 
-    def to_mjcf(self, root: Optional[ET.Element] = None) -> ET.Element:
+    def to_mjcf(self, root: Optional[_Element] = None) -> _Element:
         """
         Convert the link to an MuJoCo compatible XML element.
 
@@ -1190,7 +1254,7 @@ class Link:
             >>> link.to_mjcf()
             <Element 'link' at 0x...>
         """
-        link = ET.Element("body") if root is None else ET.SubElement(root, "body")
+        link: _Element = ET.Element("body") if root is None else ET.SubElement(root, "body")
         link.set("name", self.name)
 
         if self.visual:
@@ -1209,7 +1273,7 @@ class Link:
         return link
 
     @classmethod
-    def from_xml(cls, xml: ET.Element) -> "Link":
+    def from_xml(cls, xml: _Element) -> "Link":
         """
         Create a link from an XML element.
 
@@ -1235,7 +1299,7 @@ class Link:
         inertial_element = xml.find("inertial")
         inertial = InertialLink.from_xml(inertial_element) if inertial_element is not None else None
 
-        return cls(name=name, visual=visual, collision=collision, inertial=inertial)
+        return cls(name=name or "unnamed_link", visual=visual, collision=collision, inertial=inertial)
 
     # TODO: Implement from part method
     # @classmethod
