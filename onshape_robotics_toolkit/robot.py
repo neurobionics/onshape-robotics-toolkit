@@ -75,11 +75,11 @@ class RobotType(str, Enum):
     URDF = "urdf"
     MJCF = "xml"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.value
 
 
-def set_joint_from_xml(element: ET.Element) -> BaseJoint | None:
+def set_joint_from_xml(element: ET._Element) -> BaseJoint | None:
     """
     Set the joint type from an XML element.
 
@@ -94,7 +94,9 @@ def set_joint_from_xml(element: ET.Element) -> BaseJoint | None:
         >>> set_joint_from_xml(element)
         <FixedJoint>
     """
-    joint_type = element.attrib["type"]
+    joint_type = element.get("type")
+    if joint_type is None:
+        return None
     if joint_type == JointType.FIXED:
         return FixedJoint.from_xml(element)
     elif joint_type == JointType.REVOLUTE:
@@ -131,10 +133,7 @@ class Robot:
         self.name: str = name
         self.graph: nx.DiGraph = nx.DiGraph()  # Graph to hold links and joints
 
-        if assets is None:
-            self.assets: dict[str, Asset] = {}
-        else:
-            self.assets: dict[str, Asset] = assets
+        self.assets: dict[str, Asset] = assets or {}
 
         self.type: RobotType = robot_type
 
@@ -147,7 +146,7 @@ class Robot:
         self.rigid_subassemblies: dict[str, RootAssembly] = {}
 
         self.assembly: Optional[Assembly] = None
-        self.model: Optional[ET.Element] = None
+        self.model: Optional[ET._Element] = None
 
         # MuJoCo attributes
         self.lights: dict[str, Any] = {}
@@ -297,7 +296,7 @@ class Robot:
         self,
         name: str,
         parent_tag: str,  # Like 'asset', 'worldbody', etc.
-        element: ET.Element,
+        element: ET._Element,
     ) -> None:
         """
         Add a custom XML element to the first occurrence of a parent tag.
@@ -322,7 +321,7 @@ class Robot:
         self,
         name: str,
         parent_name: str,  # Like 'Part-3-1', 'ballbot', etc.
-        element: ET.Element,
+        element: ET._Element,
     ) -> None:
         """
         Add a custom XML element to a parent element with specific name.
@@ -365,8 +364,8 @@ class Robot:
         self.mutated_elements[element_name] = attributes
 
     def add_ground_plane(
-        self, root: ET.Element, size: int = 4, orientation: tuple[float, float, float] = (0, 0, 0), name: str = "floor"
-    ) -> ET.Element:
+        self, root: ET._Element, size: int = 4, orientation: tuple[float, float, float] = (0, 0, 0), name: str = "floor"
+    ) -> ET._Element:
         """
         Add a ground plane to the root element with associated texture and material.
         Args:
@@ -395,7 +394,7 @@ class Robot:
 
         return ground_geom
 
-    def add_ground_plane_assets(self, root: ET.Element) -> None:
+    def add_ground_plane_assets(self, root: ET._Element) -> None:
         """Add texture and material assets for the ground plane
 
         Args:
@@ -435,15 +434,17 @@ class Robot:
                 LOGGER.warning(f"Link {link_name} has no data.")
 
         # Add joints
-        for parent, child, joint_data in self.graph.edges(data="data"):
-            if joint_data is not None:
-                joint_data.to_xml(robot)
+        joint_data_raw: Optional[BaseJoint]
+        for parent, child, joint_data_raw in self.graph.edges(data="data"):
+            joint_data_typed: Optional[BaseJoint] = joint_data_raw
+            if joint_data_typed is not None:
+                joint_data_typed.to_xml(robot)
             else:
                 LOGGER.warning(f"Joint between {parent} and {child} has no data.")
 
         return ET.tostring(robot, pretty_print=True, encoding="unicode")
 
-    def get_xml_string(self, element: ET.Element) -> str:
+    def get_xml_string(self, element: ET._Element) -> str:
         """
         Get the XML string from an element.
 
@@ -504,16 +505,18 @@ class Robot:
             else:
                 LOGGER.warning(f"Link {link_name} has no data.")
 
-        dissolved_transforms = {}
+        dissolved_transforms: dict[str, tuple[np.ndarray, Rotation]] = {}
 
-        combined_mass = 0
+        combined_mass = 0.0
         combined_diaginertia = np.zeros(3)
         combined_pos = np.zeros(3)
         combined_euler = np.zeros(3)
 
         # First, process all fixed joints
-        for parent_name, child_name, joint_data in self.graph.edges(data="data"):
-            if joint_data is not None and joint_data.joint_type == "fixed":
+        joint_data_raw: Optional[BaseJoint]
+        for parent_name, child_name, joint_data_raw in self.graph.edges(data="data"):
+            joint_data_typed: Optional[BaseJoint] = joint_data_raw
+            if joint_data_typed is not None and joint_data_typed.joint_type == "fixed":
                 parent_body = body_elements.get(parent_name)
                 child_body = body_elements.get(child_name)
 
@@ -521,8 +524,8 @@ class Robot:
                     LOGGER.debug(f"\nProcessing fixed joint from {parent_name} to {child_name}")
 
                     # Convert joint transform from URDF convention
-                    joint_pos = np.array(joint_data.origin.xyz)
-                    joint_rot = Rotation.from_euler(URDF_EULER_SEQ, joint_data.origin.rpy)
+                    joint_pos = np.array(joint_data_typed.origin.xyz)
+                    joint_rot = Rotation.from_euler(URDF_EULER_SEQ, joint_data_typed.origin.rpy)
 
                     # If parent was dissolved, compose transformations
                     if parent_name in dissolved_transforms:
@@ -552,7 +555,11 @@ class Robot:
                             new_rot = joint_rot * current_rot
 
                             # Convert back to MuJoCo convention
-                            new_euler = new_rot.as_euler(MJCF_EULER_SEQ, degrees=False)
+                            from typing import cast
+
+                            from typing_extensions import Literal
+
+                            new_euler = new_rot.as_euler(cast(Literal["XYZ"], MJCF_EULER_SEQ), degrees=False)
 
                             # Accumulate inertial properties
                             combined_mass += current_mass
@@ -574,12 +581,12 @@ class Robot:
                             new_rot = joint_rot * current_rot  # Order matters for rotation composition
 
                             # Convert back to MuJoCo convention - explicitly specify intrinsic/extrinsic
-                            new_euler = new_rot.as_euler(MJCF_EULER_SEQ, degrees=False)
+                            new_euler = new_rot.as_euler(cast(Literal["XYZ"], MJCF_EULER_SEQ), degrees=False)
 
-                            element.set("pos", " ".join(format_number(v) for v in new_pos))
-                            element.set("euler", " ".join(format_number(v) for v in new_euler))
+                            element.set("pos", " ".join(format_number(float(v)) for v in new_pos))
+                            element.set("euler", " ".join(format_number(float(v)) for v in new_euler))
 
-                        parent_body.append(element)
+                        parent_body.append(element)  # type: ignore[arg-type]
 
                     root_body.remove(child_body)
                     body_elements[child_name] = parent_body
@@ -590,7 +597,7 @@ class Robot:
             combined_euler /= combined_mass
 
         # Find the inertial element of the parent body
-        parent_inertial = parent_body.find("inertial")
+        parent_inertial = parent_body.find("inertial") if parent_body is not None else None
         if parent_inertial is not None:
             # Update the existing inertial element
             parent_inertial.set("mass", str(combined_mass))
@@ -604,11 +611,14 @@ class Robot:
             new_inertial.set("pos", " ".join(format_number(v) for v in combined_pos))
             new_inertial.set("euler", " ".join(format_number(v) for v in combined_euler))
             new_inertial.set("diaginertia", " ".join(format_number(v) for v in combined_diaginertia))
-            parent_body.append(new_inertial)
+            if parent_body is not None:
+                parent_body.append(new_inertial)  # type: ignore[arg-type]
 
         # Then process revolute joints
-        for parent_name, child_name, joint_data in self.graph.edges(data="data"):
-            if joint_data is not None and joint_data.joint_type != "fixed":
+        joint_data_raw2: Optional[BaseJoint]
+        for parent_name, child_name, joint_data_raw2 in self.graph.edges(data="data"):
+            joint_data_typed2: Optional[BaseJoint] = joint_data_raw2
+            if joint_data_typed2 is not None and joint_data_typed2.joint_type != "fixed":
                 parent_body = body_elements.get(parent_name)
                 child_body = body_elements.get(child_name)
 
@@ -623,28 +633,28 @@ class Robot:
                         parent_rot = Rotation.from_euler(URDF_EULER_SEQ, [0, 0, 0])
 
                     # Convert joint transform from URDF convention
-                    joint_pos = np.array(joint_data.origin.xyz)
-                    joint_rot = Rotation.from_euler(URDF_EULER_SEQ, joint_data.origin.rpy)
+                    joint_pos = np.array(joint_data_typed2.origin.xyz)
+                    joint_rot = Rotation.from_euler(URDF_EULER_SEQ, joint_data_typed2.origin.rpy)
 
                     # Apply parent's dissolved transformation
                     final_pos = parent_rot.apply(joint_pos) + parent_pos
                     final_rot = parent_rot * joint_rot
 
                     # Convert to MuJoCo convention while maintaining the joint axis orientation
-                    final_euler = final_rot.as_euler(MJCF_EULER_SEQ, degrees=False)
+                    final_euler = final_rot.as_euler(cast(Literal["XYZ"], MJCF_EULER_SEQ), degrees=False)
 
                     LOGGER.debug(f"Joint {parent_name}->{child_name}:")
-                    LOGGER.debug(f"  Original: pos={joint_data.origin.xyz}, rpy={joint_data.origin.rpy}")
+                    LOGGER.debug(f"  Original: pos={joint_data_typed2.origin.xyz}, rpy={joint_data_typed2.origin.rpy}")
                     LOGGER.debug(f"  Final: pos={final_pos}, euler={final_euler}")
 
                     # Update child body transformation
-                    child_body.set("pos", " ".join(format_number(v) for v in final_pos))
-                    child_body.set("euler", " ".join(format_number(v) for v in final_euler))
+                    child_body.set("pos", " ".join(format_number(float(v)) for v in final_pos))
+                    child_body.set("euler", " ".join(format_number(float(v)) for v in final_euler))
 
                     # Create joint with zero origin
-                    joint_data.origin.xyz = [0, 0, 0]
-                    joint_data.origin.rpy = [0, 0, 0]
-                    joint_data.to_mjcf(child_body)
+                    joint_data_typed2.origin.xyz = (0.0, 0.0, 0.0)
+                    joint_data_typed2.origin.rpy = (0.0, 0.0, 0.0)
+                    joint_data_typed2.to_mjcf(child_body)
 
                     # Move child under parent
                     parent_body.append(child_body)
@@ -673,10 +683,12 @@ class Robot:
 
                 if parent_element is not None:
                     # Create new element with proper parent relationship
-                    new_element = ET.SubElement(parent_element, element.tag, element.attrib)
+                    new_element: ET._Element = ET.SubElement(parent_element, element.tag, element.attrib)
                     # Copy any children if they exist
                     for child in element:
-                        new_element.append(ET.fromstring(ET.tostring(child)))  # noqa: S320
+                        child_element = ET.fromstring(ET.tostring(child))  # noqa: S320
+                        if isinstance(child_element, ET._Element):
+                            new_element.append(child_element)
                 else:
                     search_type = "tag" if find_by_tag else "name"
                     LOGGER.warning(f"Parent element with {search_type} '{parent}' not found in model.")
@@ -685,9 +697,9 @@ class Robot:
             # Search recursively through all descendants, looking for both body and joint elements
             elements = model.findall(f".//*[@name='{element_name}']")
             if elements:
-                element = elements[0]  # Get the first matching element
+                element_to_modify: ET._Element = elements[0]  # Get the first matching element
                 for key, value in attributes.items():
-                    element.set(key, str(value))
+                    element_to_modify.set(key, str(value))
             else:
                 LOGGER.warning(f"Could not find element with name '{element_name}'")
 
@@ -725,7 +737,7 @@ class Robot:
     def show_tree(self) -> None:
         """Display the robot's graph as a tree structure."""
 
-        def print_tree(node, depth=0):
+        def print_tree(node: str, depth: int = 0) -> None:
             prefix = "    " * depth
             print(f"{prefix}{node}")
             for child in self.graph.successors(node):
@@ -757,7 +769,7 @@ class Robot:
         except Exception as e:
             LOGGER.error(f"Error downloading assets: {e}")
 
-    def add_custom_element(self, parent_name: str, element: ET.Element) -> None:
+    def add_custom_element(self, parent_name: str, element: ET._Element) -> None:
         """Add a custom XML element to the robot model.
 
         Args:
@@ -765,7 +777,7 @@ class Robot:
             element: The custom XML element to add.
         """
         if self.model is None:
-            self.model = self.create_robot_model()
+            raise RuntimeError("Robot model not initialized")
 
         if parent_name == "root":
             self.model.insert(0, element)
@@ -790,10 +802,12 @@ class Robot:
         Returns:
             The robot model.
         """
-        tree: ET.ElementTree = ET.parse(file_name)  # noqa: S320
-        root: ET.Element = tree.getroot()
+        tree = ET.parse(file_name)  # noqa: S320
+        root = tree.getroot()
 
-        name = root.attrib["name"]
+        name = root.get("name")
+        if name is None:
+            raise ValueError("Root element missing name attribute")
         robot = cls(name=name, robot_type=robot_type)
 
         for element in root:
@@ -808,9 +822,9 @@ class Robot:
                     if geometry is not None:
                         mesh = geometry.find("mesh")
                         if mesh is not None:
-                            file_name = mesh.attrib.get("filename")
-                            if file_name and file_name not in robot.assets:
-                                robot.assets[file_name] = Asset.from_file(file_name)
+                            visual_file_name: str | None = mesh.get("filename")
+                            if visual_file_name is not None and visual_file_name not in robot.assets:
+                                robot.assets[visual_file_name] = Asset.from_file(visual_file_name)
 
                 # Process the collision element within the link
                 collision = element.find("collision")
@@ -819,9 +833,9 @@ class Robot:
                     if geometry is not None:
                         mesh = geometry.find("mesh")
                         if mesh is not None:
-                            file_name = mesh.attrib.get("filename")
-                            if file_name and file_name not in robot.assets:
-                                robot.assets[file_name] = Asset.from_file(file_name)
+                            collision_file_name: str | None = mesh.get("filename")
+                            if collision_file_name is not None and collision_file_name not in robot.assets:
+                                robot.assets[collision_file_name] = Asset.from_file(collision_file_name)
 
             elif element.tag == "joint":
                 joint = set_joint_from_xml(element)
@@ -873,7 +887,7 @@ class Robot:
 
         instances, instance_proxy_map, occurrences, id_to_name_map = get_instances(
             assembly=assembly, max_depth=max_depth
-        )
+        )  # type: ignore[misc]
         subassemblies, rigid_subassemblies = get_subassemblies(assembly=assembly, client=client, instances=instances)
 
         # Create parts without mass properties first (for mates processing)
@@ -934,7 +948,7 @@ class Robot:
         return robot
 
 
-def load_element(file_name: str) -> ET.Element:
+def load_element(file_name: str) -> ET._Element:
     """
     Load an XML element from a file.
 
@@ -944,15 +958,15 @@ def load_element(file_name: str) -> ET.Element:
     Returns:
         The root element of the XML file.
     """
-    tree: ET.ElementTree = ET.parse(file_name)  # noqa: S320
-    root: ET.Element = tree.getroot()
+    tree = ET.parse(file_name)  # noqa: S320
+    root = tree.getroot()
     return root
 
 
 def get_robot(
     assembly: Assembly,
     graph: nx.DiGraph,
-    root_node: str,
+    root_node: Optional[str],
     parts: dict[str, Part],
     mates: dict[str, MateFeatureData],
     relations: dict[str, MateRelationFeatureData],
@@ -983,6 +997,9 @@ def get_robot(
 
     LOGGER.info(f"Processing root node: {root_node}")
 
+    if assembly.document is None:
+        raise ValueError("Assembly document is None")
+
     root_link, stl_to_root_tf, root_asset = get_robot_link(
         name=root_node, part=parts[root_node], wid=assembly.document.wid, client=client, mate=None
     )
@@ -1004,11 +1021,14 @@ def get_robot(
         joint_mimic = None
         relation = topological_relations.get(topological_mates[mate_key].id)
         if relation:
-            multiplier = (
+            multiplier_value = (
                 relation.relationLength
                 if relation.relationType == RelationType.RACK_AND_PINION
                 else relation.relationRatio
             )
+            if multiplier_value is None:
+                raise ValueError("Relation multiplier is None")
+            multiplier = multiplier_value
             joint_mimic = JointMimic(
                 joint=get_joint_name(relation.mates[RELATION_PARENT].featureId, mates),
                 multiplier=multiplier,
@@ -1024,6 +1044,9 @@ def get_robot(
             is_rigid_assembly=parts[parent].isRigidAssembly,
         )
 
+        if assembly.document is None:
+            raise ValueError("Assembly document is None")
+
         link, stl_to_link_tf, asset = get_robot_link(
             child, parts[child], assembly.document.wid, client, topological_mates[mate_key]
         )
@@ -1035,11 +1058,11 @@ def get_robot(
         else:
             LOGGER.warning(f"Link {child} already exists in the robot graph. Skipping.")
 
-        for link in link_list:
-            if link.name not in robot.graph:
-                robot.add_link(link)
+        for link_item in link_list or []:
+            if link_item.name not in robot.graph:
+                robot.add_link(link_item)
             else:
-                LOGGER.warning(f"Link {link.name} already exists in the robot graph. Skipping.")
+                LOGGER.warning(f"Link {link_item.name} already exists in the robot graph. Skipping.")
 
         for joint in joint_list:
             robot.add_joint(joint)

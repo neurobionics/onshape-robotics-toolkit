@@ -10,7 +10,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Union
+from typing import Any, Optional, Union, cast
 
 import networkx as nx
 import numpy as np
@@ -106,6 +106,11 @@ class TypedKey:
     @classmethod
     def for_rigid_assembly(cls, path: tuple[str, ...], assembly_id: str) -> "TypedKey":
         """Create a TypedKey for a rigid assembly."""
+        return cls(path=path, entity_type=EntityType.RIGID_ASSEMBLY, entity_id=assembly_id)
+
+    @classmethod
+    def for_assembly(cls, path: tuple[str, ...], assembly_id: str) -> "TypedKey":
+        """Create a TypedKey for an assembly (backward compatibility)."""
         return cls(path=path, entity_type=EntityType.RIGID_ASSEMBLY, entity_id=assembly_id)
 
     @classmethod
@@ -323,7 +328,7 @@ class CAD:
     max_depth: int
 
     @classmethod
-    def from_assembly(cls, assembly: Assembly, client, max_depth: int = 0) -> "CAD":
+    def from_assembly(cls, assembly: Assembly, client: Client, max_depth: int = 0) -> "CAD":
         """
         Create CAD from an Onshape assembly with full subassembly parsing.
 
@@ -441,7 +446,7 @@ class CAD:
         """Get all rigid subassembly keys."""
         return list(self.rigid_subassemblies.keys())
 
-    async def fetch_rigid_subassemblies_async(self, client) -> None:
+    async def fetch_rigid_subassemblies_async(self, client: Client) -> None:
         """
         Asynchronously fetch rigid subassemblies from Onshape API.
 
@@ -472,7 +477,7 @@ class CAD:
             await asyncio.gather(*rigid_tasks, return_exceptions=True)
             LOGGER.info(f"Completed fetching {len(self.rigid_subassemblies)} rigid subassemblies")
 
-    async def _fetch_single_rigid_subassembly(self, client, key: TypedKey, subassembly: SubAssembly) -> None:
+    async def _fetch_single_rigid_subassembly(self, client: Client, key: TypedKey, subassembly: SubAssembly) -> None:
         """Fetch a single rigid subassembly."""
         try:
             root_assembly = await asyncio.to_thread(
@@ -488,11 +493,11 @@ class CAD:
             # This ensures each rigid instance gets its own entry even if they share the same UID
             rigid_key = TypedKey.for_assembly(("rigid_subassembly", *key.path), subassembly.uid)
             self.rigid_subassemblies[rigid_key] = root_assembly
-            LOGGER.debug(f"Successfully fetched rigid subassembly: {self.key_namer(key.path)}")
+            LOGGER.debug(f"Successfully fetched rigid subassembly: {self.key_namer.get_name(key)}")
         except Exception as e:
-            LOGGER.error(f"Failed to fetch rigid subassembly {self.key_namer(key.path)}: {e}")
+            LOGGER.error(f"Failed to fetch rigid subassembly {self.key_namer.get_name(key)}: {e}")
 
-    def fetch_rigid_subassemblies(self, client) -> None:
+    def fetch_rigid_subassemblies(self, client: Client) -> None:
         """
         Synchronous wrapper for fetch_rigid_subassemblies_async.
 
@@ -526,7 +531,7 @@ class CAD:
                 return f"{instance.name} ({key.entity_type.value})"
             return f"{key.entity_id} ({key.entity_type.value})"
 
-        def print_tree(path: tuple[str, ...], depth: int = 0):
+        def print_tree(path: tuple[str, ...], depth: int = 0) -> None:
             """Recursively print tree structure."""
             prefix = "    " * depth
 
@@ -540,7 +545,7 @@ class CAD:
                 children,
                 key=lambda k: (
                     0 if k.entity_type.value == "PART" else 1,  # Parts first, then assemblies
-                    self.instances.get(k, k).name if hasattr(self.instances.get(k, k), "name") else k.entity_id,
+                    getattr(self.instances.get(k, k), "name", k.entity_id) if self.instances.get(k) else k.entity_id,
                 ),
             )
 
@@ -553,11 +558,11 @@ class CAD:
 
                 for sub_key in sub_keys:
                     sub = self.subassemblies[sub_key]
-                    print(f"{prefix}|   +-- Flexible Subassembly: {sub.name}")
+                    print(f"{prefix}|   +-- Flexible Subassembly: {sub.uid}")
 
                 for rigid_key in rigid_keys:
                     rigid = self.rigid_subassemblies[rigid_key]
-                    print(f"{prefix}|   +-- Rigid Subassembly: {rigid.name}")
+                    print(f"{prefix}|   +-- Rigid Subassembly: {rigid.uid}")
 
                 # Recurse to children
                 if key.path in children_by_path:
@@ -642,7 +647,7 @@ class AssemblyStructureBuilder:
                     continue
                 visited_paths.add(instance_path)
 
-                if instance.uid in uid_to_subassembly:
+                if instance.uid in uid_to_subassembly and isinstance(instance, AssemblyInstance):
                     subassembly = uid_to_subassembly[instance.uid]
                     subassembly_queue.append((instance_path, instance, subassembly))
 
@@ -667,7 +672,7 @@ class AssemblyStructureBuilder:
                         continue
                     visited_paths.add(nested_path)
 
-                    if instance.uid in uid_to_subassembly:
+                    if instance.uid in uid_to_subassembly and isinstance(instance, AssemblyInstance):
                         nested_subassembly = uid_to_subassembly[instance.uid]
                         subassembly_queue.append((nested_path, instance, nested_subassembly))
 
@@ -694,11 +699,11 @@ class AssemblyStructureBuilder:
         for instance in assembly_level.instances:
             instance_path = (*path, instance.id)
 
-            if instance.type == InstanceType.PART:
+            if instance.type == InstanceType.PART and isinstance(instance, PartInstance):
                 key = TypedKey.for_part(instance_path, instance.id)
                 self.instances[key] = instance
-                self.parts[key] = instance
-            elif instance.type == InstanceType.ASSEMBLY:
+                self.parts[key] = cast(PartInstance, instance)
+            elif instance.type == InstanceType.ASSEMBLY and isinstance(instance, AssemblyInstance):
                 # Determine if this assembly should be rigid based on depth
                 instance_depth = len(instance_path)
                 is_instance_rigid = True if self.max_depth == 0 else instance_depth > self.max_depth
@@ -706,12 +711,12 @@ class AssemblyStructureBuilder:
                 # Create typed key and store in appropriate collection
                 if is_instance_rigid:
                     key = TypedKey.for_rigid_assembly(instance_path, instance.id)
-                    self.rigid_assemblies[key] = instance
-                    instance.isRigid = True  # Keep for backward compatibility
+                    self.rigid_assemblies[key] = cast(AssemblyInstance, instance)
+                    cast(AssemblyInstance, instance).isRigid = True  # Keep for backward compatibility
                 else:
                     key = TypedKey.for_flexible_assembly(instance_path, instance.id)
-                    self.flexible_assemblies[key] = instance
-                    instance.isRigid = False  # Keep for backward compatibility
+                    self.flexible_assemblies[key] = cast(AssemblyInstance, instance)
+                    cast(AssemblyInstance, instance).isRigid = False  # Keep for backward compatibility
 
                 self.instances[key] = instance
 
@@ -723,9 +728,11 @@ class AssemblyStructureBuilder:
             self.features[key] = feature
 
             # Classify feature types
-            if hasattr(feature.featureData, "matedEntities"):
+            if hasattr(feature.featureData, "matedEntities") and isinstance(feature.featureData, MateFeatureData):
                 self.mates[key] = feature.featureData
-            elif hasattr(feature.featureData, "relationType"):
+            elif hasattr(feature.featureData, "relationType") and isinstance(
+                feature.featureData, MateRelationFeatureData
+            ):
                 self.relations[key] = feature.featureData
 
     def _build_occurrences(self) -> None:
@@ -830,8 +837,8 @@ async def traverse_instances_async(
             # Not in a rigid subassembly, map to self
             instance_proxy_map[instance_id] = instance_id
 
-        if instance.type == InstanceType.ASSEMBLY:
-            instance_map[instance_id].isRigid = isRigid
+        if instance.type == InstanceType.ASSEMBLY and isinstance(instance, AssemblyInstance):
+            cast(AssemblyInstance, instance).isRigid = isRigid
 
             # Determine the rigid subassembly prefix for child traversal
             child_rigid_prefix = rigid_subassembly_prefix
@@ -930,8 +937,8 @@ def get_instances_sync_legacy(
             - A dictionary mapping instance IDs to their corresponding instances.
             - A dictionary mapping instance IDs to their sanitized names.
         """
-        instance_map = {}
-        id_to_name_map = {}
+        instance_map: dict[str, Union[PartInstance, AssemblyInstance]] = {}
+        id_to_name_map: dict[str, str] = {}
 
         # Stop traversing if the maximum depth is reached
         if current_depth >= max_depth:
@@ -987,7 +994,7 @@ def get_occurrences(assembly: Assembly, id_to_name_map: dict[str, str], max_dept
 
 async def fetch_rigid_subassemblies_async(
     subassembly: SubAssembly, key: str, client: Client, rigid_subassembly_map: dict[str, RootAssembly]
-):
+) -> None:
     """
     Fetch rigid subassemblies asynchronously.
 
@@ -1033,12 +1040,12 @@ async def get_subassemblies_async(
     rigid_subassembly_map: dict[str, RootAssembly] = {}
 
     # Group by UID
-    subassembly_instance_map = {}
-    rigid_subassembly_instance_map = {}
+    subassembly_instance_map: dict[str, list[str]] = {}
+    rigid_subassembly_instance_map: dict[str, list[str]] = {}
 
     for instance_key, instance in instance_map.items():
-        if instance.type == InstanceType.ASSEMBLY:
-            if instance.isRigid:
+        if instance.type == InstanceType.ASSEMBLY and isinstance(instance, AssemblyInstance):
+            if cast(AssemblyInstance, instance).isRigid:
                 rigid_subassembly_instance_map.setdefault(instance.uid, []).append(instance_key)
             else:
                 subassembly_instance_map.setdefault(instance.uid, []).append(instance_key)
@@ -1095,7 +1102,7 @@ async def _fetch_mass_properties_async(
     rigid_subassemblies: dict[str, RootAssembly],
     parts: dict[str, Part],
     include_rigid_subassembly_parts: bool = True,
-):
+) -> None:
     """
     Asynchronously fetch mass properties for a part.
 
@@ -1206,7 +1213,9 @@ async def _get_parts_without_mass_properties_async(
             bodyType="",
             MassProperty=rigid_subassembly.MassProperty,
             isRigidAssembly=True,
-            rigidAssemblyWorkspaceId=rigid_subassembly.documentMetaData.defaultWorkspace.id,
+            rigidAssemblyWorkspaceId=rigid_subassembly.documentMetaData.defaultWorkspace.id
+            if rigid_subassembly.documentMetaData and rigid_subassembly.documentMetaData.defaultWorkspace
+            else None,
             rigidAssemblyToPartTF={},
         )
 
@@ -1218,7 +1227,7 @@ def get_parts(
     rigid_subassemblies: dict[str, RootAssembly],
     client: Client,
     instances: dict[str, Union[PartInstance, AssemblyInstance]],
-    graph: nx.Graph = None,
+    graph: Optional[nx.Graph] = None,
     include_rigid_subassembly_parts: bool = False,
 ) -> dict[str, Part]:
     """
@@ -1254,6 +1263,8 @@ def get_parts(
             "mass properties for ALL parts, which can be very slow for complex assemblies. "
             "Consider passing a graph parameter.",
         )
+        # Return empty dict for legacy workflow without graph
+        return {}
 
 
 def get_parts_without_mass_properties(
@@ -1304,7 +1315,7 @@ def get_parts_optimized(
     rigid_subassemblies: dict[str, RootAssembly],
     client: Client,
     instances: dict[str, Union[PartInstance, AssemblyInstance]],
-    graph: nx.Graph = None,
+    graph: Optional[nx.Graph] = None,
     include_rigid_subassembly_parts: bool = False,
 ) -> dict[str, Part]:
     """
@@ -1326,7 +1337,10 @@ def get_parts_optimized(
         A dictionary mapping part IDs to their corresponding part objects.
     """
     parts = get_parts_without_mass_properties(assembly, rigid_subassemblies, instances)
-    get_parts_with_selective_mass_properties(parts, graph, client, rigid_subassemblies, include_rigid_subassembly_parts)
+    if graph is not None:
+        get_parts_with_selective_mass_properties(
+            parts, graph, client, rigid_subassemblies, include_rigid_subassembly_parts
+        )
 
     return parts
 
@@ -1478,19 +1492,19 @@ def build_hierarchical_transform_for_rigid_subassembly(
 
     if len(occurrences_list) < 2:
         LOGGER.debug("DEBUG: Short occurrences_list, returning identity matrix")
-        return np.eye(4)
+        return np.matrix(np.eye(4))
 
     rigid_sub_name = occurrences_list[0]
     if rigid_sub_name not in rigid_subassembly_occurrence_map:
         LOGGER.warning(f"Rigid subassembly {rigid_sub_name} not found in occurrence map")
-        return np.eye(4)
+        return np.matrix(np.eye(4))
 
     LOGGER.debug(
         f"DEBUG: Found rigid subassembly {rigid_sub_name}, \
             available keys: {list(rigid_subassembly_occurrence_map[rigid_sub_name].keys())}"
     )
 
-    parent_tf = np.eye(4)
+    parent_tf = np.matrix(np.eye(4))
     rigid_sub_occurrences = rigid_subassembly_occurrence_map[rigid_sub_name]
 
     # Traverse through each sub-assembly level (excluding the final part)
@@ -1504,7 +1518,7 @@ def build_hierarchical_transform_for_rigid_subassembly(
             continue
         _occurrence_tf = np.matrix(_occurrence_data.transform).reshape(4, 4)
         LOGGER.debug(f"DEBUG: Found occurrence transform for {hierarchical_key}: {_occurrence_tf}")
-        parent_tf = parent_tf @ _occurrence_tf
+        parent_tf = np.matrix(parent_tf @ _occurrence_tf)
         LOGGER.debug(f"DEBUG: Cumulative parent_tf after {hierarchical_key}: {parent_tf}")
 
     LOGGER.debug(f"DEBUG: Final hierarchical transform: {parent_tf}")
@@ -1535,7 +1549,7 @@ def build_hierarchical_transform_with_flexible_parents(
         Transform matrix from assembly root to the part's coordinate system
     """
     if len(occurrences_list) < 2:
-        return np.eye(4)
+        return np.matrix(np.eye(4))
 
     # Find the first rigid subassembly in the occurrence path
     rigid_start_idx = None
@@ -1547,10 +1561,10 @@ def build_hierarchical_transform_with_flexible_parents(
     if rigid_start_idx is None:
         # No rigid subassembly found, shouldn't happen but handle gracefully
         LOGGER.warning(f"No rigid subassembly found in occurrences: {occurrences_list}")
-        return np.eye(4)
+        return np.matrix(np.eye(4))
 
     # Build transform from root to the rigid subassembly through flexible parents
-    flexible_to_rigid_tf = np.eye(4)
+    flexible_to_rigid_tf = np.matrix(np.eye(4))
 
     # Apply transforms for flexible parents leading to the rigid subassembly
     for i in range(rigid_start_idx):
@@ -1562,7 +1576,7 @@ def build_hierarchical_transform_with_flexible_parents(
 
         if occurrence_key in flexible_occurrences:
             flexible_tf = np.matrix(flexible_occurrences[occurrence_key].transform).reshape(4, 4)
-            flexible_to_rigid_tf = flexible_to_rigid_tf @ flexible_tf
+            flexible_to_rigid_tf = np.matrix(flexible_to_rigid_tf @ flexible_tf)
         else:
             LOGGER.warning(f"Flexible occurrence {occurrence_key} not found in occurrences map")
 
@@ -1573,7 +1587,7 @@ def build_hierarchical_transform_with_flexible_parents(
     )
 
     # Combine the transforms: flexible_to_rigid @ rigid_internal
-    total_tf = flexible_to_rigid_tf @ rigid_internal_tf
+    total_tf = np.matrix(flexible_to_rigid_tf @ rigid_internal_tf)
 
     return total_tf
 
@@ -1603,7 +1617,7 @@ def build_hierarchical_transform_with_flexible_parents_v2(
         Transform matrix from assembly root to the part's coordinate system
     """
     if len(occurrences_list) < 2:
-        return np.eye(4)
+        return np.matrix(np.eye(4))
 
     # Find the first rigid subassembly in the occurrence path
     rigid_start_idx = None
@@ -1615,10 +1629,10 @@ def build_hierarchical_transform_with_flexible_parents_v2(
     if rigid_start_idx is None:
         # No rigid subassembly found, shouldn't happen but handle gracefully
         LOGGER.warning(f"No rigid subassembly found in occurrences: {occurrences_list}")
-        return np.eye(4)
+        return np.matrix(np.eye(4))
 
     # Build transform from root to the rigid subassembly through flexible parents
-    flexible_to_rigid_tf = np.eye(4)
+    flexible_to_rigid_tf = np.matrix(np.eye(4))
 
     # Apply transforms for flexible parents leading to the rigid subassembly
     for i in range(rigid_start_idx):
@@ -1630,7 +1644,7 @@ def build_hierarchical_transform_with_flexible_parents_v2(
 
         if occurrence_key in flexible_occurrences:
             flexible_tf = np.matrix(flexible_occurrences[occurrence_key].transform).reshape(4, 4)
-            flexible_to_rigid_tf = flexible_to_rigid_tf @ flexible_tf
+            flexible_to_rigid_tf = np.matrix(flexible_to_rigid_tf @ flexible_tf)
         else:
             LOGGER.warning(f"Flexible occurrence {occurrence_key} not found in occurrences map")
 
@@ -1645,7 +1659,7 @@ def build_hierarchical_transform_with_flexible_parents_v2(
     )
 
     # Combine the transforms: flexible_to_rigid @ rigid_internal
-    total_tf = flexible_to_rigid_tf @ rigid_internal_tf
+    total_tf = np.matrix(flexible_to_rigid_tf @ rigid_internal_tf)
 
     return total_tf
 
@@ -1735,7 +1749,7 @@ async def process_features_async(
         if feature.suppressed:
             continue
 
-        if feature.featureType == AssemblyFeatureType.MATE:
+        if feature.featureType == AssemblyFeatureType.MATE and isinstance(feature.featureData, MateFeatureData):
             if len(feature.featureData.matedEntities) < 2:
                 LOGGER.warning(f"Invalid mate feature: {feature}")
                 continue
@@ -1806,7 +1820,11 @@ async def process_features_async(
                     prefixed_parent_occurrences, rigid_subassembly_occurrence_map
                 )
                 parent_parentCS = MatedCS.from_tf(parent_tf)
-                parts[prefixed_parent_name].rigidAssemblyToPartTF[parent_occurrences[1]] = parent_parentCS.part_tf
+                part_dict = parts[prefixed_parent_name].rigidAssemblyToPartTF
+                if part_dict is None:
+                    part_dict = {}
+                    parts[prefixed_parent_name].rigidAssemblyToPartTF = part_dict
+                part_dict[parent_occurrences[1]] = parent_parentCS
                 feature.featureData.matedEntities[PARENT].parentCS = parent_parentCS
 
                 # Use the prefixed name for the mate connection
@@ -1829,7 +1847,11 @@ async def process_features_async(
                     i for i, occ in enumerate(parent_occurrences) if occ in rigid_subassembly_sanitized_to_prefixed
                 )
                 prefixed_rigid_name = rigid_subassembly_sanitized_to_prefixed[parent_occurrences[rigid_idx]]
-                parts[prefixed_rigid_name].rigidAssemblyToPartTF[parent_occurrences[-1]] = parent_parentCS.part_tf
+                part_dict = parts[prefixed_rigid_name].rigidAssemblyToPartTF
+                if part_dict is None:
+                    part_dict = {}
+                    parts[prefixed_rigid_name].rigidAssemblyToPartTF = part_dict
+                part_dict[parent_occurrences[-1]] = parent_parentCS
                 feature.featureData.matedEntities[PARENT].parentCS = parent_parentCS
 
                 # Use the prefixed name for the mate connection
@@ -1857,7 +1879,11 @@ async def process_features_async(
                     prefixed_child_occurrences, rigid_subassembly_occurrence_map
                 )
                 child_parentCS = MatedCS.from_tf(parent_tf)
-                parts[prefixed_child_name].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
+                part_dict = parts[prefixed_child_name].rigidAssemblyToPartTF
+                if part_dict is None:
+                    part_dict = {}
+                    parts[prefixed_child_name].rigidAssemblyToPartTF = part_dict
+                part_dict[child_occurrences[1]] = child_parentCS
                 feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
 
                 # Use the prefixed name for the mate connection
@@ -1880,7 +1906,11 @@ async def process_features_async(
                     i for i, occ in enumerate(child_occurrences) if occ in rigid_subassembly_sanitized_to_prefixed
                 )
                 prefixed_rigid_name = rigid_subassembly_sanitized_to_prefixed[child_occurrences[rigid_idx]]
-                parts[prefixed_rigid_name].rigidAssemblyToPartTF[child_occurrences[-1]] = child_parentCS.part_tf
+                part_dict = parts[prefixed_rigid_name].rigidAssemblyToPartTF
+                if part_dict is None:
+                    part_dict = {}
+                    parts[prefixed_rigid_name].rigidAssemblyToPartTF = part_dict
+                part_dict[child_occurrences[-1]] = child_parentCS
                 feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
 
                 # Use the prefixed name for the mate connection
@@ -1939,7 +1969,7 @@ async def process_features_async(
 
                     # Get the child's transform relative to the parent assembly
                     if full_child_key in occurrences:
-                        child_occurrence_tf = np.matrix(occurrences[full_child_key].transform).reshape(4, 4)
+                        child_occurrence_tf = np.matrix(np.array(occurrences[full_child_key].transform).reshape(4, 4))
                         child_parentCS = MatedCS.from_tf(child_occurrence_tf)
                         feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
                         LOGGER.debug(f"DEBUG: Set child parentCS for {child_occurrence_key}: {child_occurrence_tf}")
@@ -1955,7 +1985,9 @@ async def process_features_async(
                 )
             ] = feature.featureData
 
-        elif feature.featureType == AssemblyFeatureType.MATERELATION:
+        elif feature.featureType == AssemblyFeatureType.MATERELATION and isinstance(
+            feature.featureData, MateRelationFeatureData
+        ):
             if feature.featureData.relationType == RelationType.SCREW:
                 child_joint_id = feature.featureData.mates[0].featureId
             else:
@@ -2096,7 +2128,11 @@ async def _process_assembly_patterns_async(
                         parent_occurrences, rigid_subassembly_occurrence_map
                     )
                     parent_parentCS = MatedCS.from_tf(parent_tf)
-                    parts[parent_occurrences[0]].rigidAssemblyToPartTF[parent_occurrences[1]] = parent_parentCS.part_tf
+                    part_dict = parts[parent_occurrences[0]].rigidAssemblyToPartTF
+                    if part_dict is None:
+                        part_dict = {}
+                        parts[parent_occurrences[0]].rigidAssemblyToPartTF = part_dict
+                    part_dict[parent_occurrences[1]] = parent_parentCS
                     pattern_mate.matedEntities[PARENT].parentCS = parent_parentCS
                     parent_occurrences = [parent_occurrences[0]]
 
@@ -2105,7 +2141,11 @@ async def _process_assembly_patterns_async(
                         child_occurrences, rigid_subassembly_occurrence_map
                     )
                     child_parentCS = MatedCS.from_tf(parent_tf)
-                    parts[child_occurrences[0]].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
+                    part_dict = parts[child_occurrences[0]].rigidAssemblyToPartTF
+                    if part_dict is None:
+                        part_dict = {}
+                        parts[child_occurrences[0]].rigidAssemblyToPartTF = part_dict
+                    part_dict[child_occurrences[1]] = child_parentCS
                     pattern_mate.matedEntities[CHILD].parentCS = child_parentCS
                     child_occurrences = [child_occurrences[0]]
 
@@ -2202,8 +2242,8 @@ def ensure_unique_mate_names(mates: dict[str, MateFeatureData]) -> None:
     iteration = 0
 
     while iteration < max_iterations:
-        name_counts = {}
-        mate_keys_by_name = {}
+        name_counts: dict[str, int] = {}
+        mate_keys_by_name: dict[str, list[Any]] = {}
 
         # Count occurrences of each current name
         for mate_key, mate in mates.items():

@@ -19,6 +19,8 @@ from lxml.etree import Element, SubElement, _Element
 
 from onshape_robotics_toolkit.utilities import format_number, xml_escape
 
+__all__ = ["GeometryType", "BaseGeometry", "BoxGeometry", "CylinderGeometry", "SphereGeometry", "MeshGeometry"]
+
 
 class GeometryType(str, Enum):
     """

@@ -4,7 +4,7 @@ This module contains functions to create and manipulate graphs from Onshape asse
 """
 
 import random
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -43,7 +43,6 @@ def plot_graph(graph: Union[nx.Graph, nx.DiGraph], file_name: Optional[str] = No
             graph,
             pos,
             with_labels=True,
-            arrows=True,
             node_color=colors,
             edge_color="white",
             font_color="white",
@@ -55,13 +54,12 @@ def plot_graph(graph: Union[nx.Graph, nx.DiGraph], file_name: Optional[str] = No
             graph,
             pos,
             with_labels=True,
-            arrows=True,
             node_color=colors,
         )
         plt.show()
 
 
-def get_root_node(graph: nx.DiGraph) -> str:
+def get_root_node(graph: nx.DiGraph) -> Any:
     """
     Get the root node of a directed graph.
 
@@ -78,7 +76,7 @@ def get_root_node(graph: nx.DiGraph) -> str:
     return next(nx.topological_sort(graph))
 
 
-def convert_to_digraph(graph: nx.Graph, user_defined_root: Union[str, None] = None) -> nx.DiGraph:
+def convert_to_digraph(graph: nx.Graph, user_defined_root: Union[str, None] = None) -> tuple[nx.DiGraph, Any]:
     """
     Convert a graph to a directed graph and calculate the root node using closeness centrality.
 
@@ -96,7 +94,7 @@ def convert_to_digraph(graph: nx.Graph, user_defined_root: Union[str, None] = No
     """
 
     centrality = nx.closeness_centrality(graph)
-    root_node = user_defined_root if user_defined_root else max(centrality, key=centrality.get)
+    root_node = user_defined_root if user_defined_root else max(centrality, key=lambda x: centrality[x])
 
     bfs_graph = nx.bfs_tree(graph, root_node)
     di_graph = nx.DiGraph(bfs_graph)
@@ -113,7 +111,7 @@ def convert_to_digraph(graph: nx.Graph, user_defined_root: Union[str, None] = No
     return di_graph, root_node
 
 
-def get_topological_order(graph: nx.DiGraph) -> tuple[str]:
+def get_topological_order(graph: nx.DiGraph) -> Optional[tuple[Any, ...]]:
     """
     Get the topological order of a directed graph.
 
@@ -163,9 +161,8 @@ def create_graph(
     instances: dict[str, Union[PartInstance, AssemblyInstance]],
     parts: dict[str, Part],
     mates: dict[str, Union[MateFeatureData]],
-    directed: bool = True,
     use_user_defined_root: bool = True,
-) -> tuple[nx.DiGraph, str]:
+) -> tuple[nx.DiGraph, Optional[Any]]:
     """
     Create a graph from onshape assembly data.
 
@@ -174,7 +171,6 @@ def create_graph(
         instances: Dictionary of instances in the assembly.
         parts: Dictionary of parts in the assembly.
         mates: Dictionary of mates in the assembly.
-        directed: Whether to create a directed graph.
         use_user_defined_root: Whether to use the user defined root node.
 
     Returns:
@@ -187,10 +183,10 @@ def create_graph(
         >>> instances = get_instances(assembly)
         >>> parts = get_parts(assembly, client)
         >>> mates = get_mates(assembly)
-        >>> create_graph(occurrences, instances, parts, mates, directed=True)
+        >>> create_graph(occurrences, instances, parts, mates)
     """
 
-    graph = nx.Graph()
+    graph: nx.DiGraph = nx.DiGraph()
 
     # First, get all parts involved in mates
     involved_parts = get_parts_involved_in_mates(mates)
@@ -204,12 +200,7 @@ def create_graph(
     add_edges_to_graph(graph, mates)
 
     cur_graph = remove_unconnected_subgraphs(graph)
-
-    if directed:
-        output_graph, root_node = convert_to_digraph(cur_graph, user_defined_root)
-    else:
-        output_graph = cur_graph
-        root_node = None
+    output_graph, root_node = convert_to_digraph(cur_graph, user_defined_root)
 
     LOGGER.info(
         f"Graph created with {len(output_graph.nodes)} nodes and "
@@ -226,7 +217,7 @@ def add_nodes_to_graph(
     parts: dict[str, Part],
     involved_parts: set[str],
     use_user_defined_root: bool,
-) -> str:
+) -> Optional[str]:
     """
     Add nodes to the graph for parts that are involved in mates.
 

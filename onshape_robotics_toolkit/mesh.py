@@ -25,7 +25,8 @@ def transform_vectors(
         Array of transformed vectors
     """
 
-    return np.dot(vectors, rotation.T) + translation * len(vectors)
+    result: NDArray[np.floating] = np.dot(vectors, rotation.T) + translation * len(vectors)
+    return result
 
 
 def transform_mesh(mesh: Mesh, transform: np.ndarray) -> Mesh:
@@ -71,4 +72,5 @@ def transform_inertia_matrix(
         Transformed inertia matrix
     """
 
-    return rotation @ inertia_matrix @ rotation.T
+    result: NDArray[np.floating] = rotation @ inertia_matrix @ rotation.T
+    return result

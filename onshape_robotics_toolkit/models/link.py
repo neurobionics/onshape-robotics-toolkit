@@ -347,7 +347,7 @@ class Axis:
         root.set("axis", " ".join(format_number(v) for v in self.xyz))
 
     @classmethod
-    def from_xml(cls, xml: _Element) -> "Axis":
+    def from_xml(cls, xml: Optional[_Element]) -> "Axis":
         """
         Create an axis from an XML element.
 
@@ -362,6 +362,9 @@ class Axis:
             >>> Axis.from_xml(xml)
             Axis(xyz=(0.0, 0.0, 0.0))
         """
+        if xml is None:
+            raise ValueError("XML element for axis is None")
+
         xyz_str = xml.get("xyz")
 
         if xyz_str is None:

@@ -95,9 +95,9 @@ def load_env_variables(env: Union[str, None]) -> tuple[str, str]:
     """
 
     if env is not None:
-        return tuple(load_key_from_dotenv(env, key) for key in ONSHAPE_KEY_NAMES)
+        return (load_key_from_dotenv(env, ONSHAPE_KEY_NAMES[0]), load_key_from_dotenv(env, ONSHAPE_KEY_NAMES[1]))
     else:
-        return tuple(load_key_from_environment(key) for key in ONSHAPE_KEY_NAMES)
+        return (load_key_from_environment(ONSHAPE_KEY_NAMES[0]), load_key_from_environment(ONSHAPE_KEY_NAMES[1]))
 
 
 def make_nonce() -> str:
@@ -162,7 +162,7 @@ class Client:
         self._access_key, self._secret_key = load_env_variables(env)
         LOGGER.info(f"Onshape API initialized with env file: {env}")
 
-    def set_base_url(self, base_url: str):
+    def set_base_url(self, base_url: str) -> None:
         """
         Set the base URL for the Onshape API.
 
@@ -317,7 +317,7 @@ class Client:
             <Response [200]>
         """
 
-        payload = [variable.model_dump() for variable in variables.values()]
+        payload = [{"name": name, "expression": expression} for name, expression in variables.items()]
 
         # api/v9/variables/d/a1c1addf75444f54b504f25c/w/0d17b8ebb2a4c76be9fff3c7/e/cba5e3ca026547f34f8d9f0f/variables
         request_path = "/api/variables/d/" + did + "/w/" + wid + "/e/" + eid + "/variables"
@@ -335,7 +335,7 @@ class Client:
         wid: str,
         eid: str,
         configuration: str = "default",
-    ) -> str:
+    ) -> Optional[str]:
         """
         Get assembly name for a specified document / workspace / assembly.
 
@@ -588,7 +588,7 @@ class Client:
         eid: str,
         buffer: BinaryIO,
         configuration: str = "default",
-    ):
+    ) -> Optional[BinaryIO]:
         """
         Download an STL file from an assembly. The file is written to the buffer.
 
@@ -862,7 +862,7 @@ class Client:
         path: str,
         query: Optional[dict[str, Any]] = None,
         headers: Optional[dict[str, Any]] = None,
-        body: Optional[dict[str, Any]] = None,
+        body: Optional[Union[dict[str, Any], list[dict[str, Any]]]] = None,
         base_url: Optional[str] = None,
         log_response: bool = True,
         timeout: int = 50,
@@ -906,7 +906,7 @@ class Client:
 
         return res
 
-    def _build_url(self, base_url, path, query):
+    def _build_url(self, base_url: str, path: str, query: dict[str, Any]) -> str:
         """
         Build the URL for the request.
 
@@ -925,7 +925,7 @@ class Client:
         method: HTTP,
         url: str,
         headers: dict[str, Any],
-        body: dict[str, Any],
+        body: Optional[Union[dict[str, Any], list[dict[str, Any]]]],
         timeout: int,
     ) -> requests.Response:
         """
@@ -982,7 +982,7 @@ class Client:
             method, location.path, query=new_query, headers=headers, base_url=new_base_url, log_response=log_response
         )
 
-    def _log_response(self, res):
+    def _log_response(self, res: requests.Response) -> None:
         """
         Log the response from the Onshape API request.
 
@@ -1022,10 +1022,10 @@ class Client:
         """
         if query is None:
             query = {}
-        query = urlencode(query)
+        query_string = urlencode(query)
 
         hmac_str = (
-            str(method + "\n" + nonce + "\n" + date + "\n" + ctype + "\n" + path + "\n" + query + "\n")
+            str(method + "\n" + nonce + "\n" + date + "\n" + ctype + "\n" + path + "\n" + query_string + "\n")
             .lower()
             .encode("utf-8")
         )
@@ -1035,7 +1035,7 @@ class Client:
         )
         auth = "On " + self._access_key + ":HmacSHA256:" + signature.decode("utf-8")
 
-        LOGGER.debug(f"query: {query}, hmac_str: {hmac_str}, signature: {signature}, auth: {auth}")
+        LOGGER.debug(f"query: {query_string}, hmac_str: {hmac_str!r}, signature: {signature!r}, auth: {auth}")
 
         return auth
 
@@ -1138,7 +1138,7 @@ class Asset:
         self.partID = partID
         self.is_from_file = is_from_file
 
-        self._file_path = None
+        self._file_path: Optional[str] = None
 
     @property
     def absolute_path(self) -> str:
@@ -1149,6 +1149,8 @@ class Asset:
             The file path of the mesh file.
         """
         if self.is_from_file:
+            if self._file_path is None:
+                raise ValueError("File path is not set for file-based asset")
             return self._file_path
 
         # if meshes directory does not exist, create it
@@ -1185,9 +1187,13 @@ class Asset:
             >>> await asset.download()
         """
         LOGGER.info(f"Starting download for {self.file_name}")
+        if self.client is None:
+            raise ValueError("Client is required for downloading meshes")
         try:
             with io.BytesIO() as buffer:
                 if not self.is_rigid_assembly:
+                    if self.partID is None:
+                        raise ValueError("Part ID is required for downloading part STL")  # noqa: TRY301
                     await asyncio.to_thread(
                         self.client.download_part_stl,
                         did=self.did,
@@ -1210,14 +1216,14 @@ class Asset:
                 buffer.seek(0)
 
                 raw_mesh = stl.mesh.Mesh.from_file(None, fh=buffer)
-                transformed_mesh = transform_mesh(raw_mesh, self.transform)
+                transformed_mesh = transform_mesh(raw_mesh, self.transform) if self.transform is not None else raw_mesh
                 transformed_mesh.save(self.absolute_path)
 
                 LOGGER.info(f"Mesh file saved: {self.absolute_path}")
         except Exception as e:
             LOGGER.error(f"Failed to download {self.file_name}: {e}")
 
-    def to_mjcf(self, root: ET.Element) -> None:
+    def to_mjcf(self, root: Any) -> None:
         """
         Returns the XML representation of the asset, which is a mesh file.
 

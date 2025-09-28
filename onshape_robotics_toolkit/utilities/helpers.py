@@ -15,6 +15,7 @@ import json
 import os
 import random
 import re
+from typing import Any
 from xml.sax.saxutils import escape
 
 import dotenv
@@ -31,7 +32,7 @@ Key = tuple[str, ...]
 
 
 class CustomJSONEncoder(json.JSONEncoder):
-    def default(self, obj):
+    def default(self, obj: Any) -> Any:
         if isinstance(obj, np.ndarray):
             return obj.tolist()  # Convert numpy array to list
         if isinstance(obj, np.matrix):
@@ -142,7 +143,7 @@ def generate_uid(values: list[str]) -> str:
     return hashlib.sha256(_value.encode()).hexdigest()[:16]
 
 
-def print_dict(d: dict, indent=0) -> None:
+def print_dict(d: dict, indent: int = 0) -> None:
     """
     Print a dictionary with indentation for nested dictionaries
 
@@ -171,7 +172,7 @@ def print_dict(d: dict, indent=0) -> None:
             print("\t" * (indent + 1) + str(value))
 
 
-def get_random_files(directory: str, file_extension: str, count: int) -> list[str]:
+def get_random_files(directory: str, file_extension: str, count: int) -> tuple[list[str], list[str]]:
     """
     Get random files from a directory with a specific file extension and count
 
@@ -257,7 +258,7 @@ def make_unique_keys(keys: list[str]) -> dict[str, int]:
         {"a": 0, "b": 1, "a-1": 2, "a-2": 3}
     """
     unique_key_map = {}
-    key_count = {}
+    key_count: dict[str, int] = {}
 
     for index, key in enumerate(keys):
         if key in key_count:
@@ -370,13 +371,13 @@ def clean_name_for_urdf(name: str) -> str:
     return name
 
 
-def show_video(frames, framerate=60):
+def show_video(frames: list[Any], framerate: int = 60) -> None:
     fig, ax = plt.subplots()
     ax.axis("off")
 
     im = ax.imshow(frames[0], animated=True)
 
-    def update(frame):
+    def update(frame: Any) -> list[Any]:
         im.set_array(frame)
         return [im]
 
@@ -385,7 +386,7 @@ def show_video(frames, framerate=60):
     plt.show()
 
 
-def save_gif(frames, filename="sim.gif", framerate=60):
+def save_gif(frames: list[Any], filename: str = "sim.gif", framerate: int = 60) -> None:
     images = [Image.fromarray(frame) for frame in frames]
     images[0].save(filename, save_all=True, append_images=images[1:], duration=1000 / framerate, loop=0)
 

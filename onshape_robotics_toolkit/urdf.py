@@ -47,7 +47,7 @@ from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 SCRIPT_DIR = os.path.dirname(__file__)
 
 
-def get_joint_name(mate_id: str, mates: dict[str, MateFeatureData]) -> str:
+def get_joint_name(mate_id: str, mates: dict[str, MateFeatureData]) -> Optional[str]:
     """
     Get the name of the joint from the mate id.
 
@@ -98,16 +98,25 @@ def get_robot_link(
 
     if mate is None:
         try:
-            _link_to_stl_tf[:3, 3] = np.array(part.MassProperty.center_of_mass).reshape(3)
+            if part.MassProperty is not None:
+                _link_to_stl_tf[:3, 3] = np.array(part.MassProperty.center_of_mass).reshape(3)
+            else:
+                LOGGER.warning(f"Part {part.partId} has no mass properties, using identity transform")
         except AttributeError:
             LOGGER.warning(f"Part {part.partId} has no mass properties, using identity transform")
 
-    elif mate.matedEntities[CHILD].parentCS:
-        LOGGER.debug(f"DEBUG: Link {name} has parentCS, applying hierarchical transform")
-        _link_to_stl_tf = mate.matedEntities[CHILD].parentCS.part_tf @ mate.matedEntities[CHILD].matedCS.part_to_mate_tf
     else:
-        LOGGER.debug(f"DEBUG: Link {name} using direct part_to_mate_tf")
-        _link_to_stl_tf = mate.matedEntities[CHILD].matedCS.part_to_mate_tf
+        child_parent_cs = mate.matedEntities[CHILD].parentCS
+        child_mated_cs = mate.matedEntities[CHILD].matedCS
+        if child_parent_cs and child_mated_cs:
+            LOGGER.debug(f"DEBUG: Link {name} has parentCS, applying hierarchical transform")
+            _link_to_stl_tf = child_parent_cs.part_tf @ child_mated_cs.part_to_mate_tf
+        else:
+            LOGGER.debug(f"DEBUG: Link {name} using direct part_to_mate_tf")
+            if mate.matedEntities[CHILD].matedCS is not None:
+                _link_to_stl_tf = mate.matedEntities[CHILD].matedCS.part_to_mate_tf
+            else:
+                _link_to_stl_tf = np.eye(4)  # Default to identity matrix
 
     _stl_to_link_tf = np.matrix(np.linalg.inv(_link_to_stl_tf))
     _origin = Origin.zero_origin()
@@ -121,18 +130,19 @@ def get_robot_link(
         _inertia = np.eye(3)  # Default identity inertia matrix
     else:
         _mass = part.MassProperty.mass[0]
-        _com = part.MassProperty.center_of_mass_wrt(_stl_to_link_tf)
+        _com = tuple(part.MassProperty.center_of_mass_wrt(_stl_to_link_tf))
         _inertia = part.MassProperty.inertia_wrt(np.matrix(_stl_to_link_tf[:3, :3]))
 
     LOGGER.info(f"Creating robot link for {name}")
 
+    mvwid: str
     if part.documentVersion:
         wtype = WorkspaceType.V.value
         mvwid = part.documentVersion
 
     elif part.isRigidAssembly:
         wtype = WorkspaceType.W.value
-        mvwid = part.rigidAssemblyWorkspaceId
+        mvwid = part.rigidAssemblyWorkspaceId or wid
     else:
         wtype = WorkspaceType.W.value
         mvwid = wid
@@ -224,24 +234,25 @@ def get_robot_joint(
         )
 
     """
-    links = []
+    links: list[Link] = []
     if isinstance(mate, MateFeatureData):
         # Check if we have a parentCS (hierarchical transform) regardless of rigid assembly status
         # This handles the case where flexible assemblies contain parts from collapsed rigid subassemblies
-        if mate.matedEntities[PARENT].parentCS is not None:
+        parent_cs = mate.matedEntities[PARENT].parentCS
+        mated_cs = mate.matedEntities[PARENT].matedCS
+        if parent_cs is not None and mated_cs is not None:
             LOGGER.debug(f"DEBUG: Using parentCS for joint {mate.name} from {parent} to {child}")
-            LOGGER.debug(f"DEBUG: parentCS.part_tf = {mate.matedEntities[PARENT].parentCS.part_tf}")
-            LOGGER.debug(
-                f"DEBUG: parent matedCS.part_to_mate_tf = {mate.matedEntities[PARENT].matedCS.part_to_mate_tf}"
-            )
-            parent_to_mate_tf = (
-                mate.matedEntities[PARENT].parentCS.part_tf @ mate.matedEntities[PARENT].matedCS.part_to_mate_tf
-            )
+            LOGGER.debug(f"DEBUG: parentCS.part_tf = {parent_cs.part_tf}")
+            LOGGER.debug(f"DEBUG: parent matedCS.part_to_mate_tf = {mated_cs.part_to_mate_tf}")
+            parent_to_mate_tf = parent_cs.part_tf @ mated_cs.part_to_mate_tf
             LOGGER.debug(f"DEBUG: combined parent_to_mate_tf = {parent_to_mate_tf}")
         else:
             LOGGER.debug(f"DEBUG: No parentCS for joint {mate.name} from {parent} to {child}, using direct transform")
             # No hierarchical transform needed, use direct part-to-mate transformation
-            parent_to_mate_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+            if mate.matedEntities[PARENT].matedCS is not None:
+                parent_to_mate_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+            else:
+                parent_to_mate_tf = np.eye(4)  # Default to identity matrix
             LOGGER.debug(f"DEBUG: direct parent_to_mate_tf = {parent_to_mate_tf}")
 
     LOGGER.debug(f"DEBUG: stl_to_parent_tf = {stl_to_parent_tf}")
@@ -283,12 +294,12 @@ def get_robot_joint(
                 parent=parent,
                 child=child,
                 origin=origin,
-                # limits=JointLimits(
-                #     effort=1.0,
-                #     velocity=1.0,
-                #     lower=-0.1,
-                #     upper=0.1,
-                # ),
+                limits=JointLimits(
+                    effort=1.0,
+                    velocity=1.0,
+                    lower=-0.1,
+                    upper=0.1,
+                ),
                 axis=Axis((0.0, 0.0, -1.0)),
                 # dynamics=JointDynamics(damping=0.1, friction=0.1),
                 mimic=mimic,
