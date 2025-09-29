@@ -47,10 +47,10 @@ Enum:
 """
 
 from enum import Enum
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from onshape_robotics_toolkit.models.document import Document, DocumentMetaData
 from onshape_robotics_toolkit.models.mass import MassProperties
@@ -1102,6 +1102,29 @@ class AssemblyFeature(BaseModel):
     featureData: Union[MateGroupFeatureData, MateConnectorFeatureData, MateRelationFeatureData, MateFeatureData] = (
         Field(..., description="Data associated with the assembly feature.")
     )
+
+    @model_validator(mode="before")
+    def validate_feature_data(cls, values: Any) -> Any:
+        """Custom validator to properly parse featureData based on featureType."""
+        if isinstance(values, dict):
+            feature_type = values.get("featureType")
+            feature_data = values.get("featureData")
+
+            if feature_data and isinstance(feature_data, dict):
+                # Add the required 'id' field to featureData from the parent feature
+                feature_data["id"] = values.get("id", "")
+
+                # Parse based on feature type
+                if feature_type == AssemblyFeatureType.MATE:
+                    values["featureData"] = MateFeatureData(**feature_data)
+                elif feature_type == AssemblyFeatureType.MATEGROUP:
+                    values["featureData"] = MateGroupFeatureData(**feature_data)
+                elif feature_type == AssemblyFeatureType.MATECONNECTOR:
+                    values["featureData"] = MateConnectorFeatureData(**feature_data)
+                elif feature_type == AssemblyFeatureType.MATERELATION:
+                    values["featureData"] = MateRelationFeatureData(**feature_data)
+
+        return values
 
 
 class PatternType(str, Enum):

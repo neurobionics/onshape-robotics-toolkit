@@ -15,7 +15,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from lxml.etree import Element, SubElement, _Element
+from lxml.etree import Element as ETreeElement
+from lxml.etree import SubElement, _Element
 
 from onshape_robotics_toolkit.utilities import format_number, xml_escape
 
@@ -103,7 +104,7 @@ class BoxGeometry(BaseGeometry):
             >>> box.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = Element("geometry") if root is None else SubElement(root, "geometry")
+        geometry = ETreeElement("geometry") if root is None else SubElement(root, "geometry")
         SubElement(geometry, "box", size=" ".join(format_number(v) for v in self.size))
         return geometry
 
@@ -193,7 +194,7 @@ class CylinderGeometry(BaseGeometry):
             >>> cylinder.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = Element("geometry") if root is None else SubElement(root, "geometry")
+        geometry = ETreeElement("geometry") if root is None else SubElement(root, "geometry")
         SubElement(
             geometry,
             "cylinder",
@@ -284,7 +285,7 @@ class SphereGeometry(BaseGeometry):
             >>> sphere.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = Element("geometry") if root is None else SubElement(root, "geometry")
+        geometry = ETreeElement("geometry") if root is None else SubElement(root, "geometry")
         SubElement(geometry, "sphere", radius=format_number(self.radius))
         return geometry
 
@@ -369,7 +370,7 @@ class MeshGeometry(BaseGeometry):
             >>> mesh.to_xml()
             <Element 'geometry' at 0x7f8b3c0b4c70>
         """
-        geometry = Element("geometry") if root is None else SubElement(root, "geometry")
+        geometry = ETreeElement("geometry") if root is None else SubElement(root, "geometry")
         SubElement(geometry, "mesh", filename=self.filename)
         return geometry
 

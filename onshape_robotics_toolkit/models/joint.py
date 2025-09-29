@@ -29,7 +29,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from lxml.etree import Element, SubElement, _Element
+from lxml.etree import Element as ETreeElement
+from lxml.etree import SubElement, _Element
 
 from onshape_robotics_toolkit.models.link import Axis, Origin
 from onshape_robotics_toolkit.utilities import format_number
@@ -113,7 +114,7 @@ class JointLimits:
             <Element 'limit' at 0x7f8b3c0b4c70>
         """
 
-        limit = Element("limit") if root is None else SubElement(root, "limit")
+        limit = ETreeElement("limit") if root is None else SubElement(root, "limit")
         limit.set("effort", format_number(self.effort))
         limit.set("velocity", format_number(self.velocity))
         limit.set("lower", format_number(self.lower))
@@ -160,7 +161,7 @@ class JointMimic:
             <Element 'mimic' at 0x7f8b3c0b4c70>
         """
 
-        mimic = Element("mimic") if root is None else SubElement(root, "mimic")
+        mimic = ETreeElement("mimic") if root is None else SubElement(root, "mimic")
         mimic.set("joint", self.joint)
         mimic.set("multiplier", format_number(self.multiplier))
         mimic.set("offset", format_number(self.offset))
@@ -229,7 +230,7 @@ class JointDynamics:
             <Element 'dynamics' at 0x7f8b3c0b4c70>
         """
 
-        joint = Element("dynamics") if root is None else SubElement(root, "dynamics")
+        joint = ETreeElement("dynamics") if root is None else SubElement(root, "dynamics")
         joint.set("damping", format_number(self.damping))
         joint.set("friction", format_number(self.friction))
         return joint
@@ -292,7 +293,7 @@ class BaseJoint(ABC):
             The XML element representing the joint.
         """
 
-        joint = Element("joint") if root is None else SubElement(root, "joint")
+        joint = ETreeElement("joint") if root is None else SubElement(root, "joint")
         joint.set("name", self.name)
         joint.set("type", self.joint_type)
         self.origin.to_xml(joint)

@@ -142,8 +142,8 @@ class Robot:
         self.mates: dict[str, MateFeatureData] = {}
         self.relations: dict[str, MateRelationFeatureData] = {}
 
-        self.subassemblies: dict[str, SubAssembly] = {}
-        self.rigid_subassemblies: dict[str, RootAssembly] = {}
+        self.flexible_assembly_data: dict[str, SubAssembly] = {}
+        self.rigid_assembly_data: dict[str, RootAssembly] = {}
 
         self.assembly: Optional[Assembly] = None
         self.model: Optional[ET._Element] = None
@@ -938,8 +938,8 @@ class Robot:
         robot.mates = mates
         robot.relations = relations
 
-        robot.subassemblies = subassemblies
-        robot.rigid_subassemblies = rigid_subassemblies
+        robot.flexible_assembly_data = subassemblies
+        robot.rigid_assembly_data = rigid_subassemblies
 
         robot.assembly = assembly
 
@@ -991,7 +991,7 @@ def get_robot(
     """
     robot = Robot(name=robot_name)
 
-    assets_map = {}
+    assets_map: dict[str, Asset] = {}
     stl_to_link_tf_map = {}
     topological_mates, topological_relations = get_topological_mates(graph, mates, relations)
 
@@ -999,6 +999,9 @@ def get_robot(
 
     if assembly.document is None:
         raise ValueError("Assembly document is None")
+
+    if root_node is None:
+        raise ValueError("Root node is None")
 
     root_link, stl_to_root_tf, root_asset = get_robot_link(
         name=root_node, part=parts[root_node], wid=assembly.document.wid, client=client, mate=None
@@ -1029,8 +1032,11 @@ def get_robot(
             if multiplier_value is None:
                 raise ValueError("Relation multiplier is None")
             multiplier = multiplier_value
+            joint_name = get_joint_name(relation.mates[RELATION_PARENT].featureId, mates)
+            if joint_name is None:
+                raise ValueError("Joint name is None")
             joint_mimic = JointMimic(
-                joint=get_joint_name(relation.mates[RELATION_PARENT].featureId, mates),
+                joint=joint_name,
                 multiplier=multiplier,
                 offset=0.0,
             )

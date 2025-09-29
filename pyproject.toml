@@ -10,22 +10,16 @@ requires-python = ">=3.10,<3.13"
 dependencies = [
     "python-dotenv>=1.0.1",
     "pydantic>=2.9.2",
+    "numpy>=1.26.0",
     "scipy>=1.14.1",
     "numpy-stl>=3.1.2",
     "networkx>=3.4.2",
     "matplotlib>=3.9.2",
-    "pandas>=2.2.3",
-    "pyarrow>=18.0.0",
-    "regex>=2024.9.11",
-    "tqdm>=4.67.0",
-    "mujoco[usd]>=3.2.7",
-    "lxml>=5.3.0",
-    "optuna>=4.1.0",
     "requests>=2.32.3",
-    "plotly>=5.24.1",
-    "scikit-learn>=1.6.1",
-    "types-regex>=2025.9.18.20250921",
-    "lxml-stubs>=0.5.1",
+    "lxml>=5.3.0",
+    "typing_extensions>=4.12.0",
+    "regex>=2024.9.11",
+    "pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]
@@ -139,3 +133,9 @@ source = ["onshape_robotics_toolkit"]
 
 [tool.ruff.per-file-ignores]
 "tests/*" = ["S101"]
+
+[tool.deptry]
+# Skip example directories as they are not part of the main package
+extend_exclude = ["examples"]
+# Set dev dependency groups to ignore test/dev dependencies in obsolete check
+pep621_dev_dependency_groups = ["dev", "docs"]

@@ -1066,7 +1066,7 @@ class Client:
         nonce = make_nonce()
         ctype = headers.get("Content-Type") if headers.get("Content-Type") else "application/json"
 
-        auth = self._make_auth(method, date, nonce, path, query=query, ctype=ctype)
+        auth = self._make_auth(method, date, nonce, path, query=query, ctype=ctype or "application/json")
 
         req_headers = {
             "Content-Type": "application/json",

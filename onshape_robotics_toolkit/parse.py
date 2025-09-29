@@ -315,16 +315,21 @@ class CAD:
     assembly: Assembly
     instances: dict[TypedKey, Union[PartInstance, AssemblyInstance]]
     parts: dict[TypedKey, PartInstance]
-    rigid_assemblies: dict[TypedKey, AssemblyInstance]
-    flexible_assemblies: dict[TypedKey, AssemblyInstance]
+
+    # Assembly instance references (instances in the assembly tree)
+    rigid_assembly_instances: dict[TypedKey, AssemblyInstance]
+    flexible_assembly_instances: dict[TypedKey, AssemblyInstance]
+
     occurrences: dict[TypedKey, Occurrence]
     features: dict[TypedKey, AssemblyFeature]
     mates: dict[TypedKey, MateFeatureData]
     relations: dict[TypedKey, MateRelationFeatureData]
     id_resolver: IdToNameResolver
     key_namer: KeyNamer
-    subassemblies: dict[TypedKey, SubAssembly]
-    rigid_subassemblies: dict[TypedKey, RootAssembly]
+
+    # Assembly data (actual assembly content fetched from API)
+    flexible_assembly_data: dict[TypedKey, SubAssembly]
+    rigid_assembly_data: dict[TypedKey, RootAssembly]
     max_depth: int
 
     @classmethod
@@ -344,13 +349,24 @@ class CAD:
         cad = builder.build()
 
         # Fetch rigid subassemblies if any exist
-        if cad.rigid_assemblies:
+        if cad.rigid_assembly_instances:
             cad.fetch_rigid_subassemblies(client)
 
         # Build reverse cache for lookups
         cad.build_reverse_cache()
 
         return cad
+
+    # Convenience properties
+    @property
+    def assembly_instances(self) -> dict[TypedKey, AssemblyInstance]:
+        """Get all assembly instances (both rigid and flexible)."""
+        return {**self.rigid_assembly_instances, **self.flexible_assembly_instances}
+
+    @property
+    def assembly_data(self) -> dict[TypedKey, Union[SubAssembly, RootAssembly]]:
+        """Get all assembly data (both rigid and flexible)."""
+        return {**self.flexible_assembly_data, **self.rigid_assembly_data}
 
     @property
     def part_keys(self) -> list[TypedKey]:
@@ -360,17 +376,17 @@ class CAD:
     @property
     def assembly_keys(self) -> list[TypedKey]:
         """Get all assembly keys (both rigid and flexible)."""
-        return list(self.rigid_assemblies.keys()) + list(self.flexible_assemblies.keys())
+        return list(self.rigid_assembly_instances.keys()) + list(self.flexible_assembly_instances.keys())
 
     @property
     def rigid_assembly_keys(self) -> list[TypedKey]:
         """Get all rigid assembly keys."""
-        return list(self.rigid_assemblies.keys())
+        return list(self.rigid_assembly_instances.keys())
 
     @property
     def flexible_assembly_keys(self) -> list[TypedKey]:
         """Get all flexible assembly keys."""
-        return list(self.flexible_assemblies.keys())
+        return list(self.flexible_assembly_instances.keys())
 
     @property
     def mate_keys(self) -> list[TypedKey]:
@@ -388,9 +404,9 @@ class CAD:
             list(self.instances.keys())  # Already includes all parts and assemblies
             + list(self.features.keys())
             + list(self.occurrences.keys())
-            + list(self.subassemblies.keys())
-            + list(self.rigid_subassemblies.keys())
-            # Note: rigid_assemblies and flexible_assemblies keys already included in instances
+            + list(self.flexible_assembly_data.keys())
+            + list(self.rigid_assembly_data.keys())
+            # Note: rigid_assembly_instances and flexible_assembly_instances keys already included in instances
         )
         self.key_namer.build_reverse_cache(all_keys, prefix)
 
@@ -403,23 +419,23 @@ class CAD:
         """Look up an assembly by its generated name (searches both rigid and flexible)."""
         # Try rigid first
         key = self.key_namer.lookup_key(name, EntityType.RIGID_ASSEMBLY, prefix)
-        result = self.rigid_assemblies.get(key) if key else None
+        result = self.rigid_assembly_instances.get(key) if key else None
         if result:
             return result
 
         # Try flexible
         key = self.key_namer.lookup_key(name, EntityType.FLEXIBLE_ASSEMBLY, prefix)
-        return self.flexible_assemblies.get(key) if key else None
+        return self.flexible_assembly_instances.get(key) if key else None
 
     def lookup_rigid_assembly(self, name: str, prefix: Optional[str] = None) -> Optional[AssemblyInstance]:
         """Look up a rigid assembly by its generated name."""
         key = self.key_namer.lookup_key(name, EntityType.RIGID_ASSEMBLY, prefix)
-        return self.rigid_assemblies.get(key) if key else None
+        return self.rigid_assembly_instances.get(key) if key else None
 
     def lookup_flexible_assembly(self, name: str, prefix: Optional[str] = None) -> Optional[AssemblyInstance]:
         """Look up a flexible assembly by its generated name."""
         key = self.key_namer.lookup_key(name, EntityType.FLEXIBLE_ASSEMBLY, prefix)
-        return self.flexible_assemblies.get(key) if key else None
+        return self.flexible_assembly_instances.get(key) if key else None
 
     def lookup_mate(self, name: str, prefix: Optional[str] = None) -> Optional[MateFeatureData]:
         """Look up a mate by its generated name."""
@@ -429,22 +445,22 @@ class CAD:
     def lookup_subassembly(self, name: str, prefix: Optional[str] = None) -> Optional[SubAssembly]:
         """Look up a flexible subassembly by its generated name."""
         key = self.key_namer.lookup_key(name, EntityType.FLEXIBLE_ASSEMBLY, prefix)
-        return self.subassemblies.get(key) if key else None
+        return self.flexible_assembly_data.get(key) if key else None
 
     def lookup_rigid_subassembly(self, name: str, prefix: Optional[str] = None) -> Optional[RootAssembly]:
         """Look up a rigid subassembly by its generated name."""
         key = self.key_namer.lookup_key(name, EntityType.RIGID_ASSEMBLY, prefix)
-        return self.rigid_subassemblies.get(key) if key else None
+        return self.rigid_assembly_data.get(key) if key else None
 
     @property
     def subassembly_keys(self) -> list[TypedKey]:
         """Get all flexible subassembly keys."""
-        return list(self.subassemblies.keys())
+        return list(self.flexible_assembly_data.keys())
 
     @property
     def rigid_subassembly_keys(self) -> list[TypedKey]:
         """Get all rigid subassembly keys."""
-        return list(self.rigid_subassemblies.keys())
+        return list(self.rigid_assembly_data.keys())
 
     async def fetch_rigid_subassemblies_async(self, client: Client) -> None:
         """
@@ -459,7 +475,7 @@ class CAD:
         # This is needed because different instances may have different occurrence transforms
         rigid_tasks = []
 
-        for key, assembly_instance in self.rigid_assemblies.items():
+        for key, assembly_instance in self.rigid_assembly_instances.items():
             # Find the corresponding subassembly
             subassembly = None
             for sub in self.assembly.subAssemblies:
@@ -472,10 +488,10 @@ class CAD:
                 rigid_tasks.append(task)
 
         if rigid_tasks:
-            rigid_instance_count = len(self.rigid_assemblies)
+            rigid_instance_count = len(self.rigid_assembly_instances)
             LOGGER.info(f"Fetching {len(rigid_tasks)} unique rigid assemblies (from {rigid_instance_count} instances)")
             await asyncio.gather(*rigid_tasks, return_exceptions=True)
-            LOGGER.info(f"Completed fetching {len(self.rigid_subassemblies)} rigid subassemblies")
+            LOGGER.info(f"Completed fetching {len(self.rigid_assembly_data)} rigid assembly data")
 
     async def _fetch_single_rigid_subassembly(self, client: Client, key: TypedKey, subassembly: SubAssembly) -> None:
         """Fetch a single rigid subassembly."""
@@ -492,7 +508,7 @@ class CAD:
             # Use the instance key instead of UID to distinguish different instances of the same subassembly
             # This ensures each rigid instance gets its own entry even if they share the same UID
             rigid_key = TypedKey.for_assembly(("rigid_subassembly", *key.path), subassembly.uid)
-            self.rigid_subassemblies[rigid_key] = root_assembly
+            self.rigid_assembly_data[rigid_key] = root_assembly
             LOGGER.debug(f"Successfully fetched rigid subassembly: {self.key_namer.get_name(key)}")
         except Exception as e:
             LOGGER.error(f"Failed to fetch rigid subassembly {self.key_namer.get_name(key)}: {e}")
@@ -553,15 +569,15 @@ class CAD:
                 print(f"{prefix}|-- {get_display_name(key)}")
 
                 # Check for subassemblies/rigid subassemblies at this key
-                sub_keys = [k for k in self.subassemblies if k.path == key.path]
-                rigid_keys = [k for k in self.rigid_subassemblies if k.path == key.path]
+                sub_keys = [k for k in self.flexible_assembly_data if k.path == key.path]
+                rigid_keys = [k for k in self.rigid_assembly_data if k.path == key.path]
 
                 for sub_key in sub_keys:
-                    sub = self.subassemblies[sub_key]
+                    sub = self.flexible_assembly_data[sub_key]
                     print(f"{prefix}|   +-- Flexible Subassembly: {sub.uid}")
 
                 for rigid_key in rigid_keys:
-                    rigid = self.rigid_subassemblies[rigid_key]
+                    rigid = self.rigid_assembly_data[rigid_key]
                     print(f"{prefix}|   +-- Rigid Subassembly: {rigid.uid}")
 
                 # Recurse to children
@@ -585,14 +601,14 @@ class AssemblyStructureBuilder:
         # All mappings built in single pass
         self.instances: dict[TypedKey, Union[PartInstance, AssemblyInstance]] = {}
         self.parts: dict[TypedKey, PartInstance] = {}
-        self.rigid_assemblies: dict[TypedKey, AssemblyInstance] = {}
-        self.flexible_assemblies: dict[TypedKey, AssemblyInstance] = {}
+        self.rigid_assembly_instances: dict[TypedKey, AssemblyInstance] = {}
+        self.flexible_assembly_instances: dict[TypedKey, AssemblyInstance] = {}
         self.occurrences: dict[TypedKey, Occurrence] = {}
         self.features: dict[TypedKey, AssemblyFeature] = {}
         self.mates: dict[TypedKey, MateFeatureData] = {}
         self.relations: dict[TypedKey, MateRelationFeatureData] = {}
-        self.subassemblies: dict[TypedKey, SubAssembly] = {}
-        self.rigid_subassemblies: dict[TypedKey, RootAssembly] = {}
+        self.flexible_assembly_data: dict[TypedKey, SubAssembly] = {}
+        self.rigid_assembly_data: dict[TypedKey, RootAssembly] = {}
 
     def build(self) -> CAD:
         """Build all assembly mappings in a single traversal."""
@@ -603,9 +619,10 @@ class AssemblyStructureBuilder:
 
         LOGGER.info(
             f"Assembly parsing completed: {len(self.instances)} instances, "
-            f"{len(self.parts)} parts, {len(self.rigid_assemblies)} rigid assemblies, "
-            f"{len(self.flexible_assemblies)} flexible assemblies, "
-            f"{len(self.subassemblies)} subassemblies, {len(self.rigid_subassemblies)} rigid subassemblies, "
+            f"{len(self.parts)} parts, {len(self.rigid_assembly_instances)} rigid assemblies, "
+            f"{len(self.flexible_assembly_instances)} flexible assemblies, "
+            f"{len(self.flexible_assembly_data)} flexible assembly data, "
+            f"{len(self.rigid_assembly_data)} rigid assembly data, "
             f"{len(self.mates)} mates, {len(self.occurrences)} occurrences"
         )
 
@@ -613,16 +630,16 @@ class AssemblyStructureBuilder:
             assembly=self.assembly,
             instances=self.instances,
             parts=self.parts,
-            rigid_assemblies=self.rigid_assemblies,
-            flexible_assemblies=self.flexible_assemblies,
+            rigid_assembly_instances=self.rigid_assembly_instances,
+            flexible_assembly_instances=self.flexible_assembly_instances,
             occurrences=self.occurrences,
             features=self.features,
             mates=self.mates,
             relations=self.relations,
             id_resolver=self.id_resolver,
             key_namer=self.key_namer,
-            subassemblies=self.subassemblies,
-            rigid_subassemblies=self.rigid_subassemblies,
+            flexible_assembly_data=self.flexible_assembly_data,
+            rigid_assembly_data=self.rigid_assembly_data,
             max_depth=self.max_depth,
         )
 
@@ -693,7 +710,7 @@ class AssemblyStructureBuilder:
                 # Will be populated later when we fetch the RootAssembly
             else:
                 subassembly_key = TypedKey.for_flexible_assembly((SUBASSEMBLY_PATH_PREFIX, *path), subassembly_obj.uid)
-                self.subassemblies[subassembly_key] = subassembly_obj
+                self.flexible_assembly_data[subassembly_key] = subassembly_obj
 
         # Process instances
         for instance in assembly_level.instances:
@@ -711,11 +728,11 @@ class AssemblyStructureBuilder:
                 # Create typed key and store in appropriate collection
                 if is_instance_rigid:
                     key = TypedKey.for_rigid_assembly(instance_path, instance.id)
-                    self.rigid_assemblies[key] = cast(AssemblyInstance, instance)
+                    self.rigid_assembly_instances[key] = cast(AssemblyInstance, instance)
                     cast(AssemblyInstance, instance).isRigid = True  # Keep for backward compatibility
                 else:
                     key = TypedKey.for_flexible_assembly(instance_path, instance.id)
-                    self.flexible_assemblies[key] = cast(AssemblyInstance, instance)
+                    self.flexible_assembly_instances[key] = cast(AssemblyInstance, instance)
                     cast(AssemblyInstance, instance).isRigid = False  # Keep for backward compatibility
 
                 self.instances[key] = instance
