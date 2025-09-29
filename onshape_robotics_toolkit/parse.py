@@ -328,7 +328,7 @@ class CAD:
     key_namer: KeyNamer
 
     # Assembly data (actual assembly content fetched from API)
-    flexible_assembly_data: dict[TypedKey, SubAssembly]
+    flexible_assembly_data: dict[TypedKey, RootAssembly]
     rigid_assembly_data: dict[TypedKey, RootAssembly]
     max_depth: int
 
@@ -348,25 +348,14 @@ class CAD:
         builder = AssemblyStructureBuilder(assembly, max_depth)
         cad = builder.build()
 
-        # Fetch rigid subassemblies if any exist
-        if cad.rigid_assembly_instances:
-            cad.fetch_rigid_subassemblies(client)
+        # Fetch all subassemblies (both rigid and flexible) if any exist
+        if cad.rigid_assembly_instances or cad.flexible_assembly_instances:
+            cad.fetch_all_subassemblies(client)
 
         # Build reverse cache for lookups
         cad.build_reverse_cache()
 
         return cad
-
-    # Convenience properties
-    @property
-    def assembly_instances(self) -> dict[TypedKey, AssemblyInstance]:
-        """Get all assembly instances (both rigid and flexible)."""
-        return {**self.rigid_assembly_instances, **self.flexible_assembly_instances}
-
-    @property
-    def assembly_data(self) -> dict[TypedKey, Union[SubAssembly, RootAssembly]]:
-        """Get all assembly data (both rigid and flexible)."""
-        return {**self.flexible_assembly_data, **self.rigid_assembly_data}
 
     @property
     def part_keys(self) -> list[TypedKey]:
@@ -442,7 +431,7 @@ class CAD:
         key = self.key_namer.lookup_key(name, EntityType.FEATURE, prefix)
         return self.mates.get(key) if key else None
 
-    def lookup_subassembly(self, name: str, prefix: Optional[str] = None) -> Optional[SubAssembly]:
+    def lookup_subassembly(self, name: str, prefix: Optional[str] = None) -> Optional[RootAssembly]:
         """Look up a flexible subassembly by its generated name."""
         key = self.key_namer.lookup_key(name, EntityType.FLEXIBLE_ASSEMBLY, prefix)
         return self.flexible_assembly_data.get(key) if key else None
@@ -462,19 +451,16 @@ class CAD:
         """Get all rigid subassembly keys."""
         return list(self.rigid_assembly_data.keys())
 
-    async def fetch_rigid_subassemblies_async(self, client: Client) -> None:
+    async def fetch_all_subassemblies_async(self, client: Client) -> None:
         """
-        Asynchronously fetch rigid subassemblies from Onshape API.
+        Asynchronously fetch all subassemblies (both rigid and flexible) from Onshape API.
 
         Args:
             client: Onshape client for API calls
         """
+        all_tasks = []
 
-        # Find assembly instances that should have rigid subassemblies
-        # Fetch each rigid instance separately (no UID-based deduplication)
-        # This is needed because different instances may have different occurrence transforms
-        rigid_tasks = []
-
+        # Fetch rigid subassemblies
         for key, assembly_instance in self.rigid_assembly_instances.items():
             # Find the corresponding subassembly
             subassembly = None
@@ -484,17 +470,36 @@ class CAD:
                     break
 
             if subassembly:
-                task = self._fetch_single_rigid_subassembly(client, key, subassembly)
-                rigid_tasks.append(task)
+                task = self._fetch_single_subassembly(client, key, subassembly, is_rigid=True)
+                all_tasks.append(task)
 
-        if rigid_tasks:
-            rigid_instance_count = len(self.rigid_assembly_instances)
-            LOGGER.info(f"Fetching {len(rigid_tasks)} unique rigid assemblies (from {rigid_instance_count} instances)")
-            await asyncio.gather(*rigid_tasks, return_exceptions=True)
-            LOGGER.info(f"Completed fetching {len(self.rigid_assembly_data)} rigid assembly data")
+        # Fetch flexible subassemblies
+        for key, assembly_instance in self.flexible_assembly_instances.items():
+            # Find the corresponding subassembly
+            subassembly = None
+            for sub in self.assembly.subAssemblies:
+                if sub.uid == assembly_instance.uid:
+                    subassembly = sub
+                    break
 
-    async def _fetch_single_rigid_subassembly(self, client: Client, key: TypedKey, subassembly: SubAssembly) -> None:
-        """Fetch a single rigid subassembly."""
+            if subassembly:
+                task = self._fetch_single_subassembly(client, key, subassembly, is_rigid=False)
+                all_tasks.append(task)
+
+        if all_tasks:
+            rigid_count = len(self.rigid_assembly_instances)
+            flexible_count = len(self.flexible_assembly_instances)
+            LOGGER.info(f"Fetching {len(all_tasks)} subassemblies ({rigid_count} rigid, {flexible_count} flexible)")
+            await asyncio.gather(*all_tasks, return_exceptions=True)
+            LOGGER.info(
+                f"Completed fetching {len(self.rigid_assembly_data)} rigid "
+                f"and {len(self.flexible_assembly_data)} flexible assembly data"
+            )
+
+    async def _fetch_single_subassembly(
+        self, client: Client, key: TypedKey, subassembly: SubAssembly, is_rigid: bool
+    ) -> None:
+        """Fetch a single subassembly (both rigid and flexible use the same API call now)."""
         try:
             root_assembly = await asyncio.to_thread(
                 client.get_root_assembly,
@@ -505,22 +510,40 @@ class CAD:
                 with_mass_properties=True,
                 log_response=False,
             )
-            # Use the instance key instead of UID to distinguish different instances of the same subassembly
-            # This ensures each rigid instance gets its own entry even if they share the same UID
-            rigid_key = TypedKey.for_assembly(("rigid_subassembly", *key.path), subassembly.uid)
-            self.rigid_assembly_data[rigid_key] = root_assembly
-            LOGGER.debug(f"Successfully fetched rigid subassembly: {self.key_namer.get_name(key)}")
-        except Exception as e:
-            LOGGER.error(f"Failed to fetch rigid subassembly {self.key_namer.get_name(key)}: {e}")
 
-    def fetch_rigid_subassemblies(self, client: Client) -> None:
+            if is_rigid:
+                # Use prefixed key for rigid subassemblies to distinguish instances
+                rigid_key = TypedKey.for_assembly(("rigid_subassembly", *key.path), subassembly.uid)
+                self.rigid_assembly_data[rigid_key] = root_assembly
+                LOGGER.debug(f"Successfully fetched rigid subassembly: {self.key_namer.get_name(key)}")
+            else:
+                # Use original key for flexible subassemblies for easy lookup
+                self.flexible_assembly_data[key] = root_assembly
+                LOGGER.debug(f"Successfully fetched flexible subassembly: {self.key_namer.get_name(key)}")
+
+        except Exception as e:
+            subassembly_type = "rigid" if is_rigid else "flexible"
+            LOGGER.error(f"Failed to fetch {subassembly_type} subassembly {self.key_namer.get_name(key)}: {e}")
+
+    def fetch_all_subassemblies(self, client: Client) -> None:
         """
-        Synchronous wrapper for fetch_rigid_subassemblies_async.
+        Synchronous wrapper for fetch_all_subassemblies_async.
 
         Args:
             client: Onshape client for API calls
         """
-        asyncio.run(self.fetch_rigid_subassemblies_async(client))
+        asyncio.run(self.fetch_all_subassemblies_async(client))
+
+    # Legacy methods for backward compatibility
+    def fetch_rigid_subassemblies(self, client: Client) -> None:
+        """Legacy method - use fetch_all_subassemblies() instead."""
+        LOGGER.warning("fetch_rigid_subassemblies() is deprecated, use fetch_all_subassemblies() instead")
+        self.fetch_all_subassemblies(client)
+
+    def fetch_flexible_subassemblies(self, client: Client) -> None:
+        """Legacy method - use fetch_all_subassemblies() instead."""
+        LOGGER.warning("fetch_flexible_subassemblies() is deprecated, use fetch_all_subassemblies() instead")
+        self.fetch_all_subassemblies(client)
 
     def show_tree(self) -> None:
         """Display the CAD assembly structure as a tree."""
@@ -607,7 +630,7 @@ class AssemblyStructureBuilder:
         self.features: dict[TypedKey, AssemblyFeature] = {}
         self.mates: dict[TypedKey, MateFeatureData] = {}
         self.relations: dict[TypedKey, MateRelationFeatureData] = {}
-        self.flexible_assembly_data: dict[TypedKey, SubAssembly] = {}
+        self.flexible_assembly_data: dict[TypedKey, RootAssembly] = {}
         self.rigid_assembly_data: dict[TypedKey, RootAssembly] = {}
 
     def build(self) -> CAD:
@@ -702,15 +725,8 @@ class AssemblyStructureBuilder:
     ) -> None:
         """Process instances and features at a specific assembly level."""
 
-        # Store subassembly if provided (using instance path as key to distinguish multiple instances)
-        if subassembly_obj and path:
-            # Use instance path instead of UID to properly distinguish multiple instances of the same subassembly
-            if is_rigid:
-                subassembly_key = TypedKey.for_rigid_assembly((SUBASSEMBLY_PATH_PREFIX, *path), subassembly_obj.uid)
-                # Will be populated later when we fetch the RootAssembly
-            else:
-                subassembly_key = TypedKey.for_flexible_assembly((SUBASSEMBLY_PATH_PREFIX, *path), subassembly_obj.uid)
-                self.flexible_assembly_data[subassembly_key] = subassembly_obj
+        # Note: SubAssembly storage is no longer needed here since we now fetch
+        # RootAssembly data separately in fetch_all_subassemblies()
 
         # Process instances
         for instance in assembly_level.instances:
