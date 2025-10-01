@@ -58,8 +58,806 @@ RELATION_PARENT = 0
 
 
 # ============================================================================
-# ENHANCED UNIFIED ASSEMBLY PARSING SYSTEM
+# PATH-TUPLE BASED KEY SYSTEM (New Simplified Approach)
 # ============================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class PathKey:
+    """
+    Immutable path-based key using Onshape's natural ID hierarchy.
+
+    The path is a tuple of instance IDs that represents the hierarchical position
+    in the assembly tree, exactly as it appears in occurrence.path and
+    matedOccurrence from the JSON API response.
+
+    Examples:
+        # Root-level part instance
+        PathKey(("MqRDHdbA0tAm2ygBR",))
+
+        # Nested part in subassembly
+        PathKey(("MoN/4FhyvQ92+I8TU", "MZHBlAU4IxmX6u6A0", "MrpOYQ6mQsyqwPVz0"))
+
+        # Direct creation from JSON occurrence path
+        PathKey.from_occurrence_path(["MoN/4FhyvQ92+I8TU", "MM10pxoGk/3TUSoYG"])
+    """
+
+    _path: tuple[str, ...]
+
+    def __init__(self, path: tuple[str, ...]):
+        """
+        Create a PathKey from a tuple of instance IDs.
+
+        Args:
+            path: Tuple of Onshape instance IDs representing hierarchical position
+        """
+        object.__setattr__(self, "_path", path)
+
+    @property
+    def path(self) -> tuple[str, ...]:
+        """Get the immutable path tuple."""
+        return self._path
+
+    @property
+    def leaf_id(self) -> str:
+        """Get the last ID in the path (the actual entity)."""
+        return self._path[-1] if self._path else ""
+
+    @property
+    def parent_key(self) -> Optional["PathKey"]:
+        """Get parent PathKey by trimming last element."""
+        if len(self._path) <= 1:
+            return None
+        return PathKey(self._path[:-1])
+
+    @property
+    def depth(self) -> int:
+        """Get depth in hierarchy (0 = root level)."""
+        return len(self._path)
+
+    def __repr__(self) -> str:
+        return f"PathKey({self._path})"
+
+    def __str__(self) -> str:
+        """String representation showing the path structure."""
+        return " > ".join(self._path) if self._path else "(empty)"
+
+    @classmethod
+    def from_path(cls, path: Union[list[str], str]) -> "PathKey":
+        """
+        Create PathKey from a path (list) or single instance ID (string).
+
+        This handles both:
+        - occurrence.path from JSON (list of IDs)
+        - matedOccurrence from mate features (list of IDs)
+        - single instance ID for root-level instances (string)
+
+        Args:
+            path: Either a list of instance IDs or a single instance ID string
+
+        Returns:
+            PathKey with the path as an immutable tuple
+
+        Examples:
+            # From occurrence JSON (list)
+            occ_key = PathKey.from_path(occurrence.path)
+            # PathKey(("MoN/4FhyvQ92+I8TU", "MM10pxoGk/3TUSoYG"))
+
+            # From mate JSON (list)
+            parent_key = PathKey.from_path(mate.matedEntities[0].matedOccurrence)
+            # PathKey(("MoN/4FhyvQ92+I8TU", "MZHBlAU4IxmX6u6A0", "MrpOYQ6mQsyqwPVz0"))
+
+            # From single instance ID (string)
+            part_key = PathKey.from_path("MqRDHdbA0tAm2ygBR")
+            # PathKey(("MqRDHdbA0tAm2ygBR",))
+        """
+        if isinstance(path, str):
+            # Single instance ID -> single-element tuple
+            return cls((path,))
+        else:
+            # List of IDs -> tuple
+            return cls(tuple(path))
+
+
+@dataclass
+class InstanceRegistry:
+    """
+    Registry for all instances (parts and assemblies) using path-based keys.
+
+    This replaces the complex TypedKey system with a simpler approach that uses
+    Onshape's natural path structure directly.
+
+    Rigid vs Flexible classification is determined dynamically from path depth:
+    - is_rigid = (key.depth > max_depth)
+    - No need for separate storage!
+
+    Attributes:
+        parts: Maps PathKey to PartInstance
+        assemblies: Maps PathKey to AssemblyInstance
+        id_to_name: Maps instance ID to sanitized name
+        max_depth: Maximum depth before assemblies become rigid
+    """
+
+    # Primary storage: PathKey -> Instance
+    parts: dict[PathKey, PartInstance]
+    assemblies: dict[PathKey, AssemblyInstance]
+
+    # Name mapping (ID -> sanitized name)
+    id_to_name: dict[str, str]
+
+    # Reverse lookup: (sanitized_name, depth) -> PathKey
+    # We use depth to disambiguate same-named instances at different levels
+    _name_to_keys: dict[tuple[str, int], list[PathKey]]
+
+    # Configuration
+    max_depth: int
+
+    def __init__(self, max_depth: int = 0):
+        """
+        Initialize empty registry.
+
+        Args:
+            max_depth: Maximum depth for flexible assemblies (0 = all rigid, ∞ = all flexible)
+        """
+        self.parts = {}
+        self.assemblies = {}
+        self.id_to_name = {}
+        self._name_to_keys = {}
+        self.max_depth = max_depth
+
+    def add_part(self, key: PathKey, instance: PartInstance) -> None:
+        """
+        Add a part instance to the registry.
+
+        Args:
+            key: PathKey for this part
+            instance: PartInstance from JSON
+        """
+        self.parts[key] = instance
+        self._index_name(key, instance.name)
+
+    def add_assembly(self, key: PathKey, instance: AssemblyInstance) -> None:
+        """
+        Add an assembly instance to the registry.
+
+        Rigid vs flexible classification is determined dynamically from depth.
+
+        Args:
+            key: PathKey for this assembly
+            instance: AssemblyInstance from JSON
+        """
+        self.assemblies[key] = instance
+        self._index_name(key, instance.name)
+
+    def _index_name(self, key: PathKey, raw_name: str) -> None:
+        """
+        Index name for reverse lookup.
+
+        Args:
+            key: PathKey to index
+            raw_name: Raw name from JSON (e.g., "Part 1 <1>")
+        """
+        sanitized = get_sanitized_name(raw_name)
+        lookup_key = (sanitized, key.depth)
+
+        if lookup_key not in self._name_to_keys:
+            self._name_to_keys[lookup_key] = []
+
+        self._name_to_keys[lookup_key].append(key)
+
+    def get_part(self, key: PathKey) -> Optional[PartInstance]:
+        """Get part by PathKey."""
+        return self.parts.get(key)
+
+    def get_assembly(self, key: PathKey) -> Optional[AssemblyInstance]:
+        """Get assembly by PathKey."""
+        return self.assemblies.get(key)
+
+    def get_instance(self, key: PathKey) -> Optional[Union[PartInstance, AssemblyInstance]]:
+        """Get any instance (part or assembly) by PathKey."""
+        return self.parts.get(key) or self.assemblies.get(key)
+
+    def is_rigid_assembly(self, key: PathKey) -> bool:
+        """
+        Check if assembly is rigid based on depth.
+
+        Args:
+            key: PathKey to check
+
+        Returns:
+            True if assembly depth exceeds max_depth (making it rigid)
+
+        Example:
+            # max_depth = 2
+            # PathKey depth 0-2 -> flexible
+            # PathKey depth 3+   -> rigid
+        """
+        if key not in self.assemblies:
+            return False
+        return key.depth > self.max_depth
+
+    def is_flexible_assembly(self, key: PathKey) -> bool:
+        """
+        Check if assembly is flexible based on depth.
+
+        Args:
+            key: PathKey to check
+
+        Returns:
+            True if assembly depth is within max_depth (making it flexible)
+        """
+        if key not in self.assemblies:
+            return False
+        return key.depth <= self.max_depth
+
+    def lookup_by_name(self, name: str, depth: Optional[int] = None) -> list[PathKey]:
+        """
+        Look up PathKeys by sanitized name.
+
+        Args:
+            name: Sanitized name (e.g., "Part_1_1")
+            depth: Optional depth filter (0 = root level)
+
+        Returns:
+            List of PathKeys with this name (may be multiple if duplicates exist)
+
+        Example:
+            # Find all parts named "Part_1_1" at any depth
+            keys = registry.lookup_by_name("Part_1_1")
+
+            # Find only root-level parts named "Part_1_1"
+            keys = registry.lookup_by_name("Part_1_1", depth=0)
+        """
+        if depth is not None:
+            return self._name_to_keys.get((name, depth), [])
+        else:
+            # Return all keys with this name regardless of depth
+            all_keys = []
+            for (n, _d), keys in self._name_to_keys.items():
+                if n == name:
+                    all_keys.extend(keys)
+            return all_keys
+
+    def get_hierarchical_name(self, key: PathKey, separator: str = ":") -> str:
+        """
+        Build hierarchical name from path.
+
+        Args:
+            key: PathKey to build name for
+            separator: String to join names (default ":")
+
+        Returns:
+            Hierarchical name (e.g., "Assembly_1:Subassembly_2:Part_3")
+
+        Example:
+            # For PathKey(("MoN/4FhyvQ92+I8TU", "MZHBlAU4IxmX6u6A0", "MrpOYQ6mQsyqwPVz0"))
+            # Returns: "Assembly_1:double_wheel_1:wheel_part_1"
+        """
+        names = []
+        for instance_id in key.path:
+            name = self.id_to_name.get(instance_id, instance_id)
+            names.append(name)
+
+        return separator.join(names)
+
+    def build_from_assembly(self, assembly: Assembly) -> None:
+        """
+        Build registry from Assembly JSON in a single traversal.
+
+        Args:
+            assembly: Assembly from Onshape API
+
+        This processes:
+        1. Root-level instances
+        2. Builds ID-to-name mapping from all subassemblies
+
+        Note: Rigid vs flexible is determined dynamically from depth, not stored!
+        """
+        # Build ID to name mapping first (used by all instances)
+        self._build_id_to_name_map(assembly)
+
+        # Process root-level instances
+        for instance in assembly.rootAssembly.instances:
+            key = PathKey.from_path(instance.id)  # Single ID -> single-element tuple
+
+            if instance.type == InstanceType.PART:
+                self.add_part(key, cast(PartInstance, instance))
+            elif instance.type == InstanceType.ASSEMBLY:
+                self.add_assembly(key, cast(AssemblyInstance, instance))
+
+    def _build_id_to_name_map(self, assembly: Assembly) -> None:
+        """
+        Build mapping from instance ID to sanitized name.
+
+        Args:
+            assembly: Assembly containing all instances
+
+        This processes root assembly and all subassemblies to build complete mapping.
+        """
+        LOGGER.debug("Building instance ID to name mapping...")
+
+        # Root assembly instances
+        for instance in assembly.rootAssembly.instances:
+            sanitized = get_sanitized_name(instance.name)
+            self.id_to_name[instance.id] = sanitized
+
+        # Subassembly instances
+        visited_uids: set[str] = set()
+        subassembly_deque: deque[SubAssembly] = deque(assembly.subAssemblies)
+
+        while subassembly_deque:
+            subassembly = subassembly_deque.popleft()
+
+            if subassembly.uid in visited_uids:
+                continue
+            visited_uids.add(subassembly.uid)
+
+            for instance in subassembly.instances:
+                sanitized = get_sanitized_name(instance.name)
+                self.id_to_name[instance.id] = sanitized
+
+        LOGGER.debug(f"Mapped {len(self.id_to_name)} instance IDs to names")
+
+    def __len__(self) -> int:
+        """Total number of instances."""
+        return len(self.parts) + len(self.assemblies)
+
+    @property
+    def rigid_count(self) -> int:
+        """Count rigid assemblies dynamically."""
+        return sum(1 for key in self.assemblies if self.is_rigid_assembly(key))
+
+    @property
+    def flexible_count(self) -> int:
+        """Count flexible assemblies dynamically."""
+        return sum(1 for key in self.assemblies if self.is_flexible_assembly(key))
+
+    def __repr__(self) -> str:
+        return (
+            f"InstanceRegistry("
+            f"parts={len(self.parts)}, "
+            f"assemblies={len(self.assemblies)}, "
+            f"max_depth={self.max_depth}, "
+            f"rigid={self.rigid_count}, "
+            f"flexible={self.flexible_count})"
+        )
+
+
+@dataclass
+class OccurrenceRegistry:
+    """
+    Registry for occurrences using path-based keys.
+
+    Occurrences represent the actual placement (transform) of instances in the assembly.
+    Each occurrence has a path that matches its instance path, making lookups trivial.
+
+    Attributes:
+        occurrences: Maps PathKey to Occurrence
+        id_to_name: Reference to InstanceRegistry's ID mapping (shared)
+    """
+
+    # Primary storage: PathKey -> Occurrence
+    occurrences: dict[PathKey, Occurrence]
+
+    # Shared name mapping (from InstanceRegistry)
+    id_to_name: dict[str, str]
+
+    def __init__(self, id_to_name: dict[str, str]):
+        """
+        Initialize occurrence registry.
+
+        Args:
+            id_to_name: Shared ID-to-name mapping from InstanceRegistry
+        """
+        self.occurrences = {}
+        self.id_to_name = id_to_name
+
+    def add_occurrence(self, occurrence: Occurrence) -> PathKey:
+        """
+        Add an occurrence to the registry.
+
+        Args:
+            occurrence: Occurrence from JSON
+
+        Returns:
+            PathKey created from occurrence.path
+
+        Example:
+            # From JSON: {"path": ["MoN/4FhyvQ92+I8TU", "MM10pxoGk/3TUSoYG"], "transform": [...]}
+            key = registry.add_occurrence(occurrence)
+        """
+        key = PathKey.from_path(occurrence.path)
+        self.occurrences[key] = occurrence
+        return key
+
+    def get_occurrence(self, key: PathKey) -> Optional[Occurrence]:
+        """
+        Get occurrence by PathKey.
+
+        Args:
+            key: PathKey to lookup
+
+        Returns:
+            Occurrence if found, None otherwise
+        """
+        return self.occurrences.get(key)
+
+    def get_transform(self, key: PathKey) -> Optional[np.ndarray]:
+        """
+        Get 4x4 transform matrix for an occurrence.
+
+        Args:
+            key: PathKey to lookup
+
+        Returns:
+            4x4 numpy array, or None if not found
+
+        Example:
+            tf = registry.get_transform(key)
+            # Returns: np.array([[1, 0, 0, x], [0, 1, 0, y], [0, 0, 1, z], [0, 0, 0, 1]])
+        """
+        occ = self.occurrences.get(key)
+        if occ:
+            return np.array(occ.transform).reshape(4, 4)
+        return None
+
+    def build_transform_chain(self, key: PathKey) -> np.ndarray:
+        """
+        Build complete transform by walking up the path hierarchy.
+
+        This multiplies transforms from the occurrence up to the root,
+        giving the final world-space transform.
+
+        Args:
+            key: PathKey to build transform for
+
+        Returns:
+            4x4 numpy array representing cumulative transform
+
+        Example:
+            # For key = PathKey(("ASM_1", "ASM_2", "PART_3"))
+            # Multiplies: root_to_ASM_1 @ ASM_1_to_ASM_2 @ ASM_2_to_PART_3
+            world_tf = registry.build_transform_chain(key)
+        """
+        transforms = []
+
+        # Walk up the path from full to root
+        current_path = key.path
+        for i in range(len(current_path), 0, -1):
+            sub_path = current_path[:i]
+            sub_key = PathKey(sub_path)
+            occ = self.occurrences.get(sub_key)
+
+            if occ:
+                transforms.append(np.array(occ.transform).reshape(4, 4))
+
+        # Multiply transforms in order (child to parent)
+        result = np.eye(4)
+        for tf in transforms:
+            result = tf @ result
+
+        return result
+
+    def get_hierarchical_name(self, key: PathKey, separator: str = ":") -> str:
+        """
+        Build hierarchical name from path.
+
+        Args:
+            key: PathKey to build name for
+            separator: String to join names (default ":")
+
+        Returns:
+            Hierarchical name (e.g., "Assembly_1:Subassembly_2:Part_3")
+        """
+        names = []
+        for instance_id in key.path:
+            name = self.id_to_name.get(instance_id, instance_id)
+            names.append(name)
+
+        return separator.join(names)
+
+    def build_from_root_assembly(self, root_assembly: RootAssembly) -> None:
+        """
+        Build occurrence registry from root assembly occurrences.
+
+        Args:
+            root_assembly: RootAssembly containing occurrences
+
+        Example:
+            registry = OccurrenceRegistry(instance_registry.id_to_name)
+            registry.build_from_root_assembly(assembly.rootAssembly)
+        """
+        for occurrence in root_assembly.occurrences:
+            self.add_occurrence(occurrence)
+
+        LOGGER.debug(f"Added {len(self.occurrences)} occurrences from root assembly")
+
+    def __len__(self) -> int:
+        """Total number of occurrences."""
+        return len(self.occurrences)
+
+    def __repr__(self) -> str:
+        return f"OccurrenceRegistry(occurrences={len(self.occurrences)})"
+
+
+@dataclass
+class MateRegistry:
+    """
+    Registry for mate features using path-based keys.
+
+    Mates connect two parts/assemblies together, each referenced by their occurrence paths.
+    We use a tuple of (parent_key, child_key) as the dictionary key for O(1) lookup.
+
+    Attributes:
+        mates: Maps (parent_PathKey, child_PathKey) tuple to MateFeatureData
+        feature_id_to_mate: Maps feature ID to mate data for reverse lookup
+        id_to_name: Reference to InstanceRegistry's ID mapping (shared)
+    """
+
+    # Primary storage: (PathKey, PathKey) -> MateFeatureData
+    mates: dict[tuple[PathKey, PathKey], MateFeatureData]
+
+    # Reverse lookup: feature ID -> MateFeatureData
+    feature_id_to_mate: dict[str, MateFeatureData]
+
+    # Shared name mapping (from InstanceRegistry)
+    id_to_name: dict[str, str]
+
+    def __init__(self, id_to_name: dict[str, str]):
+        """
+        Initialize mate registry.
+
+        Args:
+            id_to_name: Shared ID-to-name mapping from InstanceRegistry
+        """
+        self.mates = {}
+        self.feature_id_to_mate = {}
+        self.id_to_name = id_to_name
+
+    def add_mate(self, feature: AssemblyFeature) -> Optional[tuple[PathKey, PathKey]]:
+        """
+        Add a mate feature to the registry.
+
+        Args:
+            feature: AssemblyFeature with featureType = MATE
+
+        Returns:
+            Tuple of (parent_key, child_key) if mate is valid, None otherwise
+
+        Example:
+            # From JSON assembly feature
+            mate_keys = registry.add_mate(feature)
+            # Returns: (PathKey(("PART_1",)), PathKey(("PART_2",)))
+        """
+        if feature.featureType != AssemblyFeatureType.MATE:
+            LOGGER.warning(f"Feature {feature.id} is not a mate, skipping")
+            return None
+
+        if not isinstance(feature.featureData, MateFeatureData):
+            LOGGER.warning(f"Feature {feature.id} has invalid mate data, skipping")
+            return None
+
+        mate_data = feature.featureData
+
+        # Extract parent and child occurrence paths from mate
+        if len(mate_data.matedEntities) < 2:
+            LOGGER.warning(f"Mate {feature.id} has insufficient mated entities, skipping")
+            return None
+
+        parent_path = mate_data.matedEntities[PARENT].matedOccurrence
+        child_path = mate_data.matedEntities[CHILD].matedOccurrence
+
+        # Create PathKeys directly from occurrence paths
+        parent_key = PathKey.from_path(parent_path)
+        child_key = PathKey.from_path(child_path)
+
+        # Store mate by key pair
+        mate_key = (parent_key, child_key)
+        self.mates[mate_key] = mate_data
+
+        # Store reverse lookup by feature ID
+        self.feature_id_to_mate[feature.id] = mate_data
+
+        return mate_key
+
+    def get_mate(self, parent_key: PathKey, child_key: PathKey) -> Optional[MateFeatureData]:
+        """
+        Get mate between two parts/assemblies.
+
+        Args:
+            parent_key: PathKey of parent
+            child_key: PathKey of child
+
+        Returns:
+            MateFeatureData if found, None otherwise
+        """
+        return self.mates.get((parent_key, child_key))
+
+    def get_mate_by_feature_id(self, feature_id: str) -> Optional[MateFeatureData]:
+        """
+        Get mate by feature ID (reverse lookup).
+
+        Args:
+            feature_id: Assembly feature ID
+
+        Returns:
+            MateFeatureData if found, None otherwise
+        """
+        return self.feature_id_to_mate.get(feature_id)
+
+    def get_mates_for_part(self, key: PathKey) -> list[tuple[PathKey, MateFeatureData]]:
+        """
+        Get all mates involving a specific part (as parent or child).
+
+        Args:
+            key: PathKey to search for
+
+        Returns:
+            List of (other_key, mate_data) tuples
+
+        Example:
+            # Find all parts connected to PART_1
+            mates = registry.get_mates_for_part(PathKey.from_path("PART_1"))
+            # Returns: [(PathKey("PART_2"), mate_data), (PathKey("PART_3"), mate_data)]
+        """
+        result = []
+
+        for (parent_key, child_key), mate_data in self.mates.items():
+            if parent_key == key:
+                result.append((child_key, mate_data))
+            elif child_key == key:
+                result.append((parent_key, mate_data))
+
+        return result
+
+    def build_from_features(self, features: list[AssemblyFeature]) -> None:
+        """
+        Build mate registry from assembly features.
+
+        Args:
+            features: List of AssemblyFeatures from RootAssembly or SubAssembly
+
+        Example:
+            registry = MateRegistry(instance_registry.id_to_name)
+            registry.build_from_features(assembly.rootAssembly.features)
+        """
+        mate_count = 0
+        for feature in features:
+            if feature.featureType == AssemblyFeatureType.MATE and self.add_mate(feature):
+                mate_count += 1
+
+        LOGGER.debug(f"Added {mate_count} mates from {len(features)} features")
+
+    def __len__(self) -> int:
+        """Total number of mates."""
+        return len(self.mates)
+
+    def __repr__(self) -> str:
+        return f"MateRegistry(mates={len(self.mates)})"
+
+
+@dataclass
+class PatternRegistry:
+    """
+    Registry for assembly patterns (circular, linear, mirror).
+
+    Patterns create multiple instances from a seed instance. Each pattern maps
+    seed instance IDs to lists of patterned instance IDs.
+
+    Attributes:
+        patterns: Maps pattern ID to Pattern
+        seed_to_pattern: Maps seed instance ID to pattern ID (for reverse lookup)
+        id_to_name: Reference to InstanceRegistry's ID mapping (shared)
+    """
+
+    # Primary storage: pattern ID -> Pattern
+    patterns: dict[str, Pattern]
+
+    # Reverse lookup: seed instance ID -> pattern ID
+    seed_to_pattern: dict[str, str]
+
+    # Shared name mapping (from InstanceRegistry)
+    id_to_name: dict[str, str]
+
+    def __init__(self, id_to_name: dict[str, str]):
+        """
+        Initialize pattern registry.
+
+        Args:
+            id_to_name: Shared ID-to-name mapping from InstanceRegistry
+        """
+        self.patterns = {}
+        self.seed_to_pattern = {}
+        self.id_to_name = id_to_name
+
+    def add_pattern(self, pattern: Pattern) -> str:
+        """
+        Add a pattern to the registry.
+
+        Args:
+            pattern: Pattern from JSON
+
+        Returns:
+            Pattern ID
+
+        Example:
+            # From JSON: {"id": "PATTERN_1", "seedToPatternInstances": {"SEED_1": ["INST_1", "INST_2"]}}
+            pattern_id = registry.add_pattern(pattern)
+        """
+        self.patterns[pattern.id] = pattern
+
+        # Build reverse lookup: seed -> pattern
+        for seed_id in pattern.seedToPatternInstances:
+            self.seed_to_pattern[seed_id] = pattern.id
+
+        return pattern.id
+
+    def get_pattern(self, pattern_id: str) -> Optional[Pattern]:
+        """Get pattern by ID."""
+        return self.patterns.get(pattern_id)
+
+    def get_pattern_for_seed(self, seed_id: str) -> Optional[Pattern]:
+        """
+        Get pattern containing a specific seed instance.
+
+        Args:
+            seed_id: Instance ID of seed
+
+        Returns:
+            Pattern if found, None otherwise
+        """
+        pattern_id = self.seed_to_pattern.get(seed_id)
+        if pattern_id:
+            return self.patterns.get(pattern_id)
+        return None
+
+    def get_patterned_instances(self, seed_id: str) -> list[str]:
+        """
+        Get list of patterned instance IDs for a seed.
+
+        Args:
+            seed_id: Instance ID of seed
+
+        Returns:
+            List of patterned instance IDs, or empty list if not found
+
+        Example:
+            # Seed "PART_1" creates pattern instances ["PART_2", "PART_3", "PART_4"]
+            instances = registry.get_patterned_instances("PART_1")
+            # Returns: ["PART_2", "PART_3", "PART_4"]
+        """
+        pattern = self.get_pattern_for_seed(seed_id)
+        if pattern and seed_id in pattern.seedToPatternInstances:
+            return pattern.seedToPatternInstances[seed_id]
+        return []
+
+    def is_seed_instance(self, instance_id: str) -> bool:
+        """Check if an instance is a seed for a pattern."""
+        return instance_id in self.seed_to_pattern
+
+    def build_from_patterns(self, patterns: list[Pattern]) -> None:
+        """
+        Build pattern registry from assembly patterns.
+
+        Args:
+            patterns: List of Patterns from RootAssembly or SubAssembly
+
+        Example:
+            registry = PatternRegistry(instance_registry.id_to_name)
+            registry.build_from_patterns(assembly.rootAssembly.patterns)
+        """
+        for pattern in patterns:
+            if not pattern.suppressed:  # Only add active patterns
+                self.add_pattern(pattern)
+
+        LOGGER.debug(f"Added {len(self.patterns)} patterns")
+
+    def __len__(self) -> int:
+        """Total number of patterns."""
+        return len(self.patterns)
+
+    def __repr__(self) -> str:
+        return f"PatternRegistry(patterns={len(self.patterns)})"
 
 
 class EntityType(Enum):
@@ -330,6 +1128,11 @@ class CAD:
     # Assembly data (actual assembly content fetched from API)
     flexible_assembly_data: dict[TypedKey, RootAssembly]
     rigid_assembly_data: dict[TypedKey, RootAssembly]
+
+    # Subassembly occurrence data (indexed for O(1) lookup)
+    flexible_assembly_occurrences: dict[TypedKey, dict[TypedKey, Occurrence]]
+    rigid_assembly_occurrences: dict[TypedKey, dict[TypedKey, Occurrence]]
+
     max_depth: int
 
     @classmethod
@@ -351,8 +1154,10 @@ class CAD:
         # Fetch all subassemblies (both rigid and flexible) if any exist
         if cad.rigid_assembly_instances or cad.flexible_assembly_instances:
             cad.fetch_all_subassemblies(client)
+            # Index subassembly occurrences for O(1) lookup
+            cad.index_subassembly_occurrences()
 
-        # Build reverse cache for lookups
+        # Build reverse cache for lookups (includes subassembly occurrences)
         cad.build_reverse_cache()
 
         return cad
@@ -382,21 +1187,91 @@ class CAD:
         """Get all mate keys."""
         return list(self.mates.keys())
 
+    def index_subassembly_occurrences(self) -> None:
+        """
+        Index occurrences from fetched subassembly data into dictionaries for O(1) lookup.
+        Builds per-subassembly name-to-occurrence mappings to avoid global name collisions.
+        Should be called after fetch_all_subassemblies().
+        """
+        LOGGER.debug("Indexing subassembly occurrences with per-assembly name caches...")
+
+        # Index flexible subassembly occurrences
+        for assembly_key, root_assembly in self.flexible_assembly_data.items():
+            occurrence_dict: dict[TypedKey, Occurrence] = {}
+            name_to_key: dict[str, TypedKey] = {}  # Per-subassembly name mapping
+
+            for occurrence in root_assembly.occurrences:
+                if occurrence.path:
+                    # Create occurrence key
+                    occ_key = TypedKey.for_occurrence(path=tuple(occurrence.path), occurrence_id=occurrence.path[-1])
+                    occurrence_dict[occ_key] = occurrence
+
+                    # Build name for this occurrence
+                    occ_name = self.key_namer.get_name(occ_key)
+                    name_to_key[occ_name] = occ_key
+
+            self.flexible_assembly_occurrences[assembly_key] = occurrence_dict
+            # Store name mapping in KeyNamer with assembly-specific prefix
+            assembly_name = self.key_namer.get_name(assembly_key)
+            for name, key in name_to_key.items():
+                # Store with prefix to avoid global collision
+                if assembly_name not in self.key_namer._prefixed_reverse_cache_by_type:
+                    self.key_namer._prefixed_reverse_cache_by_type[assembly_name] = {}
+                if EntityType.OCCURRENCE not in self.key_namer._prefixed_reverse_cache_by_type[assembly_name]:
+                    self.key_namer._prefixed_reverse_cache_by_type[assembly_name][EntityType.OCCURRENCE] = {}
+                self.key_namer._prefixed_reverse_cache_by_type[assembly_name][EntityType.OCCURRENCE][name] = key
+
+        # Index rigid subassembly occurrences
+        for assembly_key, root_assembly in self.rigid_assembly_data.items():
+            rigid_occurrence_dict: dict[TypedKey, Occurrence] = {}
+            rigid_name_to_key: dict[str, TypedKey] = {}  # Per-subassembly name mapping
+
+            for occurrence in root_assembly.occurrences:
+                if occurrence.path:
+                    # Create occurrence key
+                    occ_key = TypedKey.for_occurrence(path=tuple(occurrence.path), occurrence_id=occurrence.path[-1])
+                    rigid_occurrence_dict[occ_key] = occurrence
+
+                    # Build name for this occurrence
+                    occ_name = self.key_namer.get_name(occ_key)
+                    rigid_name_to_key[occ_name] = occ_key
+
+            self.rigid_assembly_occurrences[assembly_key] = rigid_occurrence_dict
+            # Store name mapping in KeyNamer with assembly-specific prefix
+            assembly_name = self.key_namer.get_name(assembly_key)
+            for name, key in rigid_name_to_key.items():
+                # Store with prefix to avoid global collision
+                if assembly_name not in self.key_namer._prefixed_reverse_cache_by_type:
+                    self.key_namer._prefixed_reverse_cache_by_type[assembly_name] = {}
+                if EntityType.OCCURRENCE not in self.key_namer._prefixed_reverse_cache_by_type[assembly_name]:
+                    self.key_namer._prefixed_reverse_cache_by_type[assembly_name][EntityType.OCCURRENCE] = {}
+                self.key_namer._prefixed_reverse_cache_by_type[assembly_name][EntityType.OCCURRENCE][name] = key
+
+        total_flexible = sum(len(occ_dict) for occ_dict in self.flexible_assembly_occurrences.values())
+        total_rigid = sum(len(occ_dict) for occ_dict in self.rigid_assembly_occurrences.values())
+        LOGGER.debug(
+            f"Indexed {total_flexible} flexible and {total_rigid} rigid subassembly occurrences with name caches"
+        )
+
     def build_reverse_cache(self, prefix: Optional[str] = None) -> None:
         """
         Build reverse mapping cache for all entity types.
 
         Args:
             prefix: Optional prefix for scoped cache
+
+        Note:
+            Subassembly occurrences are NOT added to the global cache to avoid name collisions.
+            They are looked up via their parent assembly using lookup_occurrence(assembly_name=...).
         """
         all_keys = (
-            list(self.instances.keys())  # Already includes all parts and assemblies
+            list(self.instances.keys())  # Already includes all parts and assemblies (including assembly instances)
             + list(self.features.keys())
-            + list(self.occurrences.keys())
-            + list(self.flexible_assembly_data.keys())
-            + list(self.rigid_assembly_data.keys())
-            # Note: rigid_assembly_instances and flexible_assembly_instances keys already included in instances
+            + list(self.occurrences.keys())  # Only root assembly occurrences
+            # Note: flexible_assembly_data and rigid_assembly_data use the same keys as their instances,
+            # so they're already included via instances.keys() and don't need to be added separately
         )
+
         self.key_namer.build_reverse_cache(all_keys, prefix)
 
     def lookup_part(self, name: str, prefix: Optional[str] = None) -> Optional[PartInstance]:
@@ -430,6 +1305,71 @@ class CAD:
         """Look up a mate by its generated name."""
         key = self.key_namer.lookup_key(name, EntityType.FEATURE, prefix)
         return self.mates.get(key) if key else None
+
+    def lookup_occurrence(
+        self,
+        name: str,
+        assembly_name: Optional[str] = None,
+        is_rigid: Optional[bool] = None,
+        sanitize: bool = False,
+        prefix: Optional[str] = None,
+    ) -> Optional[Occurrence]:
+        """
+        Look up an occurrence by name (O(1) lookup using reverse cache).
+
+        Args:
+            name: Name of the occurrence
+            assembly_name: Optional subassembly name. If None, searches root assembly.
+            is_rigid: Specifies rigid (True) or flexible (False). If None, tries flexible then rigid.
+            sanitize: If True, sanitizes the name before lookup (e.g., "Part 1 <1>" -> "Part_1_1")
+            prefix: Optional prefix for scoped cache
+
+        Returns:
+            Occurrence if found, None otherwise
+        """
+        # Sanitize names if requested
+        if sanitize:
+            from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
+
+            name = get_sanitized_name(name)
+            if assembly_name:
+                assembly_name = get_sanitized_name(assembly_name)
+
+        # Search root assembly
+        if assembly_name is None:
+            key = self.key_namer.lookup_key(name, EntityType.OCCURRENCE, prefix)
+            return self.occurrences.get(key) if key else None
+
+        # Determine which dictionary and entity type to use
+        if is_rigid is True:
+            assembly_dict = self.rigid_assembly_occurrences
+            entity_type = EntityType.RIGID_ASSEMBLY
+        elif is_rigid is False:
+            assembly_dict = self.flexible_assembly_occurrences
+            entity_type = EntityType.FLEXIBLE_ASSEMBLY
+        else:
+            # Try flexible first
+            assembly_key = self.key_namer.lookup_key(assembly_name, EntityType.FLEXIBLE_ASSEMBLY, prefix)
+            if assembly_key and assembly_key in self.flexible_assembly_occurrences:
+                # Use assembly-specific prefix for per-subassembly name lookup
+                occ_key = self.key_namer.lookup_key(name, EntityType.OCCURRENCE, prefix=assembly_name)
+                if occ_key:
+                    result = self.flexible_assembly_occurrences[assembly_key].get(occ_key)
+                    if result:
+                        return result
+            # Then try rigid
+            assembly_dict = self.rigid_assembly_occurrences
+            entity_type = EntityType.RIGID_ASSEMBLY
+
+        # Lookup in the determined dictionary using assembly-specific prefix
+        assembly_key = self.key_namer.lookup_key(assembly_name, entity_type, prefix)
+        if assembly_key and assembly_key in assembly_dict:
+            # Use assembly name as prefix for scoped lookup
+            occ_key = self.key_namer.lookup_key(name, EntityType.OCCURRENCE, prefix=assembly_name)
+            if occ_key:
+                return assembly_dict[assembly_key].get(occ_key)
+
+        return None
 
     def lookup_subassembly(self, name: str, prefix: Optional[str] = None) -> Optional[RootAssembly]:
         """Look up a flexible subassembly by its generated name."""
@@ -632,6 +1572,8 @@ class AssemblyStructureBuilder:
         self.relations: dict[TypedKey, MateRelationFeatureData] = {}
         self.flexible_assembly_data: dict[TypedKey, RootAssembly] = {}
         self.rigid_assembly_data: dict[TypedKey, RootAssembly] = {}
+        self.flexible_assembly_occurrences: dict[TypedKey, dict[TypedKey, Occurrence]] = {}
+        self.rigid_assembly_occurrences: dict[TypedKey, dict[TypedKey, Occurrence]] = {}
 
     def build(self) -> CAD:
         """Build all assembly mappings in a single traversal."""
@@ -663,6 +1605,8 @@ class AssemblyStructureBuilder:
             key_namer=self.key_namer,
             flexible_assembly_data=self.flexible_assembly_data,
             rigid_assembly_data=self.rigid_assembly_data,
+            flexible_assembly_occurrences=self.flexible_assembly_occurrences,
+            rigid_assembly_occurrences=self.rigid_assembly_occurrences,
             max_depth=self.max_depth,
         )
 
