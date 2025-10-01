@@ -1,9 +1,14 @@
 """Streamlined transform utilities for Onshape assemblies.
 
 Demonstrates:
-1. plot_transform() - Visualize a 4x4 transform matrix
+1. plot_all_transforms() - Visualize all occurrence transforms in 3D space
 2. get_occurrence_transform_by_name() - Get occurrence transform by part name (supports raw or sanitized names)
 3. Using the new CAD and PathKey system for assembly navigation
+
+The 3D visualization shows:
+- All parts/assemblies with their coordinate frames (X=red, Y=green, Z=blue)
+- Global origin and axes for reference
+- Labels for each occurrence to understand spatial relationships
 """
 
 import os
@@ -29,71 +34,140 @@ TRANSFORMS = (
 )
 
 
-def plot_transform(transform: np.ndarray | list[float], label: str = "", scale: float = 0.1):
+def plot_all_transforms(cad: CAD, scale: float = 50.0, save_name: str = "assembly_3d"):
     """
-    Plot a 4x4 transform matrix as a 3D coordinate frame.
+    Plot all occurrence transforms in 3D space to visualize assembly structure.
 
     Args:
-        transform: 4x4 transform matrix (numpy array) or 16-element list
-        label: Label for the coordinate frame
-        scale: Scale factor for the axes vectors
+        cad: CAD object containing assembly data
+        scale: Scale factor for the coordinate frame axes (in mm)
+        save_name: Base filename for saving the plot
     """
-    # Convert to numpy array if needed
-    if isinstance(transform, list):
-        transform = np.array(transform).reshape(4, 4)
 
-    fig = plt.figure(figsize=(10, 8))
+    fig = plt.figure(figsize=(16, 12))
     ax = fig.add_subplot(111, projection="3d")
 
-    # Extract origin and rotation
-    origin = transform[:3, 3]
-    rotation = transform[:3, :3]
+    # Axis colors for X, Y, Z
+    axis_colors = ["red", "green", "blue"]
+    axis_labels = ["X", "Y", "Z"]
 
-    # Scale axes
-    x_axis = rotation[:, 0] * scale
-    y_axis = rotation[:, 1] * scale
-    z_axis = rotation[:, 2] * scale
+    # Plot global origin
+    ax.scatter([0], [0], [0], color="black", s=100, marker="o", label="Global Origin", zorder=1000)
 
-    # Plot axes as arrows (X=red, Y=green, Z=blue)
-    ax.quiver(
-        origin[0], origin[1], origin[2], x_axis[0], x_axis[1], x_axis[2], color="red", arrow_length_ratio=0.1, label="X"
+    # Plot global axes
+    for i, (color, _label) in enumerate(zip(axis_colors, axis_labels)):
+        direction = np.zeros(3)
+        direction[i] = scale * 1.5
+        ax.quiver(
+            0,
+            0,
+            0,
+            direction[0],
+            direction[1],
+            direction[2],
+            color=color,
+            arrow_length_ratio=0.15,
+            linewidth=2.5,
+            alpha=0.3,
+            linestyle="--",
+        )
+
+    # Collect all transforms
+    transform_data = []
+    for key, occurrence in cad.root_assembly.occurrences.occurrences.items():
+        transform = occurrence.transform
+        if transform is not None:
+            # Convert to numpy array if needed
+            if isinstance(transform, list):
+                transform = np.array(transform).reshape(4, 4)
+
+            # Get the instance name - check both parts and assemblies
+            part = cad.root_assembly.instances.parts.get(key)
+            assembly = cad.root_assembly.instances.assemblies.get(key)
+
+            if part:
+                name = part.name
+            elif assembly:
+                name = assembly.name
+            else:
+                name = str(key.leaf_id)
+
+            transform_data.append((name, key, transform))
+
+    LOGGER.info(f"Plotting {len(transform_data)} occurrence transforms")
+
+    # Plot each transform
+    for name, _, transform in transform_data:
+        # Extract origin and rotation
+        origin = transform[:3, 3] * 1000  # Convert to mm
+        rotation = transform[:3, :3]
+
+        # Plot origin point
+        ax.scatter(*origin, s=30, alpha=0.6, zorder=100)
+
+        # Plot coordinate axes for this occurrence
+        for i, (color, _axis_label) in enumerate(zip(axis_colors, axis_labels)):
+            # Get the i-th column of the rotation matrix (the axis direction)
+            axis_direction = rotation[:, i] * scale
+
+            ax.quiver(
+                origin[0],
+                origin[1],
+                origin[2],
+                axis_direction[0],
+                axis_direction[1],
+                axis_direction[2],
+                color=color,
+                arrow_length_ratio=0.2,
+                linewidth=1.5,
+                alpha=0.7,
+            )
+
+        # Add label near the origin
+        ax.text(origin[0], origin[1], origin[2], f"  {name}", fontsize=7, alpha=0.8)
+
+    # Set labels and title
+    ax.set_xlabel("X (mm)", fontsize=12, fontweight="bold")
+    ax.set_ylabel("Y (mm)", fontsize=12, fontweight="bold")
+    ax.set_zlabel("Z (mm)", fontsize=12, fontweight="bold")
+    ax.set_title(
+        f"Assembly Occurrence Transforms ({len(transform_data)} parts/assemblies)",
+        fontsize=14,
+        fontweight="bold",
+        pad=20,
     )
-    ax.quiver(
-        origin[0],
-        origin[1],
-        origin[2],
-        y_axis[0],
-        y_axis[1],
-        y_axis[2],
-        color="green",
-        arrow_length_ratio=0.1,
-        label="Y",
-    )
-    ax.quiver(
-        origin[0],
-        origin[1],
-        origin[2],
-        z_axis[0],
-        z_axis[1],
-        z_axis[2],
-        color="blue",
-        arrow_length_ratio=0.1,
-        label="Z",
-    )
 
-    # Add label at origin
-    if label:
-        ax.text(origin[0], origin[1], origin[2], label, fontsize=10)
+    # Equal aspect ratio
+    # Get the data limits
+    all_origins = np.array([t[2][:3, 3] * 1000 for t in transform_data])
+    if len(all_origins) > 0:
+        max_range = (
+            np.array([
+                all_origins[:, 0].max() - all_origins[:, 0].min(),
+                all_origins[:, 1].max() - all_origins[:, 1].min(),
+                all_origins[:, 2].max() - all_origins[:, 2].min(),
+            ]).max()
+            / 2.0
+        )
 
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    ax.set_title(f"Transform: {label}" if label else "Transform")
-    ax.set_box_aspect([1, 1, 1])
-    ax.legend()
+        mid_x = (all_origins[:, 0].max() + all_origins[:, 0].min()) * 0.5
+        mid_y = (all_origins[:, 1].max() + all_origins[:, 1].min()) * 0.5
+        mid_z = (all_origins[:, 2].max() + all_origins[:, 2].min()) * 0.5
+
+        ax.set_xlim(mid_x - max_range, mid_x + max_range)
+        ax.set_ylim(mid_y - max_range, mid_y + max_range)
+        ax.set_zlim(mid_z - max_range, mid_z + max_range)
+
+    # Add grid
+    ax.grid(True, alpha=0.3)
+
+    # Add legend
+    ax.legend(loc="upper left", fontsize=10)
 
     plt.tight_layout()
-    plt.show()
+    plt.savefig(f"{save_name}.png", dpi=150, bbox_inches="tight")
+    LOGGER.info(f"Saved 3D visualization to {save_name}.png")
+    plt.close()
 
 
 def get_occurrence_transform_by_name(
@@ -167,7 +241,6 @@ if __name__ == "__main__":
 
     LOGGER.info("Creating CAD from assembly...")
     cad = CAD.from_assembly(assembly, max_depth=DEPTH)
-    cad.show()
 
-    result = get_occurrence_transform_by_name(cad, "Part 10 <1>")
-    print(result[-1])
+    # Plot all occurrence transforms in 3D
+    plot_all_transforms(cad, scale=50.0, save_name=NAME)

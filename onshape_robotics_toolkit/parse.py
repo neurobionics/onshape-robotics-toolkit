@@ -39,7 +39,7 @@ from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 SUBASSEMBLY_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
 MATE_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
 
-LOGGER.info(f"Generated joiners - SUBASSEMBLY: {SUBASSEMBLY_JOINER}, MATE: {MATE_JOINER}")
+LOGGER.debug(f"Generated joiners - SUBASSEMBLY: {SUBASSEMBLY_JOINER}, MATE: {MATE_JOINER}")
 
 # Path and entity constants
 ROOT_PATH_NAME = "root"
