@@ -50,7 +50,7 @@ from enum import Enum
 from typing import Any, Union
 
 import numpy as np
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from onshape_robotics_toolkit.models.document import Document, DocumentMetaData
 from onshape_robotics_toolkit.models.mass import MassProperties
@@ -547,6 +547,7 @@ class AssemblyInstance(IDBase):
     type: InstanceType = Field(..., description="The type of the instance, must be 'Assembly'.")
     name: str = Field(..., description="The name of the assembly instance.")
     suppressed: bool = Field(..., description="Indicates if the assembly instance is suppressed.")
+    documentVersion: Union[str, None] = Field(None, description="The version of the document.")
 
     isRigid: bool = Field(
         False,
@@ -606,8 +607,7 @@ class MatedCS(BaseModel):
         )
     """
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     xAxis: list[float] = Field(..., description="The x-axis vector of the coordinate system.")
     yAxis: list[float] = Field(..., description="The y-axis vector of the coordinate system.")
@@ -1017,8 +1017,7 @@ class MateFeatureData(BaseModel):
 
     """
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     matedEntities: list[MatedEntity] = Field(..., description="A list of mated entities.")
     mateType: MateType = Field(..., description="The type of mate.")

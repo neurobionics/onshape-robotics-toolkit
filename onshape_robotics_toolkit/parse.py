@@ -860,6 +860,491 @@ class PatternRegistry:
         return f"PatternRegistry(patterns={len(self.patterns)})"
 
 
+# ============================================================================
+# Assembly Data Classes (Registry-Based System)
+# ============================================================================
+
+
+@dataclass
+class AssemblyData:
+    """
+    Base assembly data with registries.
+
+    Shared by both root assemblies and subassemblies.
+    Contains instances, mates, and patterns.
+
+    Note: Occurrences are NOT included because subassemblies
+    in the JSON response don't have occurrences - only instances.
+
+    Attributes:
+        instances: Registry for all part and assembly instances
+        mates: Registry for mate connections
+        patterns: Registry for assembly patterns
+    """
+
+    instances: InstanceRegistry
+    mates: MateRegistry
+    patterns: PatternRegistry
+
+    def __init__(self, max_depth: int = 0):
+        """
+        Initialize assembly data with empty registries.
+
+        Args:
+            max_depth: Maximum depth for flexible assembly classification
+        """
+        self.instances = InstanceRegistry(max_depth=max_depth)
+        self.mates = MateRegistry(id_to_name=self.instances.id_to_name)
+        self.patterns = PatternRegistry(id_to_name=self.instances.id_to_name)
+
+    def populate_from_root_assembly(self, root_assembly: RootAssembly) -> None:
+        """
+        Populate registries from a RootAssembly object.
+
+        Args:
+            root_assembly: RootAssembly from Onshape API
+        """
+        # Add instances
+        for instance in root_assembly.instances:
+            key = PathKey.from_path(instance.id)
+
+            if instance.type == InstanceType.PART:
+                if isinstance(instance, PartInstance):
+                    self.instances.add_part(key, instance)
+            elif instance.type == InstanceType.ASSEMBLY and isinstance(instance, AssemblyInstance):
+                self.instances.add_assembly(key, instance)
+
+        # Add mates
+        if root_assembly.features:
+            for feature in root_assembly.features:
+                if feature.featureType == AssemblyFeatureType.MATE:
+                    self.mates.add_mate(feature)
+
+        # Add patterns
+        if root_assembly.patterns:
+            for pattern in root_assembly.patterns:
+                self.patterns.add_pattern(pattern)
+
+        LOGGER.debug(
+            f"Populated AssemblyData: {len(self.instances.parts)} parts, "
+            f"{len(self.instances.assemblies)} assemblies, "
+            f"{len(self.mates.mates)} mates, "
+            f"{len(self.patterns.patterns)} patterns"
+        )
+
+    def populate_from_subassembly(self, subassembly: SubAssembly) -> None:
+        """
+        Populate registries from a SubAssembly object.
+
+        Note: SubAssemblies don't have occurrences in the JSON response.
+
+        Args:
+            subassembly: SubAssembly from Onshape API
+        """
+        # Add instances
+        for instance in subassembly.instances:
+            key = PathKey.from_path(instance.id)
+
+            if instance.type == InstanceType.PART:
+                if isinstance(instance, PartInstance):
+                    self.instances.add_part(key, instance)
+            elif instance.type == InstanceType.ASSEMBLY and isinstance(instance, AssemblyInstance):
+                self.instances.add_assembly(key, instance)
+
+        # Add mates
+        if subassembly.features:
+            for feature in subassembly.features:
+                if feature.featureType == AssemblyFeatureType.MATE:
+                    self.mates.add_mate(feature)
+
+        # Add patterns
+        if subassembly.patterns:
+            for pattern in subassembly.patterns:
+                self.patterns.add_pattern(pattern)
+
+        LOGGER.debug(
+            f"Populated SubAssembly: {len(self.instances.parts)} parts, "
+            f"{len(self.instances.assemblies)} assemblies, "
+            f"{len(self.mates.mates)} mates, "
+            f"{len(self.patterns.patterns)} patterns"
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"AssemblyData("
+            f"parts={len(self.instances.parts)}, "
+            f"assemblies={len(self.instances.assemblies)}, "
+            f"mates={len(self.mates.mates)}, "
+            f"patterns={len(self.patterns.patterns)})"
+        )
+
+
+@dataclass
+class RootAssemblyData(AssemblyData):
+    """
+    Root assembly data with occurrences.
+
+    Only root assemblies (and subassemblies when fetched separately as their own assembly)
+    have occurrence transforms. Subassemblies in the JSON response don't have occurrences.
+
+    Attributes:
+        occurrences: Registry for occurrence transforms
+    """
+
+    occurrences: OccurrenceRegistry
+
+    def __init__(self, max_depth: int = 0):
+        """
+        Initialize root assembly data with empty registries.
+
+        Args:
+            max_depth: Maximum depth for flexible assembly classification
+        """
+        super().__init__(max_depth=max_depth)
+        self.occurrences = OccurrenceRegistry(id_to_name=self.instances.id_to_name)
+
+    def populate_from_root_assembly(self, root_assembly: RootAssembly) -> None:
+        """
+        Populate registries from a RootAssembly object (includes occurrences).
+
+        Args:
+            root_assembly: RootAssembly from Onshape API
+        """
+        # Populate base registries (instances, mates, patterns)
+        super().populate_from_root_assembly(root_assembly)
+
+        # Add occurrences (only root assemblies have these)
+        for occurrence in root_assembly.occurrences:
+            self.occurrences.add_occurrence(occurrence)
+
+        LOGGER.debug(f"Added {len(self.occurrences.occurrences)} occurrences to RootAssemblyData")
+
+    def __repr__(self) -> str:
+        return (
+            f"RootAssemblyData("
+            f"parts={len(self.instances.parts)}, "
+            f"assemblies={len(self.instances.assemblies)}, "
+            f"occurrences={len(self.occurrences.occurrences)}, "
+            f"mates={len(self.mates.mates)}, "
+            f"patterns={len(self.patterns.patterns)})"
+        )
+
+
+@dataclass
+class CADDocument:
+    """
+    Top-level CAD document container.
+
+    Represents a complete Onshape assembly with:
+    - Root assembly data (instances, occurrences, mates, patterns)
+    - Parts dictionary (shared across entire document)
+    - Nested subassemblies (recursively fetched as separate CAD documents)
+
+    This structure maps to Onshape's assembly JSON schema:
+    {
+      "parts": [...],                    -> parts
+      "rootAssembly": {...},             -> root_assembly
+      "subAssemblies": [...]             -> fetched and stored in subassemblies
+    }
+
+    Attributes:
+        document_id: Onshape document ID
+        element_id: Onshape element (assembly) ID
+        root_assembly: Root assembly data with all registries
+        parts: Part definitions (shared across document)
+        subassemblies: Nested subassembly CAD documents
+        max_depth: Maximum depth for flexible assemblies
+        current_depth: Current depth in hierarchy (0 = root)
+    """
+
+    document_id: str
+    element_id: str
+    root_assembly: RootAssemblyData
+    parts: dict[str, Part]
+    subassemblies: dict[PathKey, "CADDocument"]
+    max_depth: int
+    current_depth: int
+
+    def __init__(
+        self,
+        document_id: str,
+        element_id: str,
+        root_assembly: RootAssemblyData,
+        parts: dict[str, Part],
+        max_depth: int = 0,
+        current_depth: int = 0,
+    ):
+        """
+        Initialize a CAD document.
+
+        Args:
+            document_id: Onshape document ID
+            element_id: Onshape element (assembly) ID
+            root_assembly: Root assembly data
+            parts: Part definitions
+            max_depth: Maximum depth for flexible assemblies
+            current_depth: Current depth in hierarchy
+        """
+        self.document_id = document_id
+        self.element_id = element_id
+        self.root_assembly = root_assembly
+        self.parts = parts
+        self.subassemblies = {}
+        self.max_depth = max_depth
+        self.current_depth = current_depth
+
+    @classmethod
+    def from_assembly(
+        cls,
+        assembly: Assembly,
+        max_depth: int = 0,
+        current_depth: int = 0,
+    ) -> "CADDocument":
+        """
+        Create a CADDocument from an Onshape Assembly.
+
+        Args:
+            assembly: Onshape assembly data
+            max_depth: Maximum depth for flexible assemblies
+            current_depth: Current depth in hierarchy
+
+        Returns:
+            CADDocument with populated registries
+        """
+        # Create root assembly data and populate registries
+        root_assembly_data = RootAssemblyData(max_depth=max_depth)
+        root_assembly_data.populate_from_root_assembly(assembly.rootAssembly)
+
+        # Extract parts
+        parts = {part.partId: part for part in assembly.parts}
+
+        # Get document/element IDs from rootAssembly
+        return cls(
+            document_id=assembly.rootAssembly.documentId,
+            element_id=assembly.rootAssembly.elementId,
+            root_assembly=root_assembly_data,
+            parts=parts,
+            max_depth=max_depth,
+            current_depth=current_depth,
+        )
+
+    async def fetch_subassemblies(self, client: Client) -> None:
+        """
+        Recursively fetch all flexible subassembly CAD documents.
+
+        This method:
+        1. Identifies flexible subassembly instances
+        2. Fetches their assembly data from Onshape API
+        3. Creates nested CADDocument objects
+        4. Stores them in self.subassemblies keyed by PathKey
+
+        Args:
+            client: Onshape API client for fetching assemblies
+        """
+        if self.current_depth >= self.max_depth:
+            LOGGER.debug(f"Max depth {self.max_depth} reached, skipping subassembly fetch")
+            return
+
+        # Get flexible assembly instances (ones we want to fetch)
+        flexible_assemblies = [
+            (key, instance)
+            for key, instance in self.root_assembly.instances.assemblies.items()
+            if self.root_assembly.instances.is_flexible_assembly(key)
+        ]
+
+        if not flexible_assemblies:
+            LOGGER.debug("No flexible subassemblies to fetch")
+            return
+
+        LOGGER.info(f"Fetching {len(flexible_assemblies)} subassemblies at depth {self.current_depth}")
+
+        # Fetch each subassembly
+        tasks = []
+        for key, instance in flexible_assemblies:
+            tasks.append(self._fetch_single_subassembly(client, key, instance))
+
+        # Wait for all fetches to complete
+        await asyncio.gather(*tasks)
+
+        LOGGER.info(f"Fetched {len(self.subassemblies)} subassemblies at depth {self.current_depth}")
+
+    async def _fetch_single_subassembly(self, client: Client, key: PathKey, instance: AssemblyInstance) -> None:
+        """
+        Fetch a single subassembly.
+
+        Args:
+            client: Onshape API client
+            key: PathKey of the subassembly instance
+            instance: AssemblyInstance to fetch
+        """
+        try:
+            LOGGER.debug(f"Fetching subassembly {instance.name} (depth {self.current_depth + 1})")
+
+            # Determine workspace type and fetch assembly
+            if instance.documentVersion:
+                assembly_data = client.get_assembly(
+                    did=instance.documentId,
+                    wtype=WorkspaceType.V,
+                    wid=instance.documentVersion,
+                    eid=instance.elementId,
+                )
+            elif instance.documentMicroversion:
+                assembly_data = client.get_assembly(
+                    did=instance.documentId,
+                    wtype=WorkspaceType.M,
+                    wid=instance.documentMicroversion,
+                    eid=instance.elementId,
+                )
+            else:
+                LOGGER.warning(f"Subassembly {instance.name} has no version info, skipping")
+                return
+
+            # Create nested CADDocument
+            subassembly_cad = CADDocument.from_assembly(
+                assembly=assembly_data,
+                max_depth=self.max_depth,
+                current_depth=self.current_depth + 1,
+            )
+
+            # Recursively fetch nested subassemblies
+            await subassembly_cad.fetch_subassemblies(client)
+
+            # Store in subassemblies dict
+            self.subassemblies[key] = subassembly_cad
+
+            LOGGER.debug(f"Successfully fetched subassembly {instance.name}")
+
+        except Exception as e:
+            LOGGER.error(f"Failed to fetch subassembly {instance.name}: {e}")
+
+    def get_subassembly(self, key: PathKey) -> Optional["CADDocument"]:
+        """
+        Get a subassembly CAD document by PathKey.
+
+        Args:
+            key: PathKey of the subassembly instance
+
+        Returns:
+            CADDocument if found, None otherwise
+        """
+        return self.subassemblies.get(key)
+
+    def get_all_subassemblies(self, recursive: bool = False) -> dict[PathKey, "CADDocument"]:
+        """
+        Get all subassemblies.
+
+        Args:
+            recursive: If True, includes nested subassemblies recursively
+
+        Returns:
+            Dictionary of PathKey -> CADDocument
+        """
+        if not recursive:
+            return self.subassemblies
+
+        # Recursively collect all subassemblies
+        all_subs = dict(self.subassemblies)
+        for sub_cad in self.subassemblies.values():
+            nested = sub_cad.get_all_subassemblies(recursive=True)
+            all_subs.update(nested)
+
+        return all_subs
+
+    def get_part(self, part_id: str) -> Optional[Part]:
+        """
+        Get a part definition by partId.
+
+        Args:
+            part_id: Onshape part ID
+
+        Returns:
+            Part if found, None otherwise
+        """
+        return self.parts.get(part_id)
+
+    def get_part_instance(self, key: PathKey) -> Optional[PartInstance]:
+        """
+        Get a part instance by PathKey.
+
+        Args:
+            key: PathKey of the part instance
+
+        Returns:
+            PartInstance if found, None otherwise
+        """
+        return self.root_assembly.instances.get_part(key)
+
+    def get_assembly_instance(self, key: PathKey) -> Optional[AssemblyInstance]:
+        """
+        Get an assembly instance by PathKey.
+
+        Args:
+            key: PathKey of the assembly instance
+
+        Returns:
+            AssemblyInstance if found, None otherwise
+        """
+        return self.root_assembly.instances.get_assembly(key)
+
+    def get_occurrence(self, key: PathKey) -> Optional[Occurrence]:
+        """
+        Get an occurrence by PathKey.
+
+        Args:
+            key: PathKey of the occurrence
+
+        Returns:
+            Occurrence if found, None otherwise
+        """
+        return self.root_assembly.occurrences.get_occurrence(key)
+
+    def get_transform(self, key: PathKey) -> Optional[np.ndarray]:
+        """
+        Get the 4x4 transform matrix for an occurrence.
+
+        Args:
+            key: PathKey of the occurrence
+
+        Returns:
+            4x4 numpy array if found, None otherwise
+        """
+        return self.root_assembly.occurrences.get_transform(key)
+
+    def get_mate(self, parent_key: PathKey, child_key: PathKey) -> Optional[MateFeatureData]:
+        """
+        Get a mate between two parts/assemblies.
+
+        Args:
+            parent_key: PathKey of the parent entity
+            child_key: PathKey of the child entity
+
+        Returns:
+            MateFeatureData if found, None otherwise
+        """
+        return self.root_assembly.mates.get_mate(parent_key, child_key)
+
+    def get_pattern(self, pattern_id: str) -> Optional[Pattern]:
+        """
+        Get a pattern by its ID.
+
+        Args:
+            pattern_id: Pattern ID
+
+        Returns:
+            Pattern if found, None otherwise
+        """
+        return self.root_assembly.patterns.get_pattern(pattern_id)
+
+    def __repr__(self) -> str:
+        return (
+            f"CADDocument("
+            f"depth={self.current_depth}, "
+            f"parts={len(self.root_assembly.instances.parts)}, "
+            f"assemblies={len(self.root_assembly.instances.assemblies)}, "
+            f"subassemblies={len(self.subassemblies)})"
+        )
+
+
 class EntityType(Enum):
     """Type of entity in the assembly hierarchy."""
 

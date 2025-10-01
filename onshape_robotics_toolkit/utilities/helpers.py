@@ -66,6 +66,7 @@ def save_model_as_json(model: BaseModel, file_path: str, indent: int = 4) -> Non
     Args:
         model (BaseModel): Pydantic model to save
         file_path (str): File path to save JSON file
+        indent (int): JSON indentation level
 
     Returns:
         None
@@ -77,9 +78,35 @@ def save_model_as_json(model: BaseModel, file_path: str, indent: int = 4) -> Non
         ...
         >>> save_model_as_json(TestModel(a=1, b="hello"), "test.json")
     """
-
     with open(file_path, "w") as file:
         json.dump(model.model_dump(), file, indent=indent, cls=CustomJSONEncoder)
+
+
+def load_model_from_json(model_class: type[BaseModel], file_path: str) -> BaseModel:
+    """
+    Load a Pydantic model from a JSON file
+
+    Args:
+        model_class (type[BaseModel]): The Pydantic model class to instantiate
+        file_path (str): Path to JSON file
+
+    Returns:
+        BaseModel: Instance of the model class populated from JSON
+
+    Examples:
+        >>> class TestModel(BaseModel):
+        ...     a: int
+        ...     b: str
+        ...
+        >>> model = load_model_from_json(TestModel, "test.json")
+        >>> print(model.a, model.b)
+        1 hello
+
+        >>> from onshape_robotics_toolkit.models import Assembly
+        >>> assembly = load_model_from_json(Assembly, "assembly.json")
+    """
+    with open(file_path) as file:
+        return model_class.model_validate_json(file.read())
 
 
 def xml_escape(unescaped: str) -> str:

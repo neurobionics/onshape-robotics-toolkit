@@ -6,48 +6,25 @@ Provides two core functions:
 """
 
 import os
-import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
+from onshape_robotics_toolkit.models import Assembly
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.parse import CAD
+from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 
-DEPTH = 1
+DEPTH = 2
 NAME = f"transforms_{DEPTH}"
 USE_CACHED = True  # Set to False to force fresh API call
-PICKLE_PATH = f"{NAME}.pkl"
 LOG_ASSEMBLY = False
 
 TRANSFORMS = (
     "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/46679c6ab890a1b7a6d11a88"
 )
-
-
-def get_pickled_assembly():
-    if USE_CACHED and os.path.exists(PICKLE_PATH):
-        LOGGER.info("Loading assembly from cached pickle file...")
-        with open(PICKLE_PATH, "rb") as f:
-            assembly = pickle.load(f)  # noqa: S301
-    else:
-        LOGGER.info("Fetching assembly from Onshape API...")
-        assembly = client.get_assembly(
-            did=document.did,
-            wtype=document.wtype,
-            wid=document.wid,
-            eid=document.eid,
-            log_response=LOG_ASSEMBLY,
-            with_meta_data=True,
-        )
-        # Cache for next time
-        with open(PICKLE_PATH, "wb") as f:
-            pickle.dump(assembly, f)
-        LOGGER.info(f"Assembly cached to {PICKLE_PATH}")
-
-    return assembly
 
 
 def plot_transform(transform: np.ndarray | list[float], label: str = "", scale: float = 0.1):
@@ -155,28 +132,20 @@ if __name__ == "__main__":
 
     document = Document.from_url(url=TRANSFORMS)
     client.set_base_url(document.base_url)
-    assembly = get_pickled_assembly()
 
-    cad = CAD.from_assembly(assembly, client, max_depth=DEPTH)
-    cad.show_tree()
-
-    # Debug: Show all root assembly occurrences
-    print("\n=== ROOT ASSEMBLY OCCURRENCES ===")
-    for key in cad.occurrences:
-        name = cad.key_namer.get_name(key)
-        print(f"  {name}")
-
-    # Test lookup with correct hierarchical name
-    print("\n=== TEST LOOKUP ===")
-
-    # Correct: Use full hierarchical path
-    occ_correct = get_occurrence_transform(cad, "Assembly_2_1:Part_6_1")
-    print(f"Lookup 'Assembly_2_1:Part_6_1': {occ_correct is not None}")
-
-    # With sanitize
-    occ_sanitized = get_occurrence_transform(cad, "Assembly 2 <1>:Part 6 <1>", sanitize=True)
-    print(f"Lookup 'Assembly 2 <1>:Part 6 <1>' with sanitize=True: {occ_sanitized is not None}")
-
-    if occ_correct is not None:
-        print(f"\nTransform found!\n{occ_correct}")
-        plot_transform(occ_correct, label="Part 6 <1>")
+    if USE_CACHED and os.path.exists(f"{NAME}.json"):
+        LOGGER.info(f"Loading assembly from cached JSON: {NAME}.json")
+        assembly = load_model_from_json(Assembly, f"{NAME}.json")
+    else:
+        LOGGER.info("Fetching assembly from Onshape API...")
+        assembly = client.get_assembly(
+            did=document.did,
+            wtype=document.wtype,
+            wid=document.wid,
+            eid=document.eid,
+            log_response=LOG_ASSEMBLY,
+            with_meta_data=True,
+        )
+        # Save to cache
+        save_model_as_json(assembly, f"{NAME}.json")
+        LOGGER.info(f"Assembly cached to {NAME}.json")

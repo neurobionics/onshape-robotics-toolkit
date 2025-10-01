@@ -998,6 +998,7 @@ dev = [
     { name = "tox" },
     { name = "types-lxml" },
     { name = "types-networkx" },
+    { name = "types-regex" },
     { name = "types-requests" },
 ]
 
@@ -1042,6 +1043,7 @@ dev = [
     { name = "tox", specifier = ">=4.11.1" },
     { name = "types-lxml", specifier = ">=2024.12.13" },
     { name = "types-networkx", specifier = ">=3.5.0.20250918" },
+    { name = "types-regex", specifier = ">=2025.9.18.20250921" },
     { name = "types-requests", specifier = ">=2.32.4.20250913" },
 ]
 
@@ -1752,6 +1754,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/07/e2/c774f754de26848f53f05defff5bb21dd9375a059d1ba5b5ea943cf8206e/types_pytz-2025.2.0.20250809.tar.gz", hash = "sha256:222e32e6a29bb28871f8834e8785e3801f2dc4441c715cd2082b271eecbe21e5", size = 10876 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/db/d0/91c24fe54e565f2344d7a6821e6c6bb099841ef09007ea6321a0bac0f808/types_pytz-2025.2.0.20250809-py3-none-any.whl", hash = "sha256:4f55ed1b43e925cf851a756fe1707e0f5deeb1976e15bf844bcaa025e8fbd0db", size = 10095 },
+]
+
+[[package]]
+name = "types-regex"
+version = "2025.9.18.20250921"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/74/4a/493aa95abb5733f52740df4ffe52ed802d9305cd318e6b7bb386ff6d82f8/types_regex-2025.9.18.20250921.tar.gz", hash = "sha256:e1700c21b1c31290e4a6dd62584ed1f1d69d704ed1676b68a8eda2d1d2420c3f", size = 12438 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/52/1f/5b26a2ef84b0a98a43eae46fb1c4bbb2928ead4397d22153685e6304d090/types_regex-2025.9.18.20250921-py3-none-any.whl", hash = "sha256:7bd96178829f4499be9109ce7e8bf7bd8e00d06f6e51c5a33213599eb94e3ec1", size = 10358 },
 ]
 
 [[package]]
