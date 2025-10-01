@@ -9,7 +9,6 @@ import copy
 import uuid
 from collections import deque
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any, Optional, Union, cast
 
 import networkx as nx
@@ -35,7 +34,7 @@ from onshape_robotics_toolkit.models.assembly import (
     SubAssembly,
 )
 from onshape_robotics_toolkit.models.document import WorkspaceType
-from onshape_robotics_toolkit.utilities.helpers import clean_name_for_urdf, get_sanitized_name
+from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
 SUBASSEMBLY_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
 MATE_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
@@ -932,24 +931,36 @@ class AssemblyData:
             f"{len(self.patterns.patterns)} patterns"
         )
 
-    def populate_from_subassembly(self, subassembly: SubAssembly) -> None:
+    def populate_from_subassembly(self, subassembly: SubAssembly, occurrence_registry: "OccurrenceRegistry") -> None:
         """
         Populate registries from a SubAssembly object.
 
-        Note: SubAssemblies don't have occurrences in the JSON response.
+        Note: SubAssemblies don't have occurrences in the JSON response, but we can
+        use the occurrence registry to find the full paths for instances.
 
         Args:
             subassembly: SubAssembly from Onshape API
+            occurrence_registry: Occurrence registry to find full paths
         """
-        # Add instances
-        for instance in subassembly.instances:
-            key = PathKey.from_path(instance.id)
+        # Build a mapping of leaf IDs to full paths from occurrences
+        leaf_id_to_paths: dict[str, list[PathKey]] = {}
+        for path_key in occurrence_registry.occurrences:
+            leaf_id = path_key.leaf_id
+            if leaf_id not in leaf_id_to_paths:
+                leaf_id_to_paths[leaf_id] = []
+            leaf_id_to_paths[leaf_id].append(path_key)
 
-            if instance.type == InstanceType.PART:
-                if isinstance(instance, PartInstance):
-                    self.instances.add_part(key, instance)
-            elif instance.type == InstanceType.ASSEMBLY and isinstance(instance, AssemblyInstance):
-                self.instances.add_assembly(key, instance)
+        # Add instances using their full paths from occurrences
+        for instance in subassembly.instances:
+            # instance.id is just the leaf ID, we need to find the full path(s)
+            matching_paths = leaf_id_to_paths.get(instance.id, [])
+
+            for key in matching_paths:
+                if instance.type == InstanceType.PART:
+                    if isinstance(instance, PartInstance):
+                        self.instances.add_part(key, instance)
+                elif instance.type == InstanceType.ASSEMBLY and isinstance(instance, AssemblyInstance):
+                    self.instances.add_assembly(key, instance)
 
         # Add mates
         if subassembly.features:
@@ -1031,7 +1042,7 @@ class RootAssemblyData(AssemblyData):
 
 
 @dataclass
-class CADDocument:
+class CAD:
     """
     Top-level CAD document container.
 
@@ -1061,7 +1072,7 @@ class CADDocument:
     element_id: str
     root_assembly: RootAssemblyData
     parts: dict[str, Part]
-    subassemblies: dict[PathKey, "CADDocument"]
+    subassemblies: dict[PathKey, "CAD"]
     max_depth: int
     current_depth: int
 
@@ -1099,9 +1110,9 @@ class CADDocument:
         assembly: Assembly,
         max_depth: int = 0,
         current_depth: int = 0,
-    ) -> "CADDocument":
+    ) -> "CAD":
         """
-        Create a CADDocument from an Onshape Assembly.
+        Create a CAD from an Onshape Assembly.
 
         Args:
             assembly: Onshape assembly data
@@ -1109,11 +1120,17 @@ class CADDocument:
             current_depth: Current depth in hierarchy
 
         Returns:
-            CADDocument with populated registries
+            CAD with populated registries
         """
         # Create root assembly data and populate registries
         root_assembly_data = RootAssemblyData(max_depth=max_depth)
         root_assembly_data.populate_from_root_assembly(assembly.rootAssembly)
+
+        # Also populate instances from ALL subassemblies (regardless of max_depth)
+        # max_depth only controls which subassemblies get fetched via API, not which get added to registry
+        # We need the occurrence registry to get the full paths for subassembly instances
+        for subassembly in assembly.subAssemblies:
+            root_assembly_data.populate_from_subassembly(subassembly, root_assembly_data.occurrences)
 
         # Extract parts
         parts = {part.partId: part for part in assembly.parts}
@@ -1135,7 +1152,7 @@ class CADDocument:
         This method:
         1. Identifies flexible subassembly instances
         2. Fetches their assembly data from Onshape API
-        3. Creates nested CADDocument objects
+        3. Creates nested CAD objects
         4. Stores them in self.subassemblies keyed by PathKey
 
         Args:
@@ -1199,8 +1216,8 @@ class CADDocument:
                 LOGGER.warning(f"Subassembly {instance.name} has no version info, skipping")
                 return
 
-            # Create nested CADDocument
-            subassembly_cad = CADDocument.from_assembly(
+            # Create nested CAD
+            subassembly_cad = CAD.from_assembly(
                 assembly=assembly_data,
                 max_depth=self.max_depth,
                 current_depth=self.current_depth + 1,
@@ -1217,7 +1234,7 @@ class CADDocument:
         except Exception as e:
             LOGGER.error(f"Failed to fetch subassembly {instance.name}: {e}")
 
-    def get_subassembly(self, key: PathKey) -> Optional["CADDocument"]:
+    def get_subassembly(self, key: PathKey) -> Optional["CAD"]:
         """
         Get a subassembly CAD document by PathKey.
 
@@ -1225,11 +1242,11 @@ class CADDocument:
             key: PathKey of the subassembly instance
 
         Returns:
-            CADDocument if found, None otherwise
+            CAD if found, None otherwise
         """
         return self.subassemblies.get(key)
 
-    def get_all_subassemblies(self, recursive: bool = False) -> dict[PathKey, "CADDocument"]:
+    def get_all_subassemblies(self, recursive: bool = False) -> dict[PathKey, "CAD"]:
         """
         Get all subassemblies.
 
@@ -1237,7 +1254,7 @@ class CADDocument:
             recursive: If True, includes nested subassemblies recursively
 
         Returns:
-            Dictionary of PathKey -> CADDocument
+            Dictionary of PathKey -> CAD
         """
         if not recursive:
             return self.subassemblies
@@ -1335,665 +1352,34 @@ class CADDocument:
         """
         return self.root_assembly.patterns.get_pattern(pattern_id)
 
-    def __repr__(self) -> str:
-        return (
-            f"CADDocument("
-            f"depth={self.current_depth}, "
-            f"parts={len(self.root_assembly.instances.parts)}, "
-            f"assemblies={len(self.root_assembly.instances.assemblies)}, "
-            f"subassemblies={len(self.subassemblies)})"
-        )
-
-
-class EntityType(Enum):
-    """Type of entity in the assembly hierarchy."""
-
-    PART = "PART"
-    RIGID_ASSEMBLY = "RIGID_ASSEMBLY"
-    FLEXIBLE_ASSEMBLY = "FLEXIBLE_ASSEMBLY"
-    FEATURE = "FEATURE"
-    OCCURRENCE = "OCCURRENCE"
-
-
-@dataclass(frozen=True)
-class TypedKey:
-    """Type-safe key with entity context and hierarchical path information."""
-
-    path: tuple[str, ...]  # Hierarchical path using instance IDs
-    entity_type: EntityType
-    entity_id: str  # The actual ID of the entity
-
-    def __str__(self) -> str:
-        """String representation for debugging."""
-        path_str = ":".join(self.path) if self.path else ROOT_PATH_NAME
-        return f"{self.entity_type.value}:{path_str}:{self.entity_id}"
-
-    def __repr__(self) -> str:
-        return f"TypedKey({self.entity_type.value}, {self.path}, {self.entity_id})"
-
-    @property
-    def parent_path(self) -> tuple[str, ...]:
-        """Get parent path."""
-        return self.path[:-1] if self.path else ()
-
-    @property
-    def depth(self) -> int:
-        """Get depth in hierarchy."""
-        return len(self.path)
-
-    @classmethod
-    def for_part(cls, path: tuple[str, ...], part_id: str) -> "TypedKey":
-        """Create a TypedKey for a part."""
-        return cls(path=path, entity_type=EntityType.PART, entity_id=part_id)
-
-    @classmethod
-    def for_rigid_assembly(cls, path: tuple[str, ...], assembly_id: str) -> "TypedKey":
-        """Create a TypedKey for a rigid assembly."""
-        return cls(path=path, entity_type=EntityType.RIGID_ASSEMBLY, entity_id=assembly_id)
-
-    @classmethod
-    def for_assembly(cls, path: tuple[str, ...], assembly_id: str) -> "TypedKey":
-        """Create a TypedKey for an assembly (backward compatibility)."""
-        return cls(path=path, entity_type=EntityType.RIGID_ASSEMBLY, entity_id=assembly_id)
-
-    @classmethod
-    def for_flexible_assembly(cls, path: tuple[str, ...], assembly_id: str) -> "TypedKey":
-        """Create a TypedKey for a flexible assembly."""
-        return cls(path=path, entity_type=EntityType.FLEXIBLE_ASSEMBLY, entity_id=assembly_id)
-
-    @classmethod
-    def for_feature(cls, path: tuple[str, ...], feature_id: str) -> "TypedKey":
-        """Create a TypedKey for a feature."""
-        return cls(path=path, entity_type=EntityType.FEATURE, entity_id=feature_id)
-
-    @classmethod
-    def for_occurrence(cls, path: tuple[str, ...], occurrence_id: str) -> "TypedKey":
-        """Create a TypedKey for an occurrence."""
-        return cls(path=path, entity_type=EntityType.OCCURRENCE, entity_id=occurrence_id)
-
-
-class IdToNameResolver:
-    """Centralized ID to name resolution with efficient lookups."""
-
-    def __init__(self, assembly: Assembly):
-        self.id_to_name: dict[str, str] = {}
-        self.id_to_instance: dict[str, Union[PartInstance, AssemblyInstance]] = {}
-        self._build_mappings(assembly)
-
-    def _build_mappings(self, assembly: Assembly) -> None:
-        """Build ID mappings in single pass."""
-        LOGGER.debug("Building ID to name resolver mappings...")
-
-        # Root assembly instances
-        for instance in assembly.rootAssembly.instances:
-            sanitized_name = get_sanitized_name(instance.name)
-            self.id_to_name[instance.id] = sanitized_name
-            self.id_to_instance[instance.id] = instance
-
-        # Traverse all subassemblies to build complete mapping
-        subassembly_deque: deque[SubAssembly] = deque(assembly.subAssemblies)
-        visited_uids: set[str] = set()
-
-        while subassembly_deque:
-            subassembly = subassembly_deque.popleft()
-
-            # Avoid processing the same subassembly multiple times
-            if subassembly.uid in visited_uids:
-                continue
-            visited_uids.add(subassembly.uid)
-
-            # Process instances in this subassembly
-            for instance in subassembly.instances:
-                sanitized_name = get_sanitized_name(instance.name)
-                self.id_to_name[instance.id] = sanitized_name
-                self.id_to_instance[instance.id] = instance
-
-        LOGGER.debug(f"Resolved {len(self.id_to_name)} instance ID to name mappings")
-
-    def get_name(self, instance_id: str) -> str:
-        """Get sanitized name for an instance ID."""
-        return self.id_to_name.get(instance_id, instance_id)
-
-    def get_instance(self, instance_id: str) -> Optional[Union[PartInstance, AssemblyInstance]]:
-        """Get instance for an instance ID."""
-        return self.id_to_instance.get(instance_id)
-
-    def has_id(self, instance_id: str) -> bool:
-        """Check if an instance ID exists."""
-        return instance_id in self.id_to_name
-
-
-class KeyNamer:
-    """Type-aware key naming with consistent output."""
-
-    def __init__(self, id_resolver: IdToNameResolver, joiner: str = ":"):
-        self.id_resolver = id_resolver
-        self.joiner = joiner
-        # Separate caches by entity type to handle same names for different entity types
-        self._reverse_cache_by_type: dict[EntityType, dict[str, TypedKey]] = {}
-        self._prefixed_reverse_cache_by_type: dict[str, dict[EntityType, dict[str, TypedKey]]] = {}
-
-    def get_name(self, key: TypedKey, prefix: Optional[str] = None) -> str:
-        """Get clean name for any typed key."""
-        # Build path names from IDs
-        path_names = [self.id_resolver.get_name(path_id) for path_id in key.path]
-
-        # Add the entity name if it's different from the last path element
-        if key.path and key.entity_id != key.path[-1]:
-            entity_name = self.id_resolver.get_name(key.entity_id)
-            if entity_name != key.entity_id:  # Only add if we have a meaningful name
-                path_names.append(entity_name)
-
-        name = self.joiner.join(path_names) if path_names else key.entity_id
-        name = clean_name_for_urdf(name)
-
-        if prefix:
-            return f"{prefix}{self.joiner}{name}"
-        return name
-
-    def lookup_key(self, name: str, entity_type: EntityType, prefix: Optional[str] = None) -> Optional[TypedKey]:
-        """
-        Find a key by its generated name (for reverse lookup).
-
-        Args:
-            name: The generated name to look up
-            entity_type: Entity type to look up (ensures type safety)
-            prefix: Optional prefix scope for the lookup
-
-        Returns:
-            The TypedKey that generates this name, or None if not found
-        """
-        if prefix:
-            # Handle prefixed lookups
-            if prefix not in self._prefixed_reverse_cache_by_type:
-                return None  # Cache not built for this prefix yet
-
-            type_caches = self._prefixed_reverse_cache_by_type[prefix]
-            if entity_type not in type_caches:
-                return None  # Cache not built for this entity type yet
-
-            return type_caches[entity_type].get(name)
-        else:
-            # Handle non-prefixed lookups
-            if entity_type not in self._reverse_cache_by_type:
-                return None  # Cache not built for this entity type yet
-
-            return self._reverse_cache_by_type[entity_type].get(name)
-
-    def build_reverse_cache(self, keys: list[TypedKey], prefix: Optional[str] = None) -> None:
-        """
-        Build reverse mapping cache for efficient name-to-key lookups.
-
-        Args:
-            keys: List of TypedKeys to build cache for
-            prefix: Optional prefix for scoped cache (e.g., subassembly context)
-        """
-        # Group keys by entity type to avoid name collisions
-        keys_by_type: dict[EntityType, list[TypedKey]] = {}
-        for key in keys:
-            if key.entity_type not in keys_by_type:
-                keys_by_type[key.entity_type] = []
-            keys_by_type[key.entity_type].append(key)
-
-        # Build separate cache for each entity type
-        total_entries = 0
-        for entity_type, type_keys in keys_by_type.items():
-            type_cache: dict[str, TypedKey] = {}
-
-            for key in type_keys:
-                generated_name = self.get_name(key, prefix)
-                if generated_name in type_cache:
-                    LOGGER.warning(
-                        f"Duplicate name '{generated_name}' found in {entity_type.value}: keeping first occurrence"
-                    )
-                    continue
-                type_cache[generated_name] = key
-
-            # Store the type-specific cache
-            if prefix:
-                if prefix not in self._prefixed_reverse_cache_by_type:
-                    self._prefixed_reverse_cache_by_type[prefix] = {}
-                self._prefixed_reverse_cache_by_type[prefix][entity_type] = type_cache
-            else:
-                self._reverse_cache_by_type[entity_type] = type_cache
-
-            total_entries += len(type_cache)
-
-        LOGGER.debug(
-            f"Built reverse cache with {total_entries} total entries across {len(keys_by_type)} entity types"
-            + (f" for prefix '{prefix}'" if prefix else "")
-        )
-
-    def clear_cache(self, prefix: Optional[str] = None, entity_type: Optional[EntityType] = None) -> None:
-        """
-        Clear reverse mapping cache.
-
-        Args:
-            prefix: If provided, clears only the prefixed cache for this scope.
-                   If None, clears the main cache.
-            entity_type: If provided, clears only the cache for this entity type.
-                        If None, clears all entity type caches.
-        """
-        if prefix:
-            if entity_type:
-                # Clear specific entity type cache for specific prefix
-                if prefix in self._prefixed_reverse_cache_by_type:
-                    self._prefixed_reverse_cache_by_type[prefix].pop(entity_type, None)
-            else:
-                # Clear all entity type caches for specific prefix
-                self._prefixed_reverse_cache_by_type.pop(prefix, None)
-        else:
-            if entity_type:
-                # Clear specific entity type cache
-                self._reverse_cache_by_type.pop(entity_type, None)
-            else:
-                # Clear all entity type caches
-                self._reverse_cache_by_type.clear()
-
-
-@dataclass
-class CAD:
-    """Container for all parsed CAD assembly data with TypedKey system."""
-
-    assembly: Assembly
-    instances: dict[TypedKey, Union[PartInstance, AssemblyInstance]]
-    parts: dict[TypedKey, PartInstance]
-
-    # Assembly instance references (instances in the assembly tree)
-    rigid_assembly_instances: dict[TypedKey, AssemblyInstance]
-    flexible_assembly_instances: dict[TypedKey, AssemblyInstance]
-
-    occurrences: dict[TypedKey, Occurrence]
-    features: dict[TypedKey, AssemblyFeature]
-    mates: dict[TypedKey, MateFeatureData]
-    relations: dict[TypedKey, MateRelationFeatureData]
-    id_resolver: IdToNameResolver
-    key_namer: KeyNamer
-
-    # Assembly data (actual assembly content fetched from API)
-    flexible_assembly_data: dict[TypedKey, RootAssembly]
-    rigid_assembly_data: dict[TypedKey, RootAssembly]
-
-    # Subassembly occurrence data (indexed for O(1) lookup)
-    flexible_assembly_occurrences: dict[TypedKey, dict[TypedKey, Occurrence]]
-    rigid_assembly_occurrences: dict[TypedKey, dict[TypedKey, Occurrence]]
-
-    max_depth: int
-
-    @classmethod
-    def from_assembly(cls, assembly: Assembly, client: Client, max_depth: int = 0) -> "CAD":
-        """
-        Create CAD from an Onshape assembly with full subassembly parsing.
-
-        Args:
-            assembly: The assembly to parse
-            client: Onshape client for fetching subassemblies
-            max_depth: Maximum depth for traversal
-
-        Returns:
-            CAD with all data parsed, subassemblies fetched, and reverse cache built
-        """
-        builder = AssemblyStructureBuilder(assembly, max_depth)
-        cad = builder.build()
-
-        # Fetch all subassemblies (both rigid and flexible) if any exist
-        if cad.rigid_assembly_instances or cad.flexible_assembly_instances:
-            cad.fetch_all_subassemblies(client)
-            # Index subassembly occurrences for O(1) lookup
-            cad.index_subassembly_occurrences()
-
-        # Build reverse cache for lookups (includes subassembly occurrences)
-        cad.build_reverse_cache()
-
-        return cad
-
-    @property
-    def part_keys(self) -> list[TypedKey]:
-        """Get all part keys."""
-        return list(self.parts.keys())
-
-    @property
-    def assembly_keys(self) -> list[TypedKey]:
-        """Get all assembly keys (both rigid and flexible)."""
-        return list(self.rigid_assembly_instances.keys()) + list(self.flexible_assembly_instances.keys())
-
-    @property
-    def rigid_assembly_keys(self) -> list[TypedKey]:
-        """Get all rigid assembly keys."""
-        return list(self.rigid_assembly_instances.keys())
-
-    @property
-    def flexible_assembly_keys(self) -> list[TypedKey]:
-        """Get all flexible assembly keys."""
-        return list(self.flexible_assembly_instances.keys())
-
-    @property
-    def mate_keys(self) -> list[TypedKey]:
-        """Get all mate keys."""
-        return list(self.mates.keys())
-
-    def index_subassembly_occurrences(self) -> None:
-        """
-        Index occurrences from fetched subassembly data into dictionaries for O(1) lookup.
-        Builds per-subassembly name-to-occurrence mappings to avoid global name collisions.
-        Should be called after fetch_all_subassemblies().
-        """
-        LOGGER.debug("Indexing subassembly occurrences with per-assembly name caches...")
-
-        # Index flexible subassembly occurrences
-        for assembly_key, root_assembly in self.flexible_assembly_data.items():
-            occurrence_dict: dict[TypedKey, Occurrence] = {}
-            name_to_key: dict[str, TypedKey] = {}  # Per-subassembly name mapping
-
-            for occurrence in root_assembly.occurrences:
-                if occurrence.path:
-                    # Create occurrence key
-                    occ_key = TypedKey.for_occurrence(path=tuple(occurrence.path), occurrence_id=occurrence.path[-1])
-                    occurrence_dict[occ_key] = occurrence
-
-                    # Build name for this occurrence
-                    occ_name = self.key_namer.get_name(occ_key)
-                    name_to_key[occ_name] = occ_key
-
-            self.flexible_assembly_occurrences[assembly_key] = occurrence_dict
-            # Store name mapping in KeyNamer with assembly-specific prefix
-            assembly_name = self.key_namer.get_name(assembly_key)
-            for name, key in name_to_key.items():
-                # Store with prefix to avoid global collision
-                if assembly_name not in self.key_namer._prefixed_reverse_cache_by_type:
-                    self.key_namer._prefixed_reverse_cache_by_type[assembly_name] = {}
-                if EntityType.OCCURRENCE not in self.key_namer._prefixed_reverse_cache_by_type[assembly_name]:
-                    self.key_namer._prefixed_reverse_cache_by_type[assembly_name][EntityType.OCCURRENCE] = {}
-                self.key_namer._prefixed_reverse_cache_by_type[assembly_name][EntityType.OCCURRENCE][name] = key
-
-        # Index rigid subassembly occurrences
-        for assembly_key, root_assembly in self.rigid_assembly_data.items():
-            rigid_occurrence_dict: dict[TypedKey, Occurrence] = {}
-            rigid_name_to_key: dict[str, TypedKey] = {}  # Per-subassembly name mapping
-
-            for occurrence in root_assembly.occurrences:
-                if occurrence.path:
-                    # Create occurrence key
-                    occ_key = TypedKey.for_occurrence(path=tuple(occurrence.path), occurrence_id=occurrence.path[-1])
-                    rigid_occurrence_dict[occ_key] = occurrence
-
-                    # Build name for this occurrence
-                    occ_name = self.key_namer.get_name(occ_key)
-                    rigid_name_to_key[occ_name] = occ_key
-
-            self.rigid_assembly_occurrences[assembly_key] = rigid_occurrence_dict
-            # Store name mapping in KeyNamer with assembly-specific prefix
-            assembly_name = self.key_namer.get_name(assembly_key)
-            for name, key in rigid_name_to_key.items():
-                # Store with prefix to avoid global collision
-                if assembly_name not in self.key_namer._prefixed_reverse_cache_by_type:
-                    self.key_namer._prefixed_reverse_cache_by_type[assembly_name] = {}
-                if EntityType.OCCURRENCE not in self.key_namer._prefixed_reverse_cache_by_type[assembly_name]:
-                    self.key_namer._prefixed_reverse_cache_by_type[assembly_name][EntityType.OCCURRENCE] = {}
-                self.key_namer._prefixed_reverse_cache_by_type[assembly_name][EntityType.OCCURRENCE][name] = key
-
-        total_flexible = sum(len(occ_dict) for occ_dict in self.flexible_assembly_occurrences.values())
-        total_rigid = sum(len(occ_dict) for occ_dict in self.rigid_assembly_occurrences.values())
-        LOGGER.debug(
-            f"Indexed {total_flexible} flexible and {total_rigid} rigid subassembly occurrences with name caches"
-        )
-
-    def build_reverse_cache(self, prefix: Optional[str] = None) -> None:
-        """
-        Build reverse mapping cache for all entity types.
-
-        Args:
-            prefix: Optional prefix for scoped cache
-
-        Note:
-            Subassembly occurrences are NOT added to the global cache to avoid name collisions.
-            They are looked up via their parent assembly using lookup_occurrence(assembly_name=...).
-        """
-        all_keys = (
-            list(self.instances.keys())  # Already includes all parts and assemblies (including assembly instances)
-            + list(self.features.keys())
-            + list(self.occurrences.keys())  # Only root assembly occurrences
-            # Note: flexible_assembly_data and rigid_assembly_data use the same keys as their instances,
-            # so they're already included via instances.keys() and don't need to be added separately
-        )
-
-        self.key_namer.build_reverse_cache(all_keys, prefix)
-
-    def lookup_part(self, name: str, prefix: Optional[str] = None) -> Optional[PartInstance]:
-        """Look up a part by its generated name."""
-        key = self.key_namer.lookup_key(name, EntityType.PART, prefix)
-        return self.parts.get(key) if key else None
-
-    def lookup_assembly(self, name: str, prefix: Optional[str] = None) -> Optional[AssemblyInstance]:
-        """Look up an assembly by its generated name (searches both rigid and flexible)."""
-        # Try rigid first
-        key = self.key_namer.lookup_key(name, EntityType.RIGID_ASSEMBLY, prefix)
-        result = self.rigid_assembly_instances.get(key) if key else None
-        if result:
-            return result
-
-        # Try flexible
-        key = self.key_namer.lookup_key(name, EntityType.FLEXIBLE_ASSEMBLY, prefix)
-        return self.flexible_assembly_instances.get(key) if key else None
-
-    def lookup_rigid_assembly(self, name: str, prefix: Optional[str] = None) -> Optional[AssemblyInstance]:
-        """Look up a rigid assembly by its generated name."""
-        key = self.key_namer.lookup_key(name, EntityType.RIGID_ASSEMBLY, prefix)
-        return self.rigid_assembly_instances.get(key) if key else None
-
-    def lookup_flexible_assembly(self, name: str, prefix: Optional[str] = None) -> Optional[AssemblyInstance]:
-        """Look up a flexible assembly by its generated name."""
-        key = self.key_namer.lookup_key(name, EntityType.FLEXIBLE_ASSEMBLY, prefix)
-        return self.flexible_assembly_instances.get(key) if key else None
-
-    def lookup_mate(self, name: str, prefix: Optional[str] = None) -> Optional[MateFeatureData]:
-        """Look up a mate by its generated name."""
-        key = self.key_namer.lookup_key(name, EntityType.FEATURE, prefix)
-        return self.mates.get(key) if key else None
-
-    def lookup_occurrence(
-        self,
-        name: str,
-        assembly_name: Optional[str] = None,
-        is_rigid: Optional[bool] = None,
-        sanitize: bool = False,
-        prefix: Optional[str] = None,
-    ) -> Optional[Occurrence]:
-        """
-        Look up an occurrence by name (O(1) lookup using reverse cache).
-
-        Args:
-            name: Name of the occurrence
-            assembly_name: Optional subassembly name. If None, searches root assembly.
-            is_rigid: Specifies rigid (True) or flexible (False). If None, tries flexible then rigid.
-            sanitize: If True, sanitizes the name before lookup (e.g., "Part 1 <1>" -> "Part_1_1")
-            prefix: Optional prefix for scoped cache
-
-        Returns:
-            Occurrence if found, None otherwise
-        """
-        # Sanitize names if requested
-        if sanitize:
-            from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
-
-            name = get_sanitized_name(name)
-            if assembly_name:
-                assembly_name = get_sanitized_name(assembly_name)
-
-        # Search root assembly
-        if assembly_name is None:
-            key = self.key_namer.lookup_key(name, EntityType.OCCURRENCE, prefix)
-            return self.occurrences.get(key) if key else None
-
-        # Determine which dictionary and entity type to use
-        if is_rigid is True:
-            assembly_dict = self.rigid_assembly_occurrences
-            entity_type = EntityType.RIGID_ASSEMBLY
-        elif is_rigid is False:
-            assembly_dict = self.flexible_assembly_occurrences
-            entity_type = EntityType.FLEXIBLE_ASSEMBLY
-        else:
-            # Try flexible first
-            assembly_key = self.key_namer.lookup_key(assembly_name, EntityType.FLEXIBLE_ASSEMBLY, prefix)
-            if assembly_key and assembly_key in self.flexible_assembly_occurrences:
-                # Use assembly-specific prefix for per-subassembly name lookup
-                occ_key = self.key_namer.lookup_key(name, EntityType.OCCURRENCE, prefix=assembly_name)
-                if occ_key:
-                    result = self.flexible_assembly_occurrences[assembly_key].get(occ_key)
-                    if result:
-                        return result
-            # Then try rigid
-            assembly_dict = self.rigid_assembly_occurrences
-            entity_type = EntityType.RIGID_ASSEMBLY
-
-        # Lookup in the determined dictionary using assembly-specific prefix
-        assembly_key = self.key_namer.lookup_key(assembly_name, entity_type, prefix)
-        if assembly_key and assembly_key in assembly_dict:
-            # Use assembly name as prefix for scoped lookup
-            occ_key = self.key_namer.lookup_key(name, EntityType.OCCURRENCE, prefix=assembly_name)
-            if occ_key:
-                return assembly_dict[assembly_key].get(occ_key)
-
-        return None
-
-    def lookup_subassembly(self, name: str, prefix: Optional[str] = None) -> Optional[RootAssembly]:
-        """Look up a flexible subassembly by its generated name."""
-        key = self.key_namer.lookup_key(name, EntityType.FLEXIBLE_ASSEMBLY, prefix)
-        return self.flexible_assembly_data.get(key) if key else None
-
-    def lookup_rigid_subassembly(self, name: str, prefix: Optional[str] = None) -> Optional[RootAssembly]:
-        """Look up a rigid subassembly by its generated name."""
-        key = self.key_namer.lookup_key(name, EntityType.RIGID_ASSEMBLY, prefix)
-        return self.rigid_assembly_data.get(key) if key else None
-
-    @property
-    def subassembly_keys(self) -> list[TypedKey]:
-        """Get all flexible subassembly keys."""
-        return list(self.flexible_assembly_data.keys())
-
-    @property
-    def rigid_subassembly_keys(self) -> list[TypedKey]:
-        """Get all rigid subassembly keys."""
-        return list(self.rigid_assembly_data.keys())
-
-    async def fetch_all_subassemblies_async(self, client: Client) -> None:
-        """
-        Asynchronously fetch all subassemblies (both rigid and flexible) from Onshape API.
-
-        Args:
-            client: Onshape client for API calls
-        """
-        all_tasks = []
-
-        # Fetch rigid subassemblies
-        for key, assembly_instance in self.rigid_assembly_instances.items():
-            # Find the corresponding subassembly
-            subassembly = None
-            for sub in self.assembly.subAssemblies:
-                if sub.uid == assembly_instance.uid:
-                    subassembly = sub
-                    break
-
-            if subassembly:
-                task = self._fetch_single_subassembly(client, key, subassembly, is_rigid=True)
-                all_tasks.append(task)
-
-        # Fetch flexible subassemblies
-        for key, assembly_instance in self.flexible_assembly_instances.items():
-            # Find the corresponding subassembly
-            subassembly = None
-            for sub in self.assembly.subAssemblies:
-                if sub.uid == assembly_instance.uid:
-                    subassembly = sub
-                    break
-
-            if subassembly:
-                task = self._fetch_single_subassembly(client, key, subassembly, is_rigid=False)
-                all_tasks.append(task)
-
-        if all_tasks:
-            rigid_count = len(self.rigid_assembly_instances)
-            flexible_count = len(self.flexible_assembly_instances)
-            LOGGER.info(f"Fetching {len(all_tasks)} subassemblies ({rigid_count} rigid, {flexible_count} flexible)")
-            await asyncio.gather(*all_tasks, return_exceptions=True)
-            LOGGER.info(
-                f"Completed fetching {len(self.rigid_assembly_data)} rigid "
-                f"and {len(self.flexible_assembly_data)} flexible assembly data"
-            )
-
-    async def _fetch_single_subassembly(
-        self, client: Client, key: TypedKey, subassembly: SubAssembly, is_rigid: bool
-    ) -> None:
-        """Fetch a single subassembly (both rigid and flexible use the same API call now)."""
-        try:
-            root_assembly = await asyncio.to_thread(
-                client.get_root_assembly,
-                did=subassembly.documentId,
-                wtype=WorkspaceType.M.value,
-                wid=subassembly.documentMicroversion,
-                eid=subassembly.elementId,
-                with_mass_properties=True,
-                log_response=False,
-            )
-
-            if is_rigid:
-                # Use prefixed key for rigid subassemblies to distinguish instances
-                rigid_key = TypedKey.for_assembly(("rigid_subassembly", *key.path), subassembly.uid)
-                self.rigid_assembly_data[rigid_key] = root_assembly
-                LOGGER.debug(f"Successfully fetched rigid subassembly: {self.key_namer.get_name(key)}")
-            else:
-                # Use original key for flexible subassemblies for easy lookup
-                self.flexible_assembly_data[key] = root_assembly
-                LOGGER.debug(f"Successfully fetched flexible subassembly: {self.key_namer.get_name(key)}")
-
-        except Exception as e:
-            subassembly_type = "rigid" if is_rigid else "flexible"
-            LOGGER.error(f"Failed to fetch {subassembly_type} subassembly {self.key_namer.get_name(key)}: {e}")
-
-    def fetch_all_subassemblies(self, client: Client) -> None:
-        """
-        Synchronous wrapper for fetch_all_subassemblies_async.
-
-        Args:
-            client: Onshape client for API calls
-        """
-        asyncio.run(self.fetch_all_subassemblies_async(client))
-
-    # Legacy methods for backward compatibility
-    def fetch_rigid_subassemblies(self, client: Client) -> None:
-        """Legacy method - use fetch_all_subassemblies() instead."""
-        LOGGER.warning("fetch_rigid_subassemblies() is deprecated, use fetch_all_subassemblies() instead")
-        self.fetch_all_subassemblies(client)
-
-    def fetch_flexible_subassemblies(self, client: Client) -> None:
-        """Legacy method - use fetch_all_subassemblies() instead."""
-        LOGGER.warning("fetch_flexible_subassemblies() is deprecated, use fetch_all_subassemblies() instead")
-        self.fetch_all_subassemblies(client)
-
-    def show_tree(self) -> None:
+    def show(self) -> None:
         """Display the CAD assembly structure as a tree."""
         from collections import defaultdict
 
-        # Build hierarchy from TypedKey paths
-        children_by_path = defaultdict(list)
-        all_paths = set()
+        # Build hierarchy: parent_path -> list of child keys
+        children_by_path: dict[tuple[str, ...], list[PathKey]] = defaultdict(list)
 
-        # Collect all instances with their paths
-        for key in self.instances:
-            all_paths.add(key.path)
-            if key.path:
-                parent_path = key.path[:-1]
-                children_by_path[parent_path].append(key)
-            else:
-                # Root level
-                children_by_path[()].append(key)
+        # Collect all instances
+        for key in self.root_assembly.instances.parts:
+            parent_path = key.path[:-1]
+            children_by_path[parent_path].append(key)
 
-        def get_display_name(key: TypedKey) -> str:
+        for key in self.root_assembly.instances.assemblies:
+            parent_path = key.path[:-1]
+            children_by_path[parent_path].append(key)
+
+        def get_display_name(key: PathKey) -> str:
             """Get display name for a key."""
-            instance = self.instances.get(key)
-            if instance:
-                return f"{instance.name} ({key.entity_type.value})"
-            return f"{key.entity_id} ({key.entity_type.value})"
+            part = self.root_assembly.instances.parts.get(key)
+            if part:
+                return f"{part.name} (part)"
+
+            assembly = self.root_assembly.instances.assemblies.get(key)
+            if assembly:
+                assembly_type = "rigid" if self.root_assembly.instances.is_rigid_assembly(key) else "flexible"
+                return f"{assembly.name} ({assembly_type})"
+
+            return f"{key.leaf_id} (unknown)"
 
         def print_tree(path: tuple[str, ...], depth: int = 0) -> None:
             """Recursively print tree structure."""
@@ -2002,250 +1388,47 @@ class CAD:
             if depth == 0:
                 print(f"{prefix}Assembly Root")
 
-            # Print children at this level, sorted by type (parts first, then assemblies) and then by name
-            children = children_by_path[path]
-            # Sort by: 1) entity type (parts first), 2) instance name
+            # Get children at this level
+            children = children_by_path.get(path, [])
+
+            # Sort: parts first, then assemblies; within each group, sort by name
             sorted_children = sorted(
                 children,
                 key=lambda k: (
-                    0 if k.entity_type.value == "PART" else 1,  # Parts first, then assemblies
-                    getattr(self.instances.get(k, k), "name", k.entity_id) if self.instances.get(k) else k.entity_id,
+                    0 if k in self.root_assembly.instances.parts else 1,  # Parts first
+                    (
+                        part.name
+                        if (part := self.root_assembly.instances.parts.get(k)) is not None
+                        else (
+                            asm.name
+                            if (asm := self.root_assembly.instances.assemblies.get(k)) is not None
+                            else k.leaf_id
+                        )
+                    ),
                 ),
             )
 
             for key in sorted_children:
                 print(f"{prefix}|-- {get_display_name(key)}")
 
-                # Check for subassemblies/rigid subassemblies at this key
-                sub_keys = [k for k in self.flexible_assembly_data if k.path == key.path]
-                rigid_keys = [k for k in self.rigid_assembly_data if k.path == key.path]
-
-                for sub_key in sub_keys:
-                    sub = self.flexible_assembly_data[sub_key]
-                    print(f"{prefix}|   +-- Flexible Subassembly: {sub.uid}")
-
-                for rigid_key in rigid_keys:
-                    rigid = self.rigid_assembly_data[rigid_key]
-                    print(f"{prefix}|   +-- Rigid Subassembly: {rigid.uid}")
+                # Check if this key has a subassembly
+                if key in self.subassemblies:
+                    sub_cad = self.subassemblies[key]
+                    print(f"{prefix}|   +-- Subassembly Document (depth={sub_cad.current_depth})")
 
                 # Recurse to children
-                if key.path in children_by_path:
-                    print_tree(key.path, depth + 1)
+                print_tree(key.path, depth + 1)
 
         print_tree(())
 
-
-class AssemblyStructureBuilder:
-    """Builds all assembly mappings in a single efficient traversal."""
-
-    def __init__(self, assembly: Assembly, max_depth: int = 0):
-        self.assembly = assembly
-        self.max_depth = max_depth
-
-        # Core resolver and namer
-        self.id_resolver = IdToNameResolver(assembly)
-        self.key_namer = KeyNamer(self.id_resolver)
-
-        # All mappings built in single pass
-        self.instances: dict[TypedKey, Union[PartInstance, AssemblyInstance]] = {}
-        self.parts: dict[TypedKey, PartInstance] = {}
-        self.rigid_assembly_instances: dict[TypedKey, AssemblyInstance] = {}
-        self.flexible_assembly_instances: dict[TypedKey, AssemblyInstance] = {}
-        self.occurrences: dict[TypedKey, Occurrence] = {}
-        self.features: dict[TypedKey, AssemblyFeature] = {}
-        self.mates: dict[TypedKey, MateFeatureData] = {}
-        self.relations: dict[TypedKey, MateRelationFeatureData] = {}
-        self.flexible_assembly_data: dict[TypedKey, RootAssembly] = {}
-        self.rigid_assembly_data: dict[TypedKey, RootAssembly] = {}
-        self.flexible_assembly_occurrences: dict[TypedKey, dict[TypedKey, Occurrence]] = {}
-        self.rigid_assembly_occurrences: dict[TypedKey, dict[TypedKey, Occurrence]] = {}
-
-    def build(self) -> CAD:
-        """Build all assembly mappings in a single traversal."""
-        LOGGER.info("Starting assembly parsing...")
-
-        self._traverse_and_build()
-        self._build_occurrences()
-
-        LOGGER.info(
-            f"Assembly parsing completed: {len(self.instances)} instances, "
-            f"{len(self.parts)} parts, {len(self.rigid_assembly_instances)} rigid assemblies, "
-            f"{len(self.flexible_assembly_instances)} flexible assemblies, "
-            f"{len(self.flexible_assembly_data)} flexible assembly data, "
-            f"{len(self.rigid_assembly_data)} rigid assembly data, "
-            f"{len(self.mates)} mates, {len(self.occurrences)} occurrences"
+    def __repr__(self) -> str:
+        return (
+            f"CAD("
+            f"depth={self.current_depth}, "
+            f"parts={len(self.root_assembly.instances.parts)}, "
+            f"assemblies={len(self.root_assembly.instances.assemblies)}, "
+            f"subassemblies={len(self.subassemblies)})"
         )
-
-        return CAD(
-            assembly=self.assembly,
-            instances=self.instances,
-            parts=self.parts,
-            rigid_assembly_instances=self.rigid_assembly_instances,
-            flexible_assembly_instances=self.flexible_assembly_instances,
-            occurrences=self.occurrences,
-            features=self.features,
-            mates=self.mates,
-            relations=self.relations,
-            id_resolver=self.id_resolver,
-            key_namer=self.key_namer,
-            flexible_assembly_data=self.flexible_assembly_data,
-            rigid_assembly_data=self.rigid_assembly_data,
-            flexible_assembly_occurrences=self.flexible_assembly_occurrences,
-            rigid_assembly_occurrences=self.rigid_assembly_occurrences,
-            max_depth=self.max_depth,
-        )
-
-    def _traverse_and_build(self) -> None:
-        """Single traversal that builds all instance and feature mappings."""
-        LOGGER.debug("Building all mappings in single traversal...")
-
-        # Process root assembly
-        self._process_assembly_level(self.assembly.rootAssembly, path=())
-
-        # Process subassemblies with proper hierarchy tracking
-        uid_to_subassembly = {sub.uid: sub for sub in self.assembly.subAssemblies}
-
-        subassembly_queue: deque[tuple[tuple[str, ...], AssemblyInstance, SubAssembly]] = deque()
-        visited_paths: set[tuple[str, ...]] = set()
-
-        # Find root-level assembly instances
-        for instance in self.assembly.rootAssembly.instances:
-            if instance.type == InstanceType.ASSEMBLY:
-                instance_path = (instance.id,)
-                if instance_path in visited_paths:
-                    continue
-                visited_paths.add(instance_path)
-
-                if instance.uid in uid_to_subassembly and isinstance(instance, AssemblyInstance):
-                    subassembly = uid_to_subassembly[instance.uid]
-                    subassembly_queue.append((instance_path, instance, subassembly))
-
-        # Process subassemblies breadth-first
-        while subassembly_queue:
-            path, assembly_instance, subassembly = subassembly_queue.popleft()
-
-            # Determine if this subassembly should be rigid
-            # max_depth=0: all subassemblies are rigid
-            # max_depth=1: root-level subassemblies flexible, deeper ones rigid
-            # max_depth=N: subassemblies at depth <= N are flexible, deeper ones rigid
-            is_rigid = True if self.max_depth == 0 else len(path) > self.max_depth
-
-            # Process this subassembly level
-            self._process_assembly_level(subassembly, path, is_rigid, subassembly)
-
-            # Add nested assemblies to queue
-            for instance in subassembly.instances:
-                if instance.type == InstanceType.ASSEMBLY:
-                    nested_path = (*path, instance.id)
-                    if nested_path in visited_paths:
-                        continue
-                    visited_paths.add(nested_path)
-
-                    if instance.uid in uid_to_subassembly and isinstance(instance, AssemblyInstance):
-                        nested_subassembly = uid_to_subassembly[instance.uid]
-                        subassembly_queue.append((nested_path, instance, nested_subassembly))
-
-    def _process_assembly_level(
-        self,
-        assembly_level: Union[RootAssembly, SubAssembly],
-        path: tuple[str, ...],
-        is_rigid: bool = False,
-        subassembly_obj: Optional[SubAssembly] = None,
-    ) -> None:
-        """Process instances and features at a specific assembly level."""
-
-        # Note: SubAssembly storage is no longer needed here since we now fetch
-        # RootAssembly data separately in fetch_all_subassemblies()
-
-        # Process instances
-        for instance in assembly_level.instances:
-            instance_path = (*path, instance.id)
-
-            if instance.type == InstanceType.PART and isinstance(instance, PartInstance):
-                key = TypedKey.for_part(instance_path, instance.id)
-                self.instances[key] = instance
-                self.parts[key] = cast(PartInstance, instance)
-            elif instance.type == InstanceType.ASSEMBLY and isinstance(instance, AssemblyInstance):
-                # Determine if this assembly should be rigid based on depth
-                instance_depth = len(instance_path)
-                is_instance_rigid = True if self.max_depth == 0 else instance_depth > self.max_depth
-
-                # Create typed key and store in appropriate collection
-                if is_instance_rigid:
-                    key = TypedKey.for_rigid_assembly(instance_path, instance.id)
-                    self.rigid_assembly_instances[key] = cast(AssemblyInstance, instance)
-                    cast(AssemblyInstance, instance).isRigid = True  # Keep for backward compatibility
-                else:
-                    key = TypedKey.for_flexible_assembly(instance_path, instance.id)
-                    self.flexible_assembly_instances[key] = cast(AssemblyInstance, instance)
-                    cast(AssemblyInstance, instance).isRigid = False  # Keep for backward compatibility
-
-                self.instances[key] = instance
-
-        # Process features
-        for feature in assembly_level.features:
-            feature_path = (*path, feature.id)
-            key = TypedKey.for_feature(feature_path, feature.id)
-
-            self.features[key] = feature
-
-            # Classify feature types
-            if hasattr(feature.featureData, "matedEntities") and isinstance(feature.featureData, MateFeatureData):
-                self.mates[key] = feature.featureData
-            elif hasattr(feature.featureData, "relationType") and isinstance(
-                feature.featureData, MateRelationFeatureData
-            ):
-                self.relations[key] = feature.featureData
-
-    def _build_occurrences(self) -> None:
-        """Build occurrence mappings efficiently using ID resolver."""
-        LOGGER.debug("Building occurrence mappings...")
-
-        for occurrence in self.assembly.rootAssembly.occurrences:
-            if not occurrence.path:
-                continue
-
-            # Use ID resolver for efficient lookup (no nested loops!)
-            path_names = []
-            all_ids_found = True
-
-            for path_id in occurrence.path:
-                if self.id_resolver.has_id(path_id):
-                    path_names.append(path_id)
-                else:
-                    all_ids_found = False
-                    break
-
-            if all_ids_found and path_names:
-                # Create occurrence key using the actual ID path
-                occurrence_key = TypedKey.for_occurrence(path=tuple(occurrence.path), occurrence_id=occurrence.path[-1])
-                self.occurrences[occurrence_key] = occurrence
-
-        LOGGER.debug(f"Built {len(self.occurrences)} occurrence mappings")
-
-
-# ============================================================================
-# RECOMMENDED ENTRY POINT (CAD class with built-in subassembly parsing)
-# ============================================================================
-
-# Use CAD.from_assembly(assembly, client, max_depth) directly
-
-
-def get_instances(
-    assembly: Assembly, max_depth: int = 0
-) -> tuple[dict[TypedKey, Union[PartInstance, AssemblyInstance]], dict[TypedKey, Occurrence], KeyNamer]:
-    """
-    Get instances function using TypedKey system.
-
-    NOTE: This function only builds basic structure without subassembly fetching.
-    For full CAD parsing with subassembly support, use CAD.from_assembly(assembly, client, max_depth).
-
-    Returns:
-        Tuple of (instances, occurrences, key_namer) using TypedKey system
-    """
-    builder = AssemblyStructureBuilder(assembly, max_depth)
-    cad = builder.build()
-    return cad.instances, cad.occurrences, cad.key_namer
 
 
 # ============================================================================

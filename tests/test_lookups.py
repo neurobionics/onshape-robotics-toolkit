@@ -1,4 +1,4 @@
-"""Tests for lookup functionality in CADDocument and registries."""
+"""Tests for lookup functionality in CAD and registries."""
 
 import pytest
 
@@ -13,14 +13,14 @@ from conftest import (
     get_root_part_key,
 )
 
-from onshape_robotics_toolkit.parse import CADDocument
+from onshape_robotics_toolkit.parse import CAD
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
 
 class TestLookups:
     """Tests for looking up instances, occurrences, parts, and subassemblies."""
 
-    def test_lookup_part_instance_by_key(self, cad_doc: CADDocument):
+    def test_lookup_part_instance_by_key(self, cad_doc: CAD):
         """Test looking up a part instance by PathKey."""
         key = get_first_part_key(cad_doc)
         assert key is not None, "No part instances found"
@@ -32,7 +32,7 @@ class TestLookups:
         assert hasattr(part_instance, "partId")
         print(f"\nFound part instance: {part_instance.name}")
 
-    def test_lookup_assembly_instance_by_key(self, cad_doc: CADDocument):
+    def test_lookup_assembly_instance_by_key(self, cad_doc: CAD):
         """Test looking up an assembly instance by PathKey."""
         key = get_first_assembly_key(cad_doc)
         if key is None:
@@ -45,7 +45,7 @@ class TestLookups:
         assert hasattr(assembly_instance, "documentId")
         print(f"\nFound assembly instance: {assembly_instance.name}")
 
-    def test_lookup_occurrence_by_key(self, cad_doc: CADDocument):
+    def test_lookup_occurrence_by_key(self, cad_doc: CAD):
         """Test looking up an occurrence by PathKey."""
         key = get_first_occurrence_key(cad_doc)
         assert key is not None, "No occurrences found"
@@ -57,7 +57,7 @@ class TestLookups:
         assert hasattr(occurrence, "transform")
         print(f"\nFound occurrence with path: {occurrence.path}")
 
-    def test_lookup_part_by_part_id(self, cad_doc: CADDocument):
+    def test_lookup_part_by_part_id(self, cad_doc: CAD):
         """Test looking up a part definition by part ID."""
         part_id = get_first_part_id(cad_doc)
         assert part_id is not None, "No parts found"
@@ -68,7 +68,7 @@ class TestLookups:
         assert part.partId == part_id
         print(f"\nFound part: {part.name if hasattr(part, 'name') else part_id}")
 
-    def test_lookup_transform_by_key(self, cad_doc: CADDocument):
+    def test_lookup_transform_by_key(self, cad_doc: CAD):
         """Test looking up a transform matrix by PathKey."""
         key = get_first_occurrence_key(cad_doc)
         assert key is not None, "No occurrences found"
@@ -79,7 +79,7 @@ class TestLookups:
         assert transform.shape == (4, 4), "Transform should be 4x4 matrix"
         print(f"\nFound transform:\n{transform}")
 
-    def test_lookup_instance_by_name(self, cad_doc: CADDocument):
+    def test_lookup_instance_by_name(self, cad_doc: CAD):
         """Test looking up instances by sanitized name."""
         key = get_first_part_key(cad_doc)
         if key is None:
@@ -96,7 +96,7 @@ class TestLookups:
         assert key in found_keys, "Original key should be in found keys"
         print(f"\nFound {len(found_keys)} instance(s) with name: {sanitized_name}")
 
-    def test_lookup_instance_by_name_and_depth(self, cad_doc: CADDocument):
+    def test_lookup_instance_by_name_and_depth(self, cad_doc: CAD):
         """Test looking up instances by name filtered by depth."""
         key = get_root_part_key(cad_doc)
         if key is None:
@@ -118,7 +118,7 @@ class TestLookups:
 
         print(f"\nFound {len(found_keys)} root-level instance(s) with name: {sanitized_name}")
 
-    def test_lookup_hierarchical_name(self, cad_doc: CADDocument):
+    def test_lookup_hierarchical_name(self, cad_doc: CAD):
         """Test getting hierarchical name for an instance."""
         # Try to get a nested part first
         key = get_nested_part_key(cad_doc)
@@ -141,7 +141,7 @@ class TestLookups:
             assert hierarchical_name != "", "Should have a name"
             print(f"\nRoot-level name: {hierarchical_name}")
 
-    def test_get_all_subassemblies_non_recursive(self, cad_doc_depth_1: CADDocument):
+    def test_get_all_subassemblies_non_recursive(self, cad_doc_depth_1: CAD):
         """Test getting all direct subassemblies (non-recursive)."""
         # Get all subassemblies (non-recursive)
         subassemblies = cad_doc_depth_1.get_all_subassemblies(recursive=False)
@@ -150,7 +150,7 @@ class TestLookups:
         assert subassemblies is cad_doc_depth_1.subassemblies or subassemblies == cad_doc_depth_1.subassemblies
         print(f"\nFound {len(subassemblies)} direct subassemblies")
 
-    def test_get_subassembly_by_key(self, cad_doc_depth_2: CADDocument):
+    def test_get_subassembly_by_key(self, cad_doc_depth_2: CAD):
         """Test getting a specific subassembly by PathKey."""
         # With max depth 2, assemblies at depth 1 should be flexible
         flexible_keys = get_flexible_assembly_keys(cad_doc_depth_2)
@@ -164,7 +164,7 @@ class TestLookups:
         assert subassembly is None, "Subassembly should not be fetched yet"
         print(f"\nSubassembly at key {key.path} not fetched (as expected)")
 
-    def test_distinguish_rigid_vs_flexible_assemblies(self, cad_doc_depth_1: CADDocument):
+    def test_distinguish_rigid_vs_flexible_assemblies(self, cad_doc_depth_1: CAD):
         """Test distinguishing between rigid and flexible assemblies."""
         assembly_keys = list(cad_doc_depth_1.root_assembly.instances.assemblies.keys())
         if not assembly_keys:
@@ -187,7 +187,7 @@ class TestLookupsAllDepths:
     so each test runs 3 times (once for each max_depth).
     """
 
-    def test_part_instance_lookup_all_depths(self, cad_doc_all_depths: CADDocument):
+    def test_part_instance_lookup_all_depths(self, cad_doc_all_depths: CAD):
         """Test part instance lookup works at all depth configurations."""
         key = get_first_part_key(cad_doc_all_depths)
         assert key is not None, "Should always have parts"
@@ -197,7 +197,7 @@ class TestLookupsAllDepths:
         assert hasattr(part_instance, "name")
         assert hasattr(part_instance, "partId")
 
-    def test_occurrence_lookup_all_depths(self, cad_doc_all_depths: CADDocument):
+    def test_occurrence_lookup_all_depths(self, cad_doc_all_depths: CAD):
         """Test occurrence lookup works at all depth configurations."""
         key = get_first_occurrence_key(cad_doc_all_depths)
         assert key is not None, "Should always have occurrences"
@@ -207,7 +207,7 @@ class TestLookupsAllDepths:
         assert hasattr(occurrence, "path")
         assert hasattr(occurrence, "transform")
 
-    def test_transform_lookup_all_depths(self, cad_doc_all_depths: CADDocument):
+    def test_transform_lookup_all_depths(self, cad_doc_all_depths: CAD):
         """Test transform lookup works at all depth configurations."""
         key = get_first_occurrence_key(cad_doc_all_depths)
         assert key is not None
@@ -216,7 +216,7 @@ class TestLookupsAllDepths:
         assert transform is not None
         assert transform.shape == (4, 4)
 
-    def test_rigid_flexible_classification_all_depths(self, cad_doc_all_depths: CADDocument):
+    def test_rigid_flexible_classification_all_depths(self, cad_doc_all_depths: CAD):
         """Test rigid/flexible classification at all depth configurations."""
         assembly_keys = list(cad_doc_all_depths.root_assembly.instances.assemblies.keys())
         if not assembly_keys:
@@ -236,7 +236,7 @@ class TestLookupsAllDepths:
                 is_flexible == expected_flexible
             ), f"Assembly at depth {key.depth} with max_depth={cad_doc_all_depths.max_depth}"
 
-    def test_name_lookup_all_depths(self, cad_doc_all_depths: CADDocument):
+    def test_name_lookup_all_depths(self, cad_doc_all_depths: CAD):
         """Test name-based lookup works at all depth configurations."""
         key = get_first_part_key(cad_doc_all_depths)
         if key is None:

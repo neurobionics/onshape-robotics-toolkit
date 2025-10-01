@@ -1,8 +1,9 @@
 """Streamlined transform utilities for Onshape assemblies.
 
-Provides two core functions:
+Demonstrates:
 1. plot_transform() - Visualize a 4x4 transform matrix
-2. get_occurrence_transform() - Get occurrence transform for a part in an assembly
+2. get_occurrence_transform_by_name() - Get occurrence transform by part name (supports raw or sanitized names)
+3. Using the new CAD and PathKey system for assembly navigation
 """
 
 import os
@@ -14,8 +15,9 @@ from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models import Assembly
 from onshape_robotics_toolkit.models.document import Document
-from onshape_robotics_toolkit.parse import CAD
+from onshape_robotics_toolkit.parse import CAD, PathKey
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
+from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
 DEPTH = 2
 NAME = f"transforms_{DEPTH}"
@@ -94,34 +96,47 @@ def plot_transform(transform: np.ndarray | list[float], label: str = "", scale: 
     plt.show()
 
 
-def get_occurrence_transform(
-    cad: CAD, part_name: str, assembly_name: str | None = None, sanitize: bool = False
-) -> np.ndarray | None:
+def get_occurrence_transform_by_name(
+    cad: CAD, part_name: str, depth: int | None = None
+) -> tuple[PathKey, np.ndarray] | None:
     """
-    Get the occurrence transform for a part (O(1) lookup using CAD's reverse cache).
+    Get the occurrence transform for a part by name.
 
     Args:
-        cad: CAD object containing assembly data
-        part_name: Name of the part. If sanitize=False, must be sanitized (e.g., "Part_1_1").
-                   If sanitize=True, can be raw name (e.g., "Part 1 <1>").
-        assembly_name: Name of assembly context (None for root assembly)
-        sanitize: If True, sanitizes the name before lookup
+        cad: CAD containing assembly data
+        part_name: Name of the part (can be raw like "Part 14 <1>" or sanitized like "Part_14_1")
+        depth: Optional depth filter (0 = root level, None = any depth)
 
     Returns:
-        4x4 numpy array transform, or None if not found
+        Tuple of (PathKey, 4x4 transform matrix) if found, None otherwise
 
     Examples:
-        # Get transform using sanitized name
-        tf = get_occurrence_transform(cad, "Part_1_1")
+        # Get transform using raw name (auto-sanitized)
+        result = get_occurrence_transform_by_name(cad, "Part 14 <1>")
+        if result:
+            key, transform = result
+            print(f"Found at {key}: {transform}")
 
-        # Get transform using raw name (auto-sanitize)
-        tf = get_occurrence_transform(cad, "Part 1 <1>", sanitize=True)
-
-        # Get transform from specific subassembly
-        tf = get_occurrence_transform(cad, "Part_1_1", "Assembly_2_1")
+        # Get transform using sanitized name at root level only
+        result = get_occurrence_transform_by_name(cad, "Part_14_1", depth=0)
     """
-    occurrence = cad.lookup_occurrence(part_name, assembly_name=assembly_name, sanitize=sanitize)
-    return np.array(occurrence.transform).reshape(4, 4) if occurrence else None
+    # Sanitize the name
+    sanitized_name = get_sanitized_name(part_name)
+
+    # Look up by name in the instance registry
+    keys = cad.root_assembly.instances.lookup_by_name(sanitized_name, depth=depth)
+
+    if not keys:
+        return None
+
+    # Try to get transform for the first matching key
+    # (in case of duplicates, you might want to handle this differently)
+    for key in keys:
+        transform = cad.get_transform(key)
+        if transform is not None:
+            return (key, transform)
+
+    return None
 
 
 if __name__ == "__main__":
@@ -149,3 +164,10 @@ if __name__ == "__main__":
         # Save to cache
         save_model_as_json(assembly, f"{NAME}.json")
         LOGGER.info(f"Assembly cached to {NAME}.json")
+
+    LOGGER.info("Creating CAD from assembly...")
+    cad = CAD.from_assembly(assembly, max_depth=DEPTH)
+    cad.show()
+
+    result = get_occurrence_transform_by_name(cad, "Part 10 <1>")
+    print(result[-1])

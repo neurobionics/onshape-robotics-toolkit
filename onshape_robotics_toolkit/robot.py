@@ -44,11 +44,13 @@ from onshape_robotics_toolkit.models.mjcf import Actuator, Encoder, ForceSensor,
 from onshape_robotics_toolkit.parse import (
     MATE_JOINER,
     RELATION_PARENT,
-    get_instances,
     get_mates_and_relations,
     get_parts,
     get_parts_without_mass_properties,
     get_subassemblies,
+)
+from onshape_robotics_toolkit.parse import (
+    get_instances_legacy as get_instances,
 )
 from onshape_robotics_toolkit.urdf import get_joint_name, get_robot_joint, get_robot_link, get_topological_mates
 from onshape_robotics_toolkit.utilities.helpers import format_number
@@ -887,7 +889,7 @@ class Robot:
 
         instances, instance_proxy_map, occurrences, id_to_name_map = get_instances(
             assembly=assembly, max_depth=max_depth
-        )  # type: ignore[misc]
+        )
         subassemblies, rigid_subassemblies = get_subassemblies(assembly=assembly, client=client, instances=instances)
 
         # Create parts without mass properties first (for mates processing)
