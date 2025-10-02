@@ -905,6 +905,192 @@ if key.depth > max_depth:
 
 The `isRigid` flag is the source of truth after assembly population is complete.
 
+## Mates Processing with PathKeys
+
+The `CAD.process_mates_and_relations()` method implements a clean, PathKey-based approach to processing mates and relations that replaces the legacy string-based system.
+
+### Key Objectives
+
+The mates processing system achieves several critical objectives:
+
+1. **Filter internal mates**: Remove mates completely within rigid subassemblies
+2. **Remap PathKeys**: Update mate keys from buried parts to rigid subassembly roots
+3. **Transform coordinates**: Apply hierarchical transforms to mate coordinate systems
+4. **Expand patterns**: Create mates for all pattern instances
+5. **Ensure uniqueness**: Make all mate names unique for valid URDF
+
+### Processing Pipeline
+
+The processing follows a clear sequence:
+
+```python
+cad = CAD.from_assembly(assembly, max_depth=1)
+cad.process_mates_and_relations()  # Process all mates
+```
+
+**Step 1: Filter and Remap Mates**
+
+- Identifies rigid assembly roots using PathKey ancestry
+- Removes mates where both entities are within the same rigid assembly
+- Remaps mate dictionary keys from buried parts to rigid roots
+- Transforms mate coordinate systems to rigid assembly coordinates
+
+**Step 2: Expand Patterns**
+
+- Processes only flexible assemblies (depth ≤ max_depth)
+- Creates new mates for each pattern instance
+- Calculates proper transforms for pattern-relative coordinates
+
+**Step 3: Ensure Name Uniqueness**
+
+- Deduplicates mate objects by ID (handles shared mates across registries)
+- Applies sequential renaming with numeric suffixes
+- Guarantees unique names for URDF compliance
+
+### Rigid Subassembly Mate Remapping
+
+When a mate connects to a part buried within a rigid subassembly, the system automatically remaps it:
+
+**Before Processing:**
+
+```python
+# Mate connects to part at depth=3 (inside rigid assembly at depth=2)
+parent_key = PathKey(('rigid_sub', 'level1', 'buried_part'))  # depth=3
+child_key = PathKey(('mobile_part',))  # depth=1
+```
+
+**After Processing:**
+
+```python
+# Mate remapped to rigid assembly root
+parent_key = PathKey(('rigid_sub', 'level1'))  # depth=2 (rigid root)
+child_key = PathKey(('mobile_part',))  # depth=1
+
+# Transform applied: matedCS updated to rigid assembly coordinates
+mate.matedEntities[PARENT].matedCS = hierarchical_tf @ original_matedCS
+mate.matedEntities[PARENT].matedOccurrence = ['rigid_sub', 'level1']
+```
+
+### Hierarchical Transform Calculation
+
+The hierarchical transform chain is built using PathKey structure:
+
+```python
+def _build_hierarchical_transform(part_key, rigid_root_key, occurrence_registry):
+    """
+    Build transform from rigid assembly root to buried part.
+
+    Example:
+        rigid_root_key = PathKey(('rigid_sub', 'level1'))      # depth=2
+        part_key = PathKey(('rigid_sub', 'level1', 'level2', 'part'))  # depth=4
+
+    Builds: T_level2 @ T_part (relative to rigid root)
+    """
+    parent_tf = np.eye(4)
+    rigid_depth = len(rigid_root_key.path)
+
+    # Multiply transforms from rigid root to part
+    for i in range(rigid_depth, len(part_key.path)):
+        level_key = PathKey(part_key.path[:i+1])
+        level_tf = occurrence_registry.get_transform(level_key)
+        if level_tf is not None:
+            parent_tf = parent_tf @ level_tf
+
+    return np.matrix(parent_tf) if not np.allclose(parent_tf, np.eye(4)) else None
+```
+
+### Pattern Expansion with PathKeys
+
+Pattern expansion uses clean PathKey lookups:
+
+```python
+# Find pattern instances by leaf_id
+for pattern_instance_id in pattern.seedToPatternInstances[seed_leaf_id]:
+    # Find full PathKey for pattern instance
+    pattern_key = _find_instance_key_by_leaf_id(pattern_instance_id, instances)
+
+    # Get transforms using occurrence registry
+    seed_tf = occurrence_registry.get_transform(seed_key)
+    pattern_tf = occurrence_registry.get_transform(pattern_key)
+
+    # Calculate relative transform
+    seed_to_pattern_tf = pattern_tf @ np.linalg.inv(seed_tf)
+
+    # Transform mate coordinates
+    new_mate_tf = seed_to_pattern_tf @ (other_tf @ original_mate_cs)
+```
+
+### Internal Mate Filtering
+
+Mates completely within rigid assemblies are automatically removed:
+
+```python
+# Case: Both entities within SAME rigid subassembly
+parent_rigid_root = PathKey(('rigid_sub',))
+child_rigid_root = PathKey(('rigid_sub',))  # Same root
+
+if parent_rigid_root == child_rigid_root:
+    # Remove mate - it's internal to the rigid assembly
+    # The rigid assembly will be downloaded as a single STL
+    del mate_registry.mates[(parent_key, child_key)]
+```
+
+### Advantages Over Legacy System
+
+**Legacy String-Based System:**
+
+- Complex string concatenation with UUID-based joiners
+- Proxy mapping for disconnected graph resolution
+- Manual string manipulation for hierarchical paths
+- Difficult to debug and maintain
+
+**New PathKey-Based System:**
+
+- Clean tuple-based PathKey lookups
+- No string manipulation - direct dictionary access
+- Hierarchical transforms calculated from PathKey.path
+- Type-safe with proper PathKey validation
+- Simpler code, easier to understand
+
+### Example: Complete Processing Flow
+
+```python
+# Create CAD with max_depth=1
+cad = CAD.from_assembly(assembly, max_depth=1)
+
+# Before processing
+print(cad.root_assembly.mates.mates)
+# {
+#   (PathKey(('part_a',)), PathKey(('rigid', 'sub', 'buried_part'))): mate1,
+#   (PathKey(('rigid', 'sub', 'part1')), PathKey(('rigid', 'sub', 'part2'))): mate2
+# }
+
+# Process mates
+cad.process_mates_and_relations()
+
+# After processing
+print(cad.root_assembly.mates.mates)
+# {
+#   (PathKey(('part_a',)), PathKey(('rigid', 'sub'))): mate1,  # Remapped to rigid root
+#   # mate2 removed - internal to rigid assembly
+# }
+
+# Mate coordinates updated
+assert mate1.matedEntities[CHILD].matedCS == transformed_cs
+assert mate1.matedEntities[CHILD].matedOccurrence == ['rigid', 'sub']
+```
+
+### Integration with URDF Generation
+
+The processed mates are ready for URDF generation:
+
+1. **PathKeys match robot graph nodes**: Rigid assemblies appear as single nodes
+2. **Transforms are correct**: Coordinates in rigid assembly root frame
+3. **Names are unique**: All mate names suitable for URDF joint names
+4. **Internal mates excluded**: No joints within rigid assemblies
+
+This enables the robot generation pipeline to create accurate URDFs directly from the processed mate registry without additional string manipulation or coordinate transformations.
+
 ## Integration Notes
 
 ### Fetching Flexible Subassemblies

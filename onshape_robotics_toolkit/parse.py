@@ -1609,6 +1609,463 @@ class CAD:
             f"fetched_subassemblies={len(self.fetched_subassemblies)})"
         )
 
+    def process_mates_and_relations(self) -> None:
+        """
+        Process all mates and relations in this CAD assembly.
+
+        This method:
+        1. Filters out mates that are completely within rigid subassemblies (beyond max_depth)
+        2. Updates PathKeys and transforms for mates involving parts in rigid subassemblies
+        3. Expands pattern instances to create mates for all pattern copies
+        4. Ensures all mate names are unique for valid URDF generation
+
+        The processing is done using PathKey-based lookups which eliminates the need
+        for complex string concatenation and proxy mapping used in the legacy system.
+
+        Important: Mates are processed in place, updating both:
+        - The PathKeys in the mate registry (to point to rigid subassembly roots)
+        - The MateFeatureData transforms (matedCS) to be in rigid subassembly coordinates
+        """
+        # Step 1: Filter and remap mates in root assembly
+        self._filter_and_remap_mates(
+            self.root_assembly.mates,
+            self.root_assembly.instances,
+            self.root_assembly.occurrences,
+        )
+
+        # Step 2: Filter and remap mates in each subassembly (only flexible ones)
+        for sub_key, sub_assembly_data in self.sub_assemblies.items():
+            # Only process flexible subassemblies (depth <= max_depth)
+            if sub_key.depth <= self.max_depth:
+                LOGGER.debug(f"Processing mates for flexible subassembly at {sub_key}")
+                self._filter_and_remap_mates(
+                    sub_assembly_data.mates,
+                    sub_assembly_data.instances,
+                    self.root_assembly.occurrences,  # Use root occurrences for transforms
+                )
+
+        # Step 3: Expand patterns for all assemblies
+        self._expand_all_patterns()
+
+        # Step 4: Ensure all mate names are unique across all assemblies
+        self._ensure_unique_mate_names()
+
+    def _filter_and_remap_mates(
+        self,
+        mate_registry: MateRegistry,
+        instance_registry: InstanceRegistry,
+        occurrence_registry: OccurrenceRegistry,
+    ) -> None:
+        """
+        Filter and remap mates based on rigid subassembly boundaries.
+
+        This method:
+        1. Removes mates that are completely within rigid subassemblies (both entities buried)
+        2. Remaps mate PathKeys to rigid subassembly roots when entities are buried
+        3. Transforms mate coordinates to rigid subassembly coordinate systems
+
+        Args:
+            mate_registry: Mate registry to process (modified in place)
+            instance_registry: Instance registry for rigid assembly detection
+            occurrence_registry: Occurrence registry for transforms
+        """
+        # Identify all rigid assembly keys
+        rigid_assembly_keys = {key for key in instance_registry.assemblies if instance_registry.is_rigid_assembly(key)}
+
+        if not rigid_assembly_keys:
+            LOGGER.debug("No rigid assemblies found, skipping mate filtering")
+            return
+
+        # Process mates: filter and remap
+        mates_to_remove: list[tuple[PathKey, PathKey]] = []
+        mates_to_add: dict[tuple[PathKey, PathKey], MateFeatureData] = {}
+
+        for (parent_key, child_key), mate_data in list(mate_registry.mates.items()):
+            # Find rigid assembly roots for parent and child
+            parent_rigid_root = self._find_rigid_assembly_root(parent_key, rigid_assembly_keys)
+            child_rigid_root = self._find_rigid_assembly_root(child_key, rigid_assembly_keys)
+
+            # Case 1: Both entities are within the SAME rigid subassembly
+            # These mates are internal to the rigid assembly and should be removed
+            if parent_rigid_root and child_rigid_root and parent_rigid_root == child_rigid_root:
+                LOGGER.debug(
+                    f"Removing mate {mate_data.name}: both entities within rigid subassembly {parent_rigid_root}"
+                )
+                mates_to_remove.append((parent_key, child_key))
+                continue
+
+            # Case 2: One or both entities need to be remapped to rigid root
+            new_parent_key = parent_rigid_root if parent_rigid_root and parent_key != parent_rigid_root else parent_key
+            new_child_key = child_rigid_root if child_rigid_root and child_key != child_rigid_root else child_key
+
+            # If keys changed, we need to remap the mate
+            if new_parent_key != parent_key or new_child_key != child_key:
+                # Transform mate coordinates to rigid subassembly coordinate system
+                self._transform_mate_to_rigid_coords(
+                    mate_data, parent_key, new_parent_key, child_key, new_child_key, occurrence_registry
+                )
+
+                # Remove old mate and add with new keys
+                mates_to_remove.append((parent_key, child_key))
+                mates_to_add[(new_parent_key, new_child_key)] = mate_data
+
+                LOGGER.debug(
+                    f"Remapped mate {mate_data.name}: "
+                    f"({parent_key}, {child_key}) -> ({new_parent_key}, {new_child_key})"
+                )
+
+        # Apply changes to registry
+        for key in mates_to_remove:
+            if key in mate_registry.mates:
+                del mate_registry.mates[key]
+
+        mate_registry.mates.update(mates_to_add)
+
+        LOGGER.debug(f"Filtered {len(mates_to_remove) - len(mates_to_add)} mates, remapped {len(mates_to_add)} mates")
+
+    def _transform_mate_to_rigid_coords(
+        self,
+        mate_data: MateFeatureData,
+        old_parent_key: PathKey,
+        new_parent_key: PathKey,
+        old_child_key: PathKey,
+        new_child_key: PathKey,
+        occurrence_registry: OccurrenceRegistry,
+    ) -> None:
+        """
+        Transform mate coordinate systems when entities are remapped to rigid subassembly roots.
+
+        Args:
+            mate_data: Mate feature data to modify
+            old_parent_key: Original parent PathKey (possibly buried in rigid assembly)
+            new_parent_key: New parent PathKey (rigid assembly root)
+            old_child_key: Original child PathKey (possibly buried in rigid assembly)
+            new_child_key: New child PathKey (rigid assembly root)
+            occurrence_registry: Occurrence registry for transforms
+        """
+        # Transform parent if needed (PARENT is at index 1)
+        if old_parent_key != new_parent_key:
+            # Build transform from rigid root to buried part
+            hierarchical_tf = self._build_hierarchical_transform(old_parent_key, new_parent_key, occurrence_registry)
+            if hierarchical_tf is not None:
+                # Get current mate CS
+                current_mate_cs = mate_data.matedEntities[PARENT].matedCS
+
+                # Transform: new_mate_tf = hierarchical_tf @ current_mate_tf
+                new_mate_tf = hierarchical_tf @ current_mate_cs.part_to_mate_tf
+
+                # Update mate CS
+                mate_data.matedEntities[PARENT].matedCS = MatedCS.from_tf(new_mate_tf)
+
+            # Update occurrence path to reflect new key (use full path, not just leaf)
+            mate_data.matedEntities[PARENT].matedOccurrence = list(new_parent_key.path)
+
+        # Transform child if needed (CHILD is at index 0)
+        if old_child_key != new_child_key:
+            # Build transform from rigid root to buried part
+            hierarchical_tf = self._build_hierarchical_transform(old_child_key, new_child_key, occurrence_registry)
+            if hierarchical_tf is not None:
+                # Get current mate CS
+                current_mate_cs = mate_data.matedEntities[CHILD].matedCS
+
+                # Transform: new_mate_tf = hierarchical_tf @ current_mate_tf
+                new_mate_tf = hierarchical_tf @ current_mate_cs.part_to_mate_tf
+
+                # Update mate CS
+                mate_data.matedEntities[CHILD].matedCS = MatedCS.from_tf(new_mate_tf)
+
+            # Update occurrence path to reflect new key (use full path, not just leaf)
+            mate_data.matedEntities[CHILD].matedOccurrence = list(new_child_key.path)
+
+    def _expand_all_patterns(self) -> None:
+        """Expand patterns for root assembly and all flexible subassemblies."""
+        # Expand root assembly patterns
+        self._expand_pattern_mates(
+            self.root_assembly.mates,
+            self.root_assembly.patterns,
+            self.root_assembly.instances,
+            self.root_assembly.occurrences,
+        )
+
+        # Expand subassembly patterns (only flexible ones)
+        for sub_key, sub_assembly_data in self.sub_assemblies.items():
+            if sub_key.depth <= self.max_depth:
+                self._expand_pattern_mates(
+                    sub_assembly_data.mates,
+                    sub_assembly_data.patterns,
+                    sub_assembly_data.instances,
+                    self.root_assembly.occurrences,
+                )
+
+    def _expand_pattern_mates(
+        self,
+        mate_registry: MateRegistry,
+        pattern_registry: PatternRegistry,
+        instance_registry: InstanceRegistry,
+        occurrence_registry: OccurrenceRegistry,
+    ) -> None:
+        """
+        Expand mates for pattern instances.
+
+        For each mate that connects to a patterned entity, creates additional mates
+        for all pattern instances with properly calculated transforms.
+
+        Args:
+            mate_registry: Mate registry to update
+            pattern_registry: Pattern registry with seed-to-pattern mappings
+            instance_registry: Instance registry for lookups
+            occurrence_registry: Occurrence registry for transforms
+        """
+        # Collect new mates to add (can't modify dict during iteration)
+        new_mates: dict[tuple[PathKey, PathKey], MateFeatureData] = {}
+
+        # Iterate over existing mates
+        for (parent_key, child_key), mate_data in list(mate_registry.mates.items()):
+            # Check if either parent or child is a seed in a pattern
+            parent_leaf_id = parent_key.leaf_id
+            child_leaf_id = child_key.leaf_id
+
+            parent_pattern = pattern_registry.get_pattern_for_seed(parent_leaf_id)
+            child_pattern = pattern_registry.get_pattern_for_seed(child_leaf_id)
+
+            # Skip if neither is in a pattern
+            if not parent_pattern and not child_pattern:
+                continue
+
+            # Skip if both are in patterns (unsupported scenario)
+            if parent_pattern and child_pattern:
+                LOGGER.warning(
+                    f"Mate {mate_data.name} has both parent and child in patterns. "
+                    f"This scenario is not supported. Skipping pattern expansion."
+                )
+                continue
+
+            # Determine which entity is patterned
+            if child_pattern:
+                self._expand_mate_for_pattern(
+                    mate_data, child_key, parent_key, child_pattern, CHILD, occurrence_registry, new_mates
+                )
+            elif parent_pattern:
+                self._expand_mate_for_pattern(
+                    mate_data, parent_key, child_key, parent_pattern, PARENT, occurrence_registry, new_mates
+                )
+
+        # Add all new mates to the registry
+        mate_registry.mates.update(new_mates)
+        LOGGER.debug(f"Expanded {len(new_mates)} pattern mates")
+
+    def _expand_mate_for_pattern(
+        self,
+        seed_mate: MateFeatureData,
+        pattern_entity_key: PathKey,
+        other_entity_key: PathKey,
+        pattern: Pattern,
+        pattern_entity_index: int,
+        occurrence_registry: OccurrenceRegistry,
+        output_mates: dict[tuple[PathKey, PathKey], MateFeatureData],
+    ) -> None:
+        """
+        Expand a single mate for all instances in a pattern.
+
+        Args:
+            seed_mate: Original mate feature data
+            pattern_entity_key: PathKey of the patterned entity (seed)
+            other_entity_key: PathKey of the non-patterned entity
+            pattern: Pattern object containing instance IDs
+            pattern_entity_index: Index of patterned entity (CHILD or PARENT)
+            occurrence_registry: Occurrence registry for transforms
+            output_mates: Dictionary to store new mates
+        """
+        import copy
+
+        # Get pattern instances for this seed
+        seed_leaf_id = pattern_entity_key.leaf_id
+        pattern_instance_ids = pattern.seedToPatternInstances.get(seed_leaf_id, [])
+
+        if not pattern_instance_ids:
+            return
+
+        # Get transforms
+        seed_tf = occurrence_registry.get_transform(pattern_entity_key)
+        other_tf = occurrence_registry.get_transform(other_entity_key)
+
+        if seed_tf is None or other_tf is None:
+            LOGGER.warning(
+                f"Missing occurrence for pattern expansion: seed={pattern_entity_key}, other={other_entity_key}"
+            )
+            return
+
+        # Get original mate coordinate system
+        original_mate_cs = seed_mate.matedEntities[pattern_entity_index].matedCS
+
+        # Create a mate for each pattern instance
+        for pattern_instance_id in pattern_instance_ids:
+            # Find the PathKey for this pattern instance
+            # Pattern instance IDs are leaf IDs, need to find full path
+            pattern_instance_key = self._find_instance_key_by_leaf_id(pattern_instance_id, self.root_assembly.instances)
+
+            if not pattern_instance_key:
+                LOGGER.warning(f"Could not find PathKey for pattern instance {pattern_instance_id}")
+                continue
+
+            # Get pattern instance transform
+            pattern_instance_tf = occurrence_registry.get_transform(pattern_instance_key)
+            if pattern_instance_tf is None:
+                LOGGER.warning(f"No occurrence found for pattern instance {pattern_instance_key}")
+                continue
+
+            # Calculate relative transform: seed → pattern_instance
+            seed_to_pattern_tf = pattern_instance_tf @ np.linalg.inv(seed_tf)
+
+            # Clean up floating point errors
+            tolerance = 1e-10
+            seed_to_pattern_tf[np.abs(seed_to_pattern_tf) < tolerance] = 0.0
+
+            # Transform mate coordinates: local → world → pattern_relative → local
+            other_mate_world_tf = other_tf @ original_mate_cs.part_to_mate_tf
+            pattern_transformed_world_tf = seed_to_pattern_tf @ other_mate_world_tf
+            final_mate_tf = np.linalg.inv(other_tf) @ pattern_transformed_world_tf
+
+            # Clean up final transform
+            final_mate_tf[np.abs(final_mate_tf) < tolerance] = 0.0
+
+            # Create new mate feature data
+            new_mate = copy.deepcopy(seed_mate)
+
+            # Update the patterned entity's mate CS
+            new_mate.matedEntities[pattern_entity_index].matedCS = MatedCS.from_tf(final_mate_tf)
+            new_mate.matedEntities[pattern_entity_index].matedOccurrence = [pattern_instance_id]
+
+            # Create mate key with correct parent/child order
+            if pattern_entity_index == CHILD:
+                new_mate_key = (other_entity_key, pattern_instance_key)
+            else:  # pattern_entity_index == PARENT
+                new_mate_key = (pattern_instance_key, other_entity_key)
+
+            output_mates[new_mate_key] = new_mate
+
+    def _find_instance_key_by_leaf_id(self, leaf_id: str, instance_registry: InstanceRegistry) -> Optional[PathKey]:
+        """Find PathKey for an instance by its leaf ID."""
+        # Check parts
+        for key in instance_registry.parts:
+            if key.leaf_id == leaf_id:
+                return key
+        # Check assemblies
+        for key in instance_registry.assemblies:
+            if key.leaf_id == leaf_id:
+                return key
+        return None
+
+    def _find_rigid_assembly_root(self, key: PathKey, rigid_assembly_keys: set[PathKey]) -> Optional[PathKey]:
+        """
+        Find the rigid assembly root for a given key.
+
+        Checks if any ancestor of the key is a rigid assembly.
+
+        Args:
+            key: PathKey to check
+            rigid_assembly_keys: Set of all rigid assembly PathKeys
+
+        Returns:
+            PathKey of the rigid assembly root if found, None otherwise
+        """
+        # Check each ancestor path
+        for i in range(1, len(key.path)):
+            ancestor_key = PathKey(key.path[:i])
+            if ancestor_key in rigid_assembly_keys:
+                return ancestor_key
+        return None
+
+    def _build_hierarchical_transform(
+        self,
+        part_key: PathKey,
+        rigid_root_key: PathKey,
+        occurrence_registry: OccurrenceRegistry,
+    ) -> Optional[np.matrix]:
+        """
+        Build hierarchical transform from rigid assembly root to part.
+
+        Args:
+            part_key: PathKey of the part
+            rigid_root_key: PathKey of the rigid assembly root
+            occurrence_registry: Occurrence registry for transforms
+
+        Returns:
+            4x4 transform matrix (np.matrix) or None if transforms not found
+        """
+        # Start with identity
+        parent_tf = np.eye(4)
+
+        # Build path from rigid root to part
+        # rigid_root_key.path is like ('rigid_sub',)
+        # part_key.path is like ('rigid_sub', 'level1', 'level2', 'part')
+        # We need to multiply transforms for 'level1', 'level2' (exclude rigid root and final part)
+
+        rigid_depth = len(rigid_root_key.path)
+
+        # Iterate through intermediate levels (excluding the part itself)
+        for i in range(rigid_depth, len(part_key.path)):
+            level_key = PathKey(part_key.path[: i + 1])
+            level_tf = occurrence_registry.get_transform(level_key)
+
+            if level_tf is not None:
+                parent_tf = parent_tf @ level_tf
+
+        # Convert to matrix and return if not identity
+        if not np.allclose(parent_tf, np.eye(4)):
+            return np.matrix(parent_tf)
+        return None
+
+    def _ensure_unique_mate_names(self) -> None:
+        """
+        Ensure all mate names are unique across root and subassemblies.
+
+        Pattern expansion can create duplicate mate names, which makes URDF invalid.
+        This function resolves naming conflicts by renaming duplicates.
+        """
+        # Collect all unique mate objects (deduplicate by object ID)
+        # Some mates may be shared across assemblies, so we need to dedupe
+        seen_ids: set[int] = set()
+        unique_mates: list[MateFeatureData] = []
+
+        # Add root assembly mates
+        for mate_data in self.root_assembly.mates.mates.values():
+            mate_id = id(mate_data)
+            if mate_id not in seen_ids:
+                unique_mates.append(mate_data)
+                seen_ids.add(mate_id)
+
+        # Add subassembly mates
+        for sub_data in self.sub_assemblies.values():
+            for mate_data in sub_data.mates.mates.values():
+                mate_id = id(mate_data)
+                if mate_id not in seen_ids:
+                    unique_mates.append(mate_data)
+                    seen_ids.add(mate_id)
+
+        # Now ensure all unique mate names are unique
+        used_names: set[str] = set()
+        renamed_count = 0
+
+        for mate in unique_mates:
+            if mate.name in used_names:
+                # This name is already used, find a unique variant
+                base_name = mate.name
+                counter = 2
+                new_name = f"{base_name}_{counter}"
+
+                while new_name in used_names:
+                    counter += 1
+                    new_name = f"{base_name}_{counter}"
+
+                mate.name = new_name
+                renamed_count += 1
+
+            used_names.add(mate.name)
+
+        if renamed_count > 0:
+            LOGGER.debug(f"Renamed {renamed_count} mates to ensure uniqueness")
+
 
 # ============================================================================
 # LEGACY FUNCTIONS (string-based keys, deprecated)

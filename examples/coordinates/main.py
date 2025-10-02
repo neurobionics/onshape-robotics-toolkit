@@ -241,4 +241,5 @@ if __name__ == "__main__":
 
     LOGGER.info("Creating CAD from assembly...")
     cad = CAD.from_assembly(assembly, max_depth=DEPTH)
-    cad.show()
+    # cad.show()
+    cad.process_mates_and_relations()

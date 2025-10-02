@@ -1,7 +1,6 @@
 """Tests for subassembly data structure and rigid assembly handling."""
 
 import pytest
-from conftest import get_first_assembly_key
 
 from onshape_robotics_toolkit.models.assembly import AssemblyInstance
 from onshape_robotics_toolkit.parse import CAD, AssemblyData, PathKey
@@ -66,7 +65,8 @@ class TestSubassemblyDataStructure:
 
         assert (
             expected_min <= len(all_mates) <= expected_max
-        ), f"get_all_mates() should aggregate mates (got {len(all_mates)}, expected between {expected_min} and {expected_max})"
+        ), f"get_all_mates() should aggregate mates (got {len(all_mates)}, \
+            expected between {expected_min} and {expected_max})"
         print(f"\nTotal mates: {len(all_mates)} (root: {root_mates}, subassemblies: {subassembly_mates})")
 
     def test_get_subassembly_data(self, cad_doc_depth_1: CAD):
@@ -139,9 +139,7 @@ class TestRigidAssemblyHandling:
 
             # The method should return the same value as the flag
             is_rigid = cad_doc_depth_1.root_assembly.instances.is_rigid_assembly(key)
-            assert (
-                is_rigid == instance.isRigid
-            ), f"is_rigid_assembly() should match instance.isRigid flag for {key}"
+            assert is_rigid == instance.isRigid, f"is_rigid_assembly() should match instance.isRigid flag for {key}"
 
     def test_rigid_count_property(self, cad_doc_depth_1: CAD):
         """Test that rigid_count property returns correct count."""
