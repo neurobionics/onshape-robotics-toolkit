@@ -1,10 +1,10 @@
-# KinematicTree Migration Guide
+# KinematicGraph Migration Guide
 
-This guide explains the new `KinematicTree` class and how it replaces the old `create_graph()` function.
+This guide explains the new `KinematicGraph` class and how it replaces the old `create_graph()` function.
 
 ## Overview
 
-The new `KinematicTree` class uses the PathKey-based CAD system for improved type safety, performance, and maintainability.
+The new `KinematicGraph` class uses the PathKey-based CAD system for improved type safety, performance, and maintainability.
 
 ### Old System (String-Based)
 
@@ -33,8 +33,8 @@ graph, root_node = create_graph(
 # New approach with PathKey system
 cad = CAD.from_assembly(assembly, max_depth=1)
 
-# Create kinematic tree with PathKey nodes
-tree = KinematicTree(cad, use_user_defined_root=True)
+# Create kinematic graph with PathKey nodes
+tree = KinematicGraph(cad, use_user_defined_root=True)
 
 # Node is a PathKey: PathKey(("M0cLO6yVimMv6KhRM", "MZHBlAU4IxmX6u6A0"))
 ```
@@ -71,7 +71,7 @@ graph, root_node = create_graph(occurrences, instances, parts, mates)
 
 ```python
 cad = CAD.from_assembly(assembly, max_depth=1)
-tree = KinematicTree(cad, use_user_defined_root=True)
+tree = KinematicGraph(cad, use_user_defined_root=True)
 ```
 
 ### 3. Automatic Mate Collection
@@ -86,7 +86,7 @@ mates = get_mates(assembly)  # Only root mates?
 **New:** Automatic aggregation from root and subassemblies
 
 ```python
-# KinematicTree automatically collects mates from:
+# KinematicGraph automatically collects mates from:
 # - cad.root_assembly.mates
 # - All cad.sub_assemblies[key].mates
 all_mates = tree._collect_all_mates()
@@ -127,7 +127,7 @@ graph, root_node = create_graph(
 **New:**
 
 ```python
-tree = KinematicTree(
+tree = KinematicGraph(
     cad=cad,
     use_user_defined_root=True
 )
@@ -211,10 +211,10 @@ if tree.topological_order:
 
 ## Migration Checklist
 
-When migrating from `create_graph()` to `KinematicTree`:
+When migrating from `create_graph()` to `KinematicGraph`:
 
 - [ ] Replace separate data fetching with `CAD.from_assembly()`
-- [ ] Change `create_graph()` call to `KinematicTree()` constructor
+- [ ] Change `create_graph()` call to `KinematicGraph()` constructor
 - [ ] Update node handling from strings to PathKeys
 - [ ] Use `tree.graph` instead of `graph` variable
 - [ ] Use `tree.root_node` instead of `root_node` variable
@@ -264,7 +264,7 @@ for child in graph.successors(root_node):
 
 ```python
 from onshape_robotics_toolkit.parse import CAD
-from onshape_robotics_toolkit.graph import KinematicTree
+from onshape_robotics_toolkit.graph import KinematicGraph
 
 # Fetch assembly
 assembly = client.get_assembly(doc_id, wvm_type, wvm_id, element_id)
@@ -272,8 +272,8 @@ assembly = client.get_assembly(doc_id, wvm_type, wvm_id, element_id)
 # Create CAD document
 cad = CAD.from_assembly(assembly, max_depth=1)
 
-# Create kinematic tree
-tree = KinematicTree(cad, use_user_defined_root=True)
+# Create kinematic graph
+tree = KinematicGraph(cad, use_user_defined_root=True)
 
 # Navigate tree
 print(f"Root: {tree.root_node}")
@@ -297,12 +297,12 @@ print(f"Root part name: {metadata.get('name')}")
 
 ## Backward Compatibility
 
-The old `create_graph()` function remains available for backward compatibility but is deprecated. New code should use `KinematicTree`.
+The old `create_graph()` function remains available for backward compatibility but is deprecated. New code should use `KinematicGraph`.
 
 ```python
 # Old function still works but deprecated
 from onshape_robotics_toolkit.graph import create_graph
 
-# Use KinematicTree for new code
-from onshape_robotics_toolkit.graph import KinematicTree
+# Use KinematicGraph for new code
+from onshape_robotics_toolkit.graph import KinematicGraph
 ```

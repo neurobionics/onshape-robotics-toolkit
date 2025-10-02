@@ -11,7 +11,7 @@ tests/
 ├── test_cad_document.py   # Tests for CAD creation and population
 ├── test_lookups.py        # Tests for lookup functionality (instances, parts, occurrences)
 ├── test_subassemblies.py  # Tests for subassembly data structure and rigid assemblies
-├── test_kinematic_tree.py # Tests for KinematicTree class
+├── test_kinematic_tree.py # Tests for KinematicGraph class
 └── data/
     └── assembly.json      # Test assembly data
 ```
@@ -101,11 +101,11 @@ Tests for the separated subassembly data structure and rigid assembly handling:
 
 ### `test_kinematic_tree.py`
 
-Tests for the `KinematicTree` class using PathKey-based system:
+Tests for the `KinematicGraph` class using PathKey-based system:
 
-**`TestKinematicTree` class:**
+**`TestKinematicGraph` class:**
 
-- Creating kinematic tree from CAD document
+- Creating kinematic graph from CAD document
 - Graph has nodes (parts) and edges (mates)
 - Root node detection (user-defined or centrality-based)
 - Topological ordering calculation
@@ -117,7 +117,7 @@ Tests for the `KinematicTree` class using PathKey-based system:
 - Verifies nodes are PathKeys
 - Validates nodes match parts in CAD
 
-**`TestKinematicTreeInternals` class:**
+**`TestKinematicGraphInternals` class:**
 
 - Mate collection from root and subassemblies (`_collect_all_mates()`)
 - Mate validation and filtering (`_validate_mates()`)
@@ -134,12 +134,12 @@ Tests for the `KinematicTree` class using PathKey-based system:
 - Internal mate filtering (within same rigid assembly)
 - Cross-boundary mate remapping (to rigid assembly roots)
 
-**`TestKinematicTreeVisualization` class:**
+**`TestKinematicGraphVisualization` class:**
 
 - `show()` method existence and functionality
 - Label mapping creation (PathKey → part/assembly names)
 
-**`TestKinematicTreeConnectivity` class:**
+**`TestKinematicGraphConnectivity` class:**
 
 - Single connected component verification
 - No self-loops in graph

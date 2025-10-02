@@ -1,34 +1,34 @@
-"""Tests for KinematicTree class."""
+"""Tests for KinematicGraph class."""
 
-from onshape_robotics_toolkit.graph import KinematicTree
+from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.parse import CAD
 
 
-class TestKinematicTree:
-    """Tests for KinematicTree class with PathKey-based system."""
+class TestKinematicGraph:
+    """Tests for KinematicGraph class with PathKey-based system."""
 
     def test_create_kinematic_tree(self, cad_doc: CAD):
-        """Test creating a kinematic tree from CAD document."""
-        tree = KinematicTree(cad_doc, use_user_defined_root=True)
+        """Test creating a kinematic graph from CAD document."""
+        tree = KinematicGraph(cad_doc, use_user_defined_root=True)
 
         assert tree is not None
         assert tree.graph is not None
         assert tree.cad == cad_doc
 
     def test_tree_has_nodes_and_edges(self, cad_doc: CAD):
-        """Test that kinematic tree has nodes and edges."""
-        tree = KinematicTree(cad_doc)
+        """Test that kinematic graph has nodes and edges."""
+        tree = KinematicGraph(cad_doc)
 
         # Tree should have nodes from parts involved in mates
         assert len(tree.graph.nodes) > 0
         # Tree should have edges from mate relationships
         assert len(tree.graph.edges) > 0
 
-        print(f"\nKinematicTree: {len(tree.graph.nodes)} nodes, {len(tree.graph.edges)} edges")
+        print(f"\nKinematicGraph: {len(tree.graph.nodes)} nodes, {len(tree.graph.edges)} edges")
 
     def test_tree_has_root_node(self, cad_doc: CAD):
-        """Test that kinematic tree has a root node."""
-        tree = KinematicTree(cad_doc)
+        """Test that kinematic graph has a root node."""
+        tree = KinematicGraph(cad_doc)
 
         assert tree.root_node is not None
         assert tree.root_node in tree.graph.nodes
@@ -36,8 +36,8 @@ class TestKinematicTree:
         print(f"\nRoot node: {tree.root_node}")
 
     def test_tree_has_topological_order(self, cad_doc: CAD):
-        """Test that kinematic tree has topological ordering."""
-        tree = KinematicTree(cad_doc)
+        """Test that kinematic graph has topological ordering."""
+        tree = KinematicGraph(cad_doc)
 
         # If graph is acyclic, should have topological order
         if tree.topological_order is not None:
@@ -51,7 +51,7 @@ class TestKinematicTree:
 
     def test_get_children(self, cad_doc: CAD):
         """Test getting children of a node."""
-        tree = KinematicTree(cad_doc)
+        tree = KinematicGraph(cad_doc)
 
         if tree.root_node:
             children = tree.get_children(tree.root_node)
@@ -62,7 +62,7 @@ class TestKinematicTree:
 
     def test_get_parent(self, cad_doc: CAD):
         """Test getting parent of a node."""
-        tree = KinematicTree(cad_doc)
+        tree = KinematicGraph(cad_doc)
 
         # Root should have no parent
         if tree.root_node:
@@ -78,7 +78,7 @@ class TestKinematicTree:
 
     def test_get_node_metadata(self, cad_doc: CAD):
         """Test getting metadata for a node."""
-        tree = KinematicTree(cad_doc)
+        tree = KinematicGraph(cad_doc)
 
         if tree.root_node:
             metadata = tree.get_node_metadata(tree.root_node)
@@ -89,7 +89,7 @@ class TestKinematicTree:
 
     def test_get_mate_data(self, cad_doc: CAD):
         """Test getting mate data for an edge."""
-        tree = KinematicTree(cad_doc)
+        tree = KinematicGraph(cad_doc)
 
         if tree.root_node:
             children = tree.get_children(tree.root_node)
@@ -102,18 +102,18 @@ class TestKinematicTree:
                     print(f"\nFound mate data: {mate_data.featureType}")
 
     def test_tree_repr(self, cad_doc: CAD):
-        """Test string representation of kinematic tree."""
-        tree = KinematicTree(cad_doc)
+        """Test string representation of kinematic graph."""
+        tree = KinematicGraph(cad_doc)
 
         repr_str = repr(tree)
-        assert "KinematicTree" in repr_str
+        assert "KinematicGraph" in repr_str
         assert "nodes=" in repr_str
         assert "edges=" in repr_str
         print(f"\n{repr_str}")
 
     def test_tree_with_different_depths(self, cad_doc_all_depths: CAD):
-        """Test kinematic tree creation with different max_depth values."""
-        tree = KinematicTree(cad_doc_all_depths)
+        """Test kinematic graph creation with different max_depth values."""
+        tree = KinematicGraph(cad_doc_all_depths)
 
         # Tree should be created successfully regardless of max_depth
         assert tree is not None
@@ -126,8 +126,8 @@ class TestKinematicTree:
         )
 
     def test_tree_without_user_defined_root(self, cad_doc: CAD):
-        """Test kinematic tree with centrality-based root detection."""
-        tree = KinematicTree(cad_doc, use_user_defined_root=False)
+        """Test kinematic graph with centrality-based root detection."""
+        tree = KinematicGraph(cad_doc, use_user_defined_root=False)
 
         # Should still have a root node (detected via centrality)
         assert tree.root_node is not None
@@ -138,26 +138,26 @@ class TestKinematicTree:
         """Test that all nodes in the tree are PathKey objects."""
         from onshape_robotics_toolkit.parse import PathKey
 
-        tree = KinematicTree(cad_doc)
+        tree = KinematicGraph(cad_doc)
 
         for node in tree.graph.nodes:
             assert isinstance(node, PathKey), f"Node {node} is not a PathKey"
 
     def test_nodes_match_parts_in_cad(self, cad_doc: CAD):
         """Test that all nodes in tree correspond to parts in CAD."""
-        tree = KinematicTree(cad_doc)
+        tree = KinematicGraph(cad_doc)
 
         for node in tree.graph.nodes:
             # Node should be in parts registry
             assert node in cad_doc.parts, f"Node {node} not found in CAD parts registry"
 
 
-class TestKinematicTreeInternals:
-    """Tests for internal methods of KinematicTree class."""
+class TestKinematicGraphInternals:
+    """Tests for internal methods of KinematicGraph class."""
 
     def test_collect_all_mates(self, cad_doc_depth_1: CAD):
         """Test collecting mates from root and all subassemblies."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Access internal method via tree instance
         all_mates = tree._collect_all_mates()
@@ -178,7 +178,7 @@ class TestKinematicTreeInternals:
 
     def test_validate_mates(self, cad_doc_depth_1: CAD):
         """Test mate validation filters out invalid PathKeys."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Collect all mates
         all_mates = tree._collect_all_mates()
@@ -198,7 +198,7 @@ class TestKinematicTreeInternals:
 
     def test_is_valid_mate_target(self, cad_doc_depth_1: CAD):
         """Test checking if PathKey is valid mate target."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Get a known part PathKey
         part_keys = list(cad_doc_depth_1.parts.keys())
@@ -214,7 +214,7 @@ class TestKinematicTreeInternals:
 
     def test_get_parts_involved_in_mates(self, cad_doc_depth_1: CAD):
         """Test extracting parts involved in mates."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Collect and validate mates
         all_mates = tree._collect_all_mates()
@@ -236,7 +236,7 @@ class TestKinematicTreeInternals:
 
     def test_find_user_defined_root(self, cad_doc_depth_1: CAD):
         """Test finding user-defined root part."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Get involved parts
         all_mates = tree._collect_all_mates()
@@ -263,7 +263,7 @@ class TestKinematicTreeInternals:
         """Test converting relative PathKey to absolute."""
         from onshape_robotics_toolkit.parse import PathKey
 
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Create relative and prefix keys
         relative_key = PathKey(("leaf_id",))
@@ -280,7 +280,7 @@ class TestKinematicTreeInternals:
         """Test that absolute conversion is idempotent."""
         from onshape_robotics_toolkit.parse import PathKey
 
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Already absolute key
         prefix_key = PathKey(("parent1", "parent2"))
@@ -296,7 +296,7 @@ class TestRigidAssemblyMateHandling:
 
     def test_find_rigid_assembly_ancestor(self, cad_doc_depth_1: CAD):
         """Test finding rigid assembly ancestor for a PathKey."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Test with parts at different depths
         for part_key in cad_doc_depth_1.parts:
@@ -317,7 +317,7 @@ class TestRigidAssemblyMateHandling:
 
     def test_convert_subassembly_mates_to_absolute(self, cad_doc_depth_1: CAD):
         """Test converting subassembly mates from relative to absolute PathKeys."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Get mates from a subassembly
         for sub_key, sub_assembly in cad_doc_depth_1.sub_assemblies.items():
@@ -337,7 +337,7 @@ class TestRigidAssemblyMateHandling:
 
     def test_internal_mates_filtered(self, cad_doc_depth_1: CAD):
         """Test that internal mates within rigid assemblies are filtered out."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Check graph edges
         for parent_key, child_key in tree.graph.edges:
@@ -353,7 +353,7 @@ class TestRigidAssemblyMateHandling:
 
     def test_cross_boundary_mates_remapped(self, cad_doc_depth_1: CAD):
         """Test that mates crossing rigid assembly boundaries are remapped."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Check that nodes in graph are either:
         # 1. Not inside any rigid assembly, OR
@@ -367,18 +367,18 @@ class TestRigidAssemblyMateHandling:
                 assert node == rigid_ancestor, f"Node {node} inside rigid {rigid_ancestor} but not remapped"
 
 
-class TestKinematicTreeVisualization:
-    """Tests for kinematic tree visualization methods."""
+class TestKinematicGraphVisualization:
+    """Tests for kinematic graph visualization methods."""
 
     def test_show_method_exists(self, cad_doc: CAD):
         """Test that show method exists and is callable."""
-        tree = KinematicTree(cad_doc)
+        tree = KinematicGraph(cad_doc)
         assert hasattr(tree, "show")
         assert callable(tree.show)
 
     def test_show_creates_label_mapping(self, cad_doc_depth_1: CAD):
         """Test that show method creates proper name mappings."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Manually create label mapping like show() does
         label_mapping = {}
@@ -405,14 +405,14 @@ class TestKinematicTreeVisualization:
             print(f"  {node} -> {label}")
 
 
-class TestKinematicTreeConnectivity:
+class TestKinematicGraphConnectivity:
     """Tests for graph connectivity and component analysis."""
 
     def test_single_connected_component(self, cad_doc_depth_1: CAD):
-        """Test that kinematic tree has single connected component."""
+        """Test that kinematic graph has single connected component."""
         import networkx as nx
 
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         # Convert to undirected for connectivity analysis
         undirected = tree.graph.to_undirected()
@@ -427,7 +427,7 @@ class TestKinematicTreeConnectivity:
 
     def test_no_self_loops(self, cad_doc_depth_1: CAD):
         """Test that graph has no self-loops."""
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         for parent, child in tree.graph.edges:
             assert parent != child, f"Self-loop found: {parent} -> {parent}"
@@ -436,7 +436,7 @@ class TestKinematicTreeConnectivity:
         """Test that all nodes are reachable from root."""
         import networkx as nx
 
-        tree = KinematicTree(cad_doc_depth_1)
+        tree = KinematicGraph(cad_doc_depth_1)
 
         if tree.root_node and len(tree.graph.nodes) > 1:
             # Get descendants of root

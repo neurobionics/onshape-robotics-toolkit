@@ -1,4 +1,4 @@
-# KinematicTree Troubleshooting Guide
+# KinematicGraph Troubleshooting Guide
 
 ## Common Issues and Solutions
 
@@ -35,7 +35,7 @@ WARNING: Part PathKey(...) involved in mate but not found in parts registry
 - Mate processing creates incorrect PathKey mappings
 - Parts are in flexible subassemblies that weren't fetched
 
-**Solution:** Added mate validation in KinematicTree ([graph.py:136-210](../onshape_robotics_toolkit/graph.py#L136)):
+**Solution:** Added mate validation in KinematicGraph ([graph.py:136-210](../onshape_robotics_toolkit/graph.py#L136)):
 
 - `_validate_mates()`: Filters out mates with invalid PathKeys
 - `_is_valid_mate_target()`: Checks if PathKey exists in registries
@@ -80,7 +80,7 @@ WARNING: Part PathKey(...) involved in mate but not found in parts registry
 
 ## Debugging Workflow
 
-When KinematicTree has issues, check in this order:
+When KinematicGraph has issues, check in this order:
 
 ### 1. Check Assembly Structure
 
@@ -103,7 +103,7 @@ for key, data in cad.sub_assemblies.items():
 ### 3. Check Mate Validity
 
 ```python
-tree = KinematicTree(cad)  # Will log warnings about invalid mates
+tree = KinematicGraph(cad)  # Will log warnings about invalid mates
 ```
 
 ### 4. Examine Graph Structure
@@ -179,15 +179,15 @@ print(f"Connected components: {len(components)}")
 ```python
 cad = CAD.from_assembly(assembly, max_depth=1)
 cad.process_mates_and_relations()  # Required!
-tree = KinematicTree(cad)
+tree = KinematicGraph(cad)
 ```
 
 ### 2. Handle Empty Trees
 
 ```python
-tree = KinematicTree(cad)
+tree = KinematicGraph(cad)
 if tree.root_node is None:
-    print("Warning: KinematicTree is empty or invalid")
+    print("Warning: KinematicGraph is empty or invalid")
     return
 ```
 
@@ -220,6 +220,6 @@ if tree.topological_order is None:
 
 ## Related Documentation
 
-- [KinematicTree Migration Guide](kinematic-tree-migration.md)
+- [KinematicGraph Migration Guide](kinematic-tree-migration.md)
 - [Developing Documentation](developing.md)
 - [CAD Assembly System](cad-assembly-system.md)

@@ -1,12 +1,12 @@
 """
 This module contains functions and classes to create and manipulate kinematic graphs from Onshape assembly data.
 
-The main class is KinematicTree, which uses the PathKey-based CAD system to build a directed graph
+The main class is KinematicGraph, which uses the PathKey-based CAD system to build a directed graph
 representing the kinematic structure of a robot assembly. The graph nodes are parts involved in mates,
 and edges represent mate relationships.
 
 Classes:
-    KinematicTree: Build and navigate kinematic tree from CAD assembly
+    KinematicGraph: Build and navigate kinematic graph from CAD assembly
 
 Functions:
     plot_graph: Visualize graphs using matplotlib
@@ -34,9 +34,9 @@ from onshape_robotics_toolkit.models.assembly import (
 from onshape_robotics_toolkit.parse import CAD, MATE_JOINER, SUBASSEMBLY_JOINER, PathKey
 
 
-class KinematicTree:
+class KinematicGraph:
     """
-    Kinematic tree representation of an assembly using PathKey-based system.
+    kinematic graph representation of an assembly using PathKey-based system.
 
     This class creates a directed graph from CAD assembly data where:
     - Nodes: Parts involved in mates (PathKey identifiers)
@@ -52,13 +52,13 @@ class KinematicTree:
     Attributes:
         cad: CAD assembly data with PathKey-based registries
         graph: NetworkX directed graph representation
-        root_node: PathKey of the root node in the kinematic tree
+        root_node: PathKey of the root node in the kinematic graph
         topological_order: Ordered sequence of nodes from root to leaves
     """
 
     def __init__(self, cad: CAD, use_user_defined_root: bool = True):
         """
-        Initialize and build kinematic tree from CAD assembly.
+        Initialize and build kinematic graph from CAD assembly.
 
         Args:
             cad: CAD assembly with PathKey-based registries
@@ -66,7 +66,7 @@ class KinematicTree:
 
         Examples:
             >>> cad = CAD.from_assembly(assembly, max_depth=1)
-            >>> tree = KinematicTree(cad, use_user_defined_root=True)
+            >>> tree = KinematicGraph(cad, use_user_defined_root=True)
             >>> print(f"Root: {tree.root_node}")
             >>> print(f"Nodes: {len(tree.graph.nodes)}")
         """
@@ -75,7 +75,7 @@ class KinematicTree:
         self.root_node: Optional[PathKey] = None
         self.topological_order: Optional[tuple[PathKey, ...]] = None
 
-        # Build the kinematic tree
+        # Build the kinematic graph
         self._build_graph(use_user_defined_root)
 
     def _build_graph(self, use_user_defined_root: bool) -> None:
@@ -116,7 +116,7 @@ class KinematicTree:
 
         # Check if graph is empty
         if len(self.graph.nodes) == 0:
-            LOGGER.warning("KinematicTree is empty - no valid parts found in mates")
+            LOGGER.warning("KinematicGraph is empty - no valid parts found in mates")
             return
 
         # Remove disconnected subgraphs
@@ -138,7 +138,7 @@ class KinematicTree:
         self.topological_order = get_topological_order(self.graph)
 
         LOGGER.info(
-            f"KinematicTree created: {len(self.graph.nodes)} nodes, "
+            f"KinematicGraph created: {len(self.graph.nodes)} nodes, "
             f"{len(self.graph.edges)} edges, root={self.root_node}"
         )
 
@@ -498,7 +498,7 @@ class KinematicTree:
 
     def plot(self, file_name: Optional[str] = None) -> None:
         """
-        Visualize the kinematic tree.
+        Visualize the kinematic graph.
 
         Args:
             file_name: Optional filename to save visualization. If None, displays interactively.
@@ -511,7 +511,7 @@ class KinematicTree:
 
     def show(self, file_name: Optional[str] = None) -> None:
         """
-        Visualize the kinematic tree with part names as labels instead of PathKey IDs.
+        Visualize the kinematic graph with part names as labels instead of PathKey IDs.
 
         Creates a more readable visualization by mapping PathKeys to their corresponding
         part or assembly names from the CAD instance registry.
@@ -582,7 +582,7 @@ class KinematicTree:
 
     def get_children(self, node_key: PathKey) -> list[PathKey]:
         """
-        Get all children of a node in the kinematic tree.
+        Get all children of a node in the kinematic graph.
 
         Args:
             node_key: PathKey of parent node
@@ -599,7 +599,7 @@ class KinematicTree:
 
     def get_parent(self, node_key: PathKey) -> Optional[PathKey]:
         """
-        Get parent of a node in the kinematic tree.
+        Get parent of a node in the kinematic graph.
 
         Args:
             node_key: PathKey of child node
@@ -616,8 +616,10 @@ class KinematicTree:
         return predecessors[0] if predecessors else None
 
     def __repr__(self) -> str:
-        """String representation of the kinematic tree."""
-        return f"KinematicTree(nodes={len(self.graph.nodes)}, " f"edges={len(self.graph.edges)}, root={self.root_node})"
+        """String representation of the kinematic graph."""
+        return (
+            f"KinematicGraph(nodes={len(self.graph.nodes)}, " f"edges={len(self.graph.edges)}, root={self.root_node})"
+        )
 
 
 def plot_graph(graph: Union[nx.Graph, nx.DiGraph], file_name: Optional[str] = None) -> None:

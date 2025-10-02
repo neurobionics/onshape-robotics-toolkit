@@ -305,17 +305,17 @@ if parent_rigid_root == child_rigid_root:
 
 Mates and patterns are exclusive to subassemblies (not duplicated in root).
 
-## KinematicTree: Graph Construction from CAD
+## KinematicGraph: Graph Construction from CAD
 
-The `KinematicTree` class builds a directed graph from CAD assembly data where nodes are parts (PathKeys) and edges are mate relationships.
+The `KinematicGraph` class builds a directed graph from CAD assembly data where nodes are parts (PathKeys) and edges are mate relationships.
 
 ### Basic Usage
 
 ```python
-from onshape_robotics_toolkit.graph import KinematicTree
+from onshape_robotics_toolkit.graph import KinematicGraph
 
 # Create tree from CAD document
-tree = KinematicTree(cad_doc, use_user_defined_root=True)
+tree = KinematicGraph(cad_doc, use_user_defined_root=True)
 
 # Access graph structure
 graph = tree.graph  # NetworkX DiGraph

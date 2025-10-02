@@ -1,8 +1,8 @@
-# Handling Subassembly Mates in KinematicTree
+# Handling Subassembly Mates in KinematicGraph
 
 ## Problem
 
-Mates stored in subassembly registries use **relative PathKeys** (just the leaf IDs), but the KinematicTree needs **absolute PathKeys** (full paths from root) to match instances in the global registries.
+Mates stored in subassembly registries use **relative PathKeys** (just the leaf IDs), but the KinematicGraph needs **absolute PathKeys** (full paths from root) to match instances in the global registries.
 
 ### Example
 
@@ -23,7 +23,7 @@ child = PathKey(("McQ65EsxX+4zImFWp", "MemtmVozirMm3DOIv"))      # Absolute
 
 ## Solution
 
-The `KinematicTree._collect_all_mates()` method now automatically converts subassembly mates to use absolute PathKeys.
+The `KinematicGraph._collect_all_mates()` method now automatically converts subassembly mates to use absolute PathKeys.
 
 ### Implementation
 
@@ -72,7 +72,7 @@ Mate:
   child = PathKey(("MemtmVozirMm3DOIv",))
 ```
 
-**After (in KinematicTree):**
+**After (in KinematicGraph):**
 
 ```python
 Mate:
@@ -94,7 +94,7 @@ Mate:
 - All mates have absolute PathKeys
 - PathKeys match instances in global registries
 - All valid mates are included in graph
-- Result: Fully connected kinematic tree
+- Result: Fully connected kinematic graph
 
 ## Design Rationale
 
@@ -106,12 +106,12 @@ We could have modified `CAD.process_mates_and_relations()` to consolidate all ma
 
 1. **Separation of concerns**: CAD class maintains assembly structure as-is
 2. **Flexibility**: Different consumers can handle relative/absolute as needed
-3. **Minimal changes**: KinematicTree handles conversion locally
+3. **Minimal changes**: KinematicGraph handles conversion locally
 4. **Cleaner**: Subassembly data stays self-contained
 
-**Why KinematicTree Handles It:**
+**Why KinematicGraph Handles It:**
 
-- KinematicTree needs a global view of all mates anyway
+- KinematicGraph needs a global view of all mates anyway
 - Conversion is straightforward (prefix concatenation)
 - No need to modify original CAD data structures
 - Easier to debug (conversion happens in one place)
@@ -143,16 +143,16 @@ def _populate_subassembly(self, subassembly: SubAssembly, sub_key: PathKey):
 
 ```
 [WARNING] Filtered out 4 mates with invalid PathKeys (3/7 mates remain)
-[INFO] KinematicTree created: 2 nodes, 1 edges, root=...
+[INFO] KinematicGraph created: 2 nodes, 1 edges, root=...
 ```
 
 ### After Fix
 
 ```
-[INFO] KinematicTree created: 7 nodes, 6 edges, root=M0cLO6yVimMv6KhRM
+[INFO] KinematicGraph created: 7 nodes, 6 edges, root=M0cLO6yVimMv6KhRM
 ```
 
-All mates from subassemblies now correctly contribute to the kinematic tree!
+All mates from subassemblies now correctly contribute to the kinematic graph!
 
 ## Usage
 
@@ -163,13 +163,13 @@ cad = CAD.from_assembly(assembly, max_depth=1)
 cad.process_mates_and_relations()
 
 # Mates are automatically converted to absolute PathKeys
-tree = KinematicTree(cad, use_user_defined_root=True)
+tree = KinematicGraph(cad, use_user_defined_root=True)
 
 print(tree)  # Shows all nodes and edges including subassembly mates
 ```
 
 ## Related Documentation
 
-- [KinematicTree Migration Guide](kinematic-tree-migration.md)
-- [KinematicTree Troubleshooting](kinematic-tree-troubleshooting.md)
+- [KinematicGraph Migration Guide](kinematic-tree-migration.md)
+- [KinematicGraph Troubleshooting](kinematic-tree-troubleshooting.md)
 - [Developing Documentation](developing.md)

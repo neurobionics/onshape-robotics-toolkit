@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from onshape_robotics_toolkit.connect import Client
-from onshape_robotics_toolkit.graph import KinematicTree
+from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models import Assembly
 from onshape_robotics_toolkit.models.document import Document
@@ -244,5 +244,5 @@ if __name__ == "__main__":
     cad = CAD.from_assembly(assembly, max_depth=DEPTH)
 
     cad.process_mates_and_relations()
-    tree = KinematicTree(cad, use_user_defined_root=True)
+    tree = KinematicGraph(cad, use_user_defined_root=True)
     tree.show()
