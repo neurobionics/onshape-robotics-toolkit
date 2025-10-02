@@ -258,36 +258,39 @@ class InstanceRegistry:
 
     def is_rigid_assembly(self, key: PathKey) -> bool:
         """
-        Check if assembly is rigid based on depth.
+        Check if assembly is rigid.
 
         Args:
             key: PathKey to check
 
         Returns:
-            True if assembly depth exceeds max_depth (making it rigid)
+            True if the assembly instance is marked as rigid
 
         Example:
+            # Assemblies beyond max_depth are marked rigid during population
             # max_depth = 2
-            # PathKey depth 0-2 -> flexible
-            # PathKey depth 3+   -> rigid
+            # PathKey depth 0-2 -> flexible (isRigid=False)
+            # PathKey depth 3+   -> rigid (isRigid=True)
         """
-        if key not in self.assemblies:
+        assembly = self.assemblies.get(key)
+        if not assembly:
             return False
-        return key.depth > self.max_depth
+        return isinstance(assembly, AssemblyInstance) and assembly.isRigid
 
     def is_flexible_assembly(self, key: PathKey) -> bool:
         """
-        Check if assembly is flexible based on depth.
+        Check if assembly is flexible.
 
         Args:
             key: PathKey to check
 
         Returns:
-            True if assembly depth is within max_depth (making it flexible)
+            True if the assembly instance is marked as flexible (not rigid)
         """
-        if key not in self.assemblies:
+        assembly = self.assemblies.get(key)
+        if not assembly:
             return False
-        return key.depth <= self.max_depth
+        return isinstance(assembly, AssemblyInstance) and not assembly.isRigid
 
     def lookup_by_name(self, name: str, depth: Optional[int] = None) -> list[PathKey]:
         """
@@ -911,6 +914,10 @@ class AssemblyData:
                 if isinstance(instance, PartInstance):
                     self.instances.add_part(key, instance)
             elif instance.type == InstanceType.ASSEMBLY and isinstance(instance, AssemblyInstance):
+                # Mark as rigid if depth exceeds max_depth
+                if key.depth > self.instances.max_depth:
+                    instance.isRigid = True
+                    LOGGER.debug(f"Marked {instance.name} at {key} (depth={key.depth}) as rigid")
                 self.instances.add_assembly(key, instance)
 
         # Add mates
@@ -1047,23 +1054,25 @@ class CAD:
     Top-level CAD document container.
 
     Represents a complete Onshape assembly with:
-    - Root assembly data (instances, occurrences, mates, patterns)
+    - Root assembly data (instances, occurrences, mates, patterns) from rootAssembly only
     - Parts dictionary (shared across entire document)
-    - Nested subassemblies (recursively fetched as separate CAD documents)
+    - Subassemblies from the JSON (stored with their own registries)
+    - Fetched flexible subassemblies (recursively fetched as separate CAD documents)
 
     This structure maps to Onshape's assembly JSON schema:
     {
       "parts": [...],                    -> parts
       "rootAssembly": {...},             -> root_assembly
-      "subAssemblies": [...]             -> fetched and stored in subassemblies
+      "subAssemblies": [...]             -> sub_assemblies (keyed by PathKey)
     }
 
     Attributes:
         document_id: Onshape document ID
         element_id: Onshape element (assembly) ID
-        root_assembly: Root assembly data with all registries
+        root_assembly: Root assembly data (only rootAssembly, not subassemblies)
         parts: Part definitions (shared across document)
-        subassemblies: Nested subassembly CAD documents
+        sub_assemblies: AssemblyData for each subassembly from JSON (keyed by PathKey)
+        fetched_subassemblies: Nested subassembly CAD documents (fetched via API)
         max_depth: Maximum depth for flexible assemblies
         current_depth: Current depth in hierarchy (0 = root)
     """
@@ -1071,8 +1080,9 @@ class CAD:
     document_id: str
     element_id: str
     root_assembly: RootAssemblyData
-    parts: dict[str, Part]
-    subassemblies: dict[PathKey, "CAD"]
+    parts: dict[PathKey, Part]
+    sub_assemblies: dict[PathKey, AssemblyData]
+    fetched_subassemblies: dict[PathKey, "CAD"]
     max_depth: int
     current_depth: int
 
@@ -1081,7 +1091,7 @@ class CAD:
         document_id: str,
         element_id: str,
         root_assembly: RootAssemblyData,
-        parts: dict[str, Part],
+        parts: dict[PathKey, Part],
         max_depth: int = 0,
         current_depth: int = 0,
     ):
@@ -1092,7 +1102,7 @@ class CAD:
             document_id: Onshape document ID
             element_id: Onshape element (assembly) ID
             root_assembly: Root assembly data
-            parts: Part definitions
+            parts: Part definitions keyed by PathKey
             max_depth: Maximum depth for flexible assemblies
             current_depth: Current depth in hierarchy
         """
@@ -1100,7 +1110,8 @@ class CAD:
         self.element_id = element_id
         self.root_assembly = root_assembly
         self.parts = parts
-        self.subassemblies = {}
+        self.sub_assemblies = {}
+        self.fetched_subassemblies = {}
         self.max_depth = max_depth
         self.current_depth = current_depth
 
@@ -1122,28 +1133,150 @@ class CAD:
         Returns:
             CAD with populated registries
         """
-        # Create root assembly data and populate registries
+        # Create root assembly data and populate ONLY from rootAssembly
         root_assembly_data = RootAssemblyData(max_depth=max_depth)
         root_assembly_data.populate_from_root_assembly(assembly.rootAssembly)
 
-        # Also populate instances from ALL subassemblies (regardless of max_depth)
-        # max_depth only controls which subassemblies get fetched via API, not which get added to registry
-        # We need the occurrence registry to get the full paths for subassembly instances
-        for subassembly in assembly.subAssemblies:
-            root_assembly_data.populate_from_subassembly(subassembly, root_assembly_data.occurrences)
-
-        # Extract parts
-        parts = {part.partId: part for part in assembly.parts}
-
-        # Get document/element IDs from rootAssembly
-        return cls(
+        # Create CAD instance (parts will be populated later)
+        cad = cls(
             document_id=assembly.rootAssembly.documentId,
             element_id=assembly.rootAssembly.elementId,
             root_assembly=root_assembly_data,
-            parts=parts,
+            parts={},  # Will be populated below
             max_depth=max_depth,
             current_depth=current_depth,
         )
+
+        # Populate subassemblies separately (adds instances to root_assembly)
+        # We need the occurrence registry to find full paths for subassembly instances
+        for subassembly in assembly.subAssemblies:
+            cad._populate_subassembly(subassembly)
+
+        # Populate parts (both regular parts and rigid subassemblies)
+        cad._populate_parts(assembly)
+
+        return cad
+
+    def _populate_subassembly(self, subassembly: SubAssembly) -> None:
+        """
+        Populate a subassembly's data into both root instances and sub_assemblies registry.
+
+        This does two things:
+        1. Adds instances to the root_assembly.instances (for flat access to all instances)
+        2. Creates an AssemblyData with mates/patterns for the subassembly (hierarchical structure)
+
+        Args:
+            subassembly: SubAssembly from Onshape JSON
+        """
+        # Create AssemblyData for this subassembly (for mates/patterns)
+        assembly_data = AssemblyData(max_depth=self.max_depth)
+
+        # Build a mapping of leaf IDs to full paths from occurrences
+        leaf_id_to_paths: dict[str, list[PathKey]] = {}
+        for path_key in self.root_assembly.occurrences.occurrences:
+            leaf_id = path_key.leaf_id
+            if leaf_id not in leaf_id_to_paths:
+                leaf_id_to_paths[leaf_id] = []
+            leaf_id_to_paths[leaf_id].append(path_key)
+
+        # Add instances to BOTH registries
+        for instance in subassembly.instances:
+            # instance.id is just the leaf ID, we need to find the full path(s)
+            matching_paths = leaf_id_to_paths.get(instance.id, [])
+
+            for key in matching_paths:
+                if instance.type == InstanceType.PART:
+                    if isinstance(instance, PartInstance):
+                        # Add to root assembly instances (flat registry)
+                        self.root_assembly.instances.add_part(key, instance)
+                        # Also add to subassembly's own registry
+                        assembly_data.instances.add_part(key, instance)
+                elif instance.type == InstanceType.ASSEMBLY and isinstance(instance, AssemblyInstance):
+                    # Mark as rigid if depth exceeds max_depth
+                    if key.depth > self.max_depth:
+                        instance.isRigid = True
+                        LOGGER.debug(f"Marked {instance.name} at {key} (depth={key.depth}) as rigid")
+
+                    # Add to root assembly instances (flat registry)
+                    self.root_assembly.instances.add_assembly(key, instance)
+                    # Also add to subassembly's own registry
+                    assembly_data.instances.add_assembly(key, instance)
+
+        # Add mates (only to subassembly, not root)
+        if subassembly.features:
+            for feature in subassembly.features:
+                if feature.featureType == AssemblyFeatureType.MATE:
+                    assembly_data.mates.add_mate(feature)
+
+        # Add patterns (only to subassembly, not root)
+        if subassembly.patterns:
+            for pattern in subassembly.patterns:
+                assembly_data.patterns.add_pattern(pattern)
+
+        # Find the PathKey(s) for this subassembly in the assembly instances
+        # The subassembly's elementId should match an assembly instance's elementId
+        for key, instance in self.root_assembly.instances.assemblies.items():
+            if instance.elementId == subassembly.elementId:
+                self.sub_assemblies[key] = assembly_data
+                LOGGER.debug(
+                    f"Populated subassembly {instance.name} at {key}: "
+                    f"{len(assembly_data.instances.parts)} parts, "
+                    f"{len(assembly_data.instances.assemblies)} assemblies, "
+                    f"{len(assembly_data.mates.mates)} mates"
+                )
+
+    def _populate_parts(self, assembly: Assembly) -> None:
+        """
+        Populate the parts dictionary with both regular parts and rigid subassemblies.
+
+        Rigid subassemblies are treated as parts because they are downloaded as single
+        STL files, just like regular parts.
+
+        Args:
+            assembly: Assembly from Onshape JSON
+        """
+        # Populate regular parts keyed by PathKey
+        # Match part instances with their Part definitions
+        part_id_to_part = {part.partId: part for part in assembly.parts}
+        for key, instance in self.root_assembly.instances.parts.items():
+            if instance.partId in part_id_to_part:
+                self.parts[key] = part_id_to_part[instance.partId]
+
+        # Also create Part objects for rigid subassemblies
+        # Rigid subassemblies are downloaded as single STL files, just like parts
+        rigid_count = 0
+        for key, assembly_instance in self.root_assembly.instances.assemblies.items():
+            if isinstance(assembly_instance, AssemblyInstance) and assembly_instance.isRigid:
+                # Find the matching subassembly data
+                matching_subassembly = None
+                for subassembly in assembly.subAssemblies:
+                    if subassembly.elementId == assembly_instance.elementId:
+                        matching_subassembly = subassembly
+                        break
+
+                if matching_subassembly:
+                    # Create a Part object for this rigid subassembly
+                    # Note: Mass properties should be fetched separately via fetch_mass_properties
+                    self.parts[key] = Part(
+                        isStandardContent=False,
+                        fullConfiguration=matching_subassembly.fullConfiguration or "",
+                        configuration=matching_subassembly.configuration or "",
+                        documentId=assembly_instance.documentId,
+                        elementId=assembly_instance.elementId,
+                        documentMicroversion=assembly_instance.documentMicroversion or "",
+                        documentVersion=assembly_instance.documentVersion,
+                        partId="",  # Rigid assemblies don't have a partId
+                        bodyType="",
+                        MassProperty=None,
+                        isRigidAssembly=True,
+                        rigidAssemblyToPartTF=None,
+                        rigidAssemblyWorkspaceId=None,
+                    )
+                    rigid_count += 1
+                    LOGGER.debug(f"Created Part object for rigid subassembly {assembly_instance.name} at {key}")
+
+        if rigid_count > 0:
+            LOGGER.debug(f"Created {rigid_count} Part objects for rigid subassemblies")
 
     async def fetch_subassemblies(self, client: Client) -> None:
         """
@@ -1153,7 +1286,7 @@ class CAD:
         1. Identifies flexible subassembly instances
         2. Fetches their assembly data from Onshape API
         3. Creates nested CAD objects
-        4. Stores them in self.subassemblies keyed by PathKey
+        4. Stores them in self.fetched_subassemblies keyed by PathKey
 
         Args:
             client: Onshape API client for fetching assemblies
@@ -1183,7 +1316,7 @@ class CAD:
         # Wait for all fetches to complete
         await asyncio.gather(*tasks)
 
-        LOGGER.info(f"Fetched {len(self.subassemblies)} subassemblies at depth {self.current_depth}")
+        LOGGER.info(f"Fetched {len(self.fetched_subassemblies)} subassemblies at depth {self.current_depth}")
 
     async def _fetch_single_subassembly(self, client: Client, key: PathKey, instance: AssemblyInstance) -> None:
         """
@@ -1226,8 +1359,8 @@ class CAD:
             # Recursively fetch nested subassemblies
             await subassembly_cad.fetch_subassemblies(client)
 
-            # Store in subassemblies dict
-            self.subassemblies[key] = subassembly_cad
+            # Store in fetched_subassemblies dict
+            self.fetched_subassemblies[key] = subassembly_cad
 
             LOGGER.debug(f"Successfully fetched subassembly {instance.name}")
 
@@ -1236,7 +1369,7 @@ class CAD:
 
     def get_subassembly(self, key: PathKey) -> Optional["CAD"]:
         """
-        Get a subassembly CAD document by PathKey.
+        Get a fetched subassembly CAD document by PathKey.
 
         Args:
             key: PathKey of the subassembly instance
@@ -1244,11 +1377,11 @@ class CAD:
         Returns:
             CAD if found, None otherwise
         """
-        return self.subassemblies.get(key)
+        return self.fetched_subassemblies.get(key)
 
     def get_all_subassemblies(self, recursive: bool = False) -> dict[PathKey, "CAD"]:
         """
-        Get all subassemblies.
+        Get all fetched subassemblies.
 
         Args:
             recursive: If True, includes nested subassemblies recursively
@@ -1257,27 +1390,42 @@ class CAD:
             Dictionary of PathKey -> CAD
         """
         if not recursive:
-            return self.subassemblies
+            return self.fetched_subassemblies
 
         # Recursively collect all subassemblies
-        all_subs = dict(self.subassemblies)
-        for sub_cad in self.subassemblies.values():
+        all_subs = dict(self.fetched_subassemblies)
+        for sub_cad in self.fetched_subassemblies.values():
             nested = sub_cad.get_all_subassemblies(recursive=True)
             all_subs.update(nested)
 
         return all_subs
 
-    def get_part(self, part_id: str) -> Optional[Part]:
+    def get_part(self, key: PathKey) -> Optional[Part]:
         """
-        Get a part definition by partId.
+        Get a part definition by PathKey.
+
+        Args:
+            key: PathKey of the part instance
+
+        Returns:
+            Part if found, None otherwise
+        """
+        return self.parts.get(key)
+
+    def get_part_by_id(self, part_id: str) -> list[tuple[PathKey, Part]]:
+        """
+        Get all part instances with a given partId.
+
+        Since the same part can appear multiple times (different instances),
+        this returns a list of (PathKey, Part) tuples.
 
         Args:
             part_id: Onshape part ID
 
         Returns:
-            Part if found, None otherwise
+            List of (PathKey, Part) tuples for matching parts
         """
-        return self.parts.get(part_id)
+        return [(key, part) for key, part in self.parts.items() if part.partId == part_id]
 
     def get_part_instance(self, key: PathKey) -> Optional[PartInstance]:
         """
@@ -1329,7 +1477,7 @@ class CAD:
 
     def get_mate(self, parent_key: PathKey, child_key: PathKey) -> Optional[MateFeatureData]:
         """
-        Get a mate between two parts/assemblies.
+        Get a mate between two parts/assemblies from root assembly only.
 
         Args:
             parent_key: PathKey of the parent entity
@@ -1339,6 +1487,36 @@ class CAD:
             MateFeatureData if found, None otherwise
         """
         return self.root_assembly.mates.get_mate(parent_key, child_key)
+
+    def get_all_mates(self, include_subassemblies: bool = True) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
+        """
+        Get all mates from root assembly and optionally subassemblies.
+
+        Args:
+            include_subassemblies: If True, includes mates from all subassemblies
+
+        Returns:
+            Dictionary mapping (parent_key, child_key) tuples to MateFeatureData
+        """
+        all_mates = dict(self.root_assembly.mates.mates)
+
+        if include_subassemblies:
+            for assembly_data in self.sub_assemblies.values():
+                all_mates.update(assembly_data.mates.mates)
+
+        return all_mates
+
+    def get_subassembly_data(self, key: PathKey) -> Optional[AssemblyData]:
+        """
+        Get the AssemblyData for a subassembly by PathKey.
+
+        Args:
+            key: PathKey of the subassembly instance
+
+        Returns:
+            AssemblyData if found, None otherwise
+        """
+        return self.sub_assemblies.get(key)
 
     def get_pattern(self, pattern_id: str) -> Optional[Pattern]:
         """
@@ -1411,10 +1589,10 @@ class CAD:
             for key in sorted_children:
                 print(f"{prefix}|-- {get_display_name(key)}")
 
-                # Check if this key has a subassembly
-                if key in self.subassemblies:
-                    sub_cad = self.subassemblies[key]
-                    print(f"{prefix}|   +-- Subassembly Document (depth={sub_cad.current_depth})")
+                # Check if this key has a fetched subassembly
+                if key in self.fetched_subassemblies:
+                    sub_cad = self.fetched_subassemblies[key]
+                    print(f"{prefix}|   +-- Fetched Subassembly Document (depth={sub_cad.current_depth})")
 
                 # Recurse to children
                 print_tree(key.path, depth + 1)
@@ -1427,7 +1605,8 @@ class CAD:
             f"depth={self.current_depth}, "
             f"parts={len(self.root_assembly.instances.parts)}, "
             f"assemblies={len(self.root_assembly.instances.assemblies)}, "
-            f"subassemblies={len(self.subassemblies)})"
+            f"sub_assemblies={len(self.sub_assemblies)}, "
+            f"fetched_subassemblies={len(self.fetched_subassemblies)})"
         )
 
 

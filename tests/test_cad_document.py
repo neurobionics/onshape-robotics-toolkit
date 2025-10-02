@@ -3,7 +3,7 @@
 import pytest
 
 from onshape_robotics_toolkit.models.assembly import Assembly
-from onshape_robotics_toolkit.parse import CAD, RootAssemblyData
+from onshape_robotics_toolkit.parse import CAD, PathKey, RootAssemblyData
 
 
 class TestCAD:
@@ -54,11 +54,12 @@ class TestCAD:
     def test_parts_populated(self, cad_doc: CAD, assembly: Assembly):
         """Test that parts dictionary is populated."""
         assert cad_doc.parts is not None
-        assert len(cad_doc.parts) == len(assembly.parts)
+        # Parts dict includes regular parts (may also include rigid assemblies)
+        assert len(cad_doc.parts) >= len(cad_doc.root_assembly.instances.parts)
 
-        # Check that all part IDs are present
-        for part in assembly.parts:
-            assert part.partId in cad_doc.parts
+        # Check that parts are keyed by PathKey
+        for key in cad_doc.parts:
+            assert isinstance(key, PathKey), "Parts should be keyed by PathKey"
 
     def test_instances_populated(self, cad_doc: CAD):
         """Test that instances are populated in the registry."""

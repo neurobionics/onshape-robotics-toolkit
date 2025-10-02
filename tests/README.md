@@ -6,12 +6,13 @@ This directory contains the test suite for the onshape-robotics-toolkit parsing 
 
 ```
 tests/
-├── conftest.py           # Shared fixtures, helpers, and configuration
-├── test_pathkey.py       # Tests for PathKey class
-├── test_cad_document.py  # Tests for CADDocument creation and population
-├── test_lookups.py       # Tests for lookup functionality (instances, parts, occurrences)
+├── conftest.py            # Shared fixtures, helpers, and configuration
+├── test_pathkey.py        # Tests for PathKey class
+├── test_cad_document.py   # Tests for CAD creation and population
+├── test_lookups.py        # Tests for lookup functionality (instances, parts, occurrences)
+├── test_subassemblies.py  # Tests for subassembly data structure and rigid assemblies
 └── data/
-    └── assembly.json     # Test assembly data
+    └── assembly.json      # Test assembly data
 ```
 
 ## Test Files
@@ -21,7 +22,7 @@ tests/
 Shared pytest configuration including:
 
 - **Fixtures**: `assembly`, `cad_doc`, `cad_doc_depth_1`, `cad_doc_depth_2`, `cad_doc_all_depths`
-- **Helper Functions**: Functions to extract parts, assemblies, occurrences from CADDocument
+- **Helper Functions**: Functions to extract parts, assemblies, occurrences from CAD
 - **Constants**: `MAX_TEST_ASSEMBLY_DEPTH = 2`
 
 ### `test_pathkey.py`
@@ -35,11 +36,11 @@ Tests for the `PathKey` class:
 
 ### `test_cad_document.py`
 
-Tests for `CADDocument` class:
+Tests for `CAD` class:
 
 - Document creation from Assembly
 - Registry population (instances, occurrences, mates, patterns)
-- Parts dictionary population
+- Parts dictionary population with PathKey indexing
 - Assembly data structure documentation
 
 ### `test_lookups.py`
@@ -64,6 +65,38 @@ Tests for lookup functionality across the registries:
 - Parametrized tests that run with `max_depth` values of 0, 1, and 2
 - Verifies lookups work consistently across all depth configurations
 - Tests rigid/flexible classification logic
+
+### `test_subassemblies.py`
+
+Tests for the separated subassembly data structure and rigid assembly handling:
+
+**`TestSubassemblyDataStructure` class:**
+
+- Subassemblies keyed by PathKey
+- Each subassembly has its own AssemblyData with registries
+- Mates separated by subassembly (not flattened into root)
+- `get_all_mates()` aggregates correctly
+- `get_subassembly_data()` retrieval
+
+**`TestRigidAssemblyHandling` class:**
+
+- `isRigid` flag set correctly based on depth
+- `is_rigid_assembly()` uses the flag (not depth comparison)
+- `rigid_count` and `flexible_count` properties
+- Tests across max_depth=0, 1, and 2
+
+**`TestRigidAssemblyAsPartObjects` class:**
+
+- Rigid assemblies stored in `parts` dict
+- Parts dict uses PathKey indexing
+- Rigid assembly Part objects have `isRigidAssembly=True`
+- Rigid assemblies have no partId but have elementId
+
+**`TestInstanceStorageStrategy` class:**
+
+- All instances in root registry (flat)
+- Instances also in subassembly registries (hierarchical)
+- Dual storage for efficient lookup and hierarchy preservation
 
 ## Parametrized Testing
 

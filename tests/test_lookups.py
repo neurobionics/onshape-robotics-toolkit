@@ -57,16 +57,15 @@ class TestLookups:
         assert hasattr(occurrence, "transform")
         print(f"\nFound occurrence with path: {occurrence.path}")
 
-    def test_lookup_part_by_part_id(self, cad_doc: CAD):
-        """Test looking up a part definition by part ID."""
-        part_id = get_first_part_id(cad_doc)
-        assert part_id is not None, "No parts found"
+    def test_lookup_part_by_pathkey(self, cad_doc: CAD):
+        """Test looking up a part definition by PathKey."""
+        part_key = get_first_part_id(cad_doc)  # This now returns PathKey, not part_id
+        assert part_key is not None, "No parts found"
 
-        part = cad_doc.get_part(part_id)
+        part = cad_doc.get_part(part_key)
 
         assert part is not None
-        assert part.partId == part_id
-        print(f"\nFound part: {part.name if hasattr(part, 'name') else part_id}")
+        print(f"\nFound part: {part.name if hasattr(part, 'name') else str(part_key)}")
 
     def test_lookup_transform_by_key(self, cad_doc: CAD):
         """Test looking up a transform matrix by PathKey."""
@@ -146,9 +145,12 @@ class TestLookups:
         # Get all subassemblies (non-recursive)
         subassemblies = cad_doc_depth_1.get_all_subassemblies(recursive=False)
 
-        # Should return the same as cad_doc.subassemblies
-        assert subassemblies is cad_doc_depth_1.subassemblies or subassemblies == cad_doc_depth_1.subassemblies
-        print(f"\nFound {len(subassemblies)} direct subassemblies")
+        # Should return the same as cad_doc.fetched_subassemblies
+        assert (
+            subassemblies is cad_doc_depth_1.fetched_subassemblies
+            or subassemblies == cad_doc_depth_1.fetched_subassemblies
+        )
+        print(f"\nFound {len(subassemblies)} direct fetched subassemblies")
 
     def test_get_subassembly_by_key(self, cad_doc_depth_2: CAD):
         """Test getting a specific subassembly by PathKey."""

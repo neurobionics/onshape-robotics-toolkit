@@ -24,7 +24,7 @@ from onshape_robotics_toolkit.parse import CAD, PathKey
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
-DEPTH = 2
+DEPTH = 1
 NAME = f"transforms_{DEPTH}"
 USE_CACHED = True  # Set to False to force fresh API call
 LOG_ASSEMBLY = False
@@ -241,6 +241,4 @@ if __name__ == "__main__":
 
     LOGGER.info("Creating CAD from assembly...")
     cad = CAD.from_assembly(assembly, max_depth=DEPTH)
-
-    # Plot all occurrence transforms in 3D
-    plot_all_transforms(cad, scale=50.0, save_name=NAME)
+    cad.show()

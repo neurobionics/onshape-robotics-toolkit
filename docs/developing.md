@@ -810,6 +810,119 @@ The name mapping approach:
 
 This comprehensive solution enables accurate URDF generation for complex mixed flexible-rigid assemblies at intermediate max_depth values while maintaining compatibility with all existing assembly processing features.
 
+# CAD Class and Assembly Data Structure
+
+## Overview
+
+The `CAD` class provides a modern, hierarchical representation of Onshape assemblies using `PathKey`-based indexing. This replaced the older string-based key system to enable consistent data access across all registries.
+
+## Key Design Principles
+
+### 1. Hierarchical Data Preservation
+
+The assembly data structure preserves Onshape's hierarchy instead of flattening it:
+
+- **Root Assembly**: Contains all instances (flat registry for lookup)
+- **Subassemblies**: Each has its own `AssemblyData` with mates and patterns
+- **Parts**: Keyed by `PathKey`, includes both regular parts and rigid subassemblies
+
+```python
+cad.root_assembly.instances  # Flat registry: all instances
+cad.sub_assemblies           # Hierarchical: dict[PathKey, AssemblyData]
+cad.parts                    # Flat registry: dict[PathKey, Part]
+```
+
+### 2. PathKey-Based Indexing
+
+All data structures use `PathKey` for consistent indexing:
+
+```python
+# PathKey examples
+root_part = PathKey(('M0cLO6yVimMv6KhRM',))
+nested_part = PathKey(('McQ65EsxX+4zImFWp', 'MUgiNm7M17UkTi3/g'))
+
+# Access patterns
+instance = cad.root_assembly.instances.parts[key]
+part_data = cad.parts[key]
+occurrence = cad.root_assembly.occurrences.occurrences[key]
+```
+
+### 3. Rigid Assembly Handling
+
+Rigid assemblies (those beyond `max_depth`) are treated as parts:
+
+- **Marking**: `AssemblyInstance.isRigid` flag set during population
+- **Storage**: Rigid assemblies added to `cad.parts` as `Part` objects with `isRigidAssembly=True`
+- **Detection**: Use `InstanceRegistry.is_rigid_assembly(key)` which checks the `isRigid` flag
+
+```python
+# Rigid assemblies are marked during population
+if key.depth > self.max_depth:
+    instance.isRigid = True
+
+# Rigid assemblies become Part objects
+if instance.isRigid:
+    cad.parts[key] = Part(..., isRigidAssembly=True)
+```
+
+## Data Flow in from_assembly()
+
+The `CAD.from_assembly()` method follows this sequence:
+
+1. **Create root assembly data** - Populate from `rootAssembly` JSON
+2. **Populate subassemblies** - Process each subassembly:
+   - Add instances to both root (flat) and subassembly (hierarchical) registries
+   - Mark rigid assemblies based on depth
+   - Store mates and patterns only in subassembly registries
+3. **Populate parts** - Create Part objects:
+   - Regular parts from `assembly.parts` JSON
+   - Rigid subassemblies as Part objects with `isRigidAssembly=True`
+
+## Instance Storage Strategy
+
+Instances are stored in two places to balance lookup efficiency and hierarchy preservation:
+
+| Registry                        | Contains                           | Purpose                          |
+| ------------------------------- | ---------------------------------- | -------------------------------- |
+| `root_assembly.instances`       | All instances (parts + assemblies) | Fast flat lookup by PathKey      |
+| `sub_assemblies[key].instances` | Instances within that subassembly  | Preserves hierarchical structure |
+
+Mates and patterns remain exclusive to subassemblies (not duplicated in root).
+
+## Rigid Assembly Detection
+
+Always use the `isRigid` flag rather than depth comparison:
+
+```python
+# ✅ Correct: Uses isRigid flag
+if cad.root_assembly.instances.is_rigid_assembly(key):
+    # Handle rigid assembly
+
+# ❌ Avoid: Direct depth comparison (use during initial population only)
+if key.depth > max_depth:
+    # Only appropriate when SETTING the isRigid flag
+```
+
+The `isRigid` flag is the source of truth after assembly population is complete.
+
+## Integration Notes
+
+### Fetching Flexible Subassemblies
+
+The `fetch_subassemblies()` method uses `is_flexible_assembly()` to identify which assemblies need API fetching:
+
+```python
+flexible_assemblies = [
+    (key, instance)
+    for key, instance in cad.root_assembly.instances.assemblies.items()
+    if cad.root_assembly.instances.is_flexible_assembly(key)  # Uses isRigid flag
+]
+```
+
+### Parts as Single STL Files
+
+Both regular parts and rigid subassemblies appear in `cad.parts` because both are downloaded as single STL files from Onshape. This unified treatment simplifies downstream mesh processing.
+
 ## Key Classes and Their Roles
 
 ### Client Class
