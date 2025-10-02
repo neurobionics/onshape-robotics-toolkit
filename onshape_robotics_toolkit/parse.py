@@ -121,6 +121,42 @@ class PathKey:
         """String representation showing the path structure."""
         return " > ".join(self._path) if self._path else "(empty)"
 
+    def __lt__(self, other: "PathKey") -> bool:
+        """
+        Less-than comparison for sorting PathKeys.
+
+        Compares by depth first, then lexicographically by path elements.
+        This ensures consistent ordering for visualization and debugging.
+
+        Args:
+            other: Another PathKey to compare with
+
+        Returns:
+            True if this PathKey should sort before other
+        """
+        if not isinstance(other, PathKey):
+            return NotImplemented
+        # Sort by depth first (shallower first), then by path
+        return (self.depth, self._path) < (other.depth, other._path)
+
+    def __le__(self, other: "PathKey") -> bool:
+        """Less-than-or-equal comparison."""
+        if not isinstance(other, PathKey):
+            return NotImplemented
+        return (self.depth, self._path) <= (other.depth, other._path)
+
+    def __gt__(self, other: "PathKey") -> bool:
+        """Greater-than comparison."""
+        if not isinstance(other, PathKey):
+            return NotImplemented
+        return (self.depth, self._path) > (other.depth, other._path)
+
+    def __ge__(self, other: "PathKey") -> bool:
+        """Greater-than-or-equal comparison."""
+        if not isinstance(other, PathKey):
+            return NotImplemented
+        return (self.depth, self._path) >= (other.depth, other._path)
+
     @classmethod
     def from_path(cls, path: Union[list[str], str]) -> "PathKey":
         """

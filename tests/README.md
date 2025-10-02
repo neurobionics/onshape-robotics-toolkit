@@ -11,6 +11,7 @@ tests/
 ├── test_cad_document.py   # Tests for CAD creation and population
 ├── test_lookups.py        # Tests for lookup functionality (instances, parts, occurrences)
 ├── test_subassemblies.py  # Tests for subassembly data structure and rigid assemblies
+├── test_kinematic_tree.py # Tests for KinematicTree class
 └── data/
     └── assembly.json      # Test assembly data
 ```
@@ -97,6 +98,54 @@ Tests for the separated subassembly data structure and rigid assembly handling:
 - All instances in root registry (flat)
 - Instances also in subassembly registries (hierarchical)
 - Dual storage for efficient lookup and hierarchy preservation
+
+### `test_kinematic_tree.py`
+
+Tests for the `KinematicTree` class using PathKey-based system:
+
+**`TestKinematicTree` class:**
+
+- Creating kinematic tree from CAD document
+- Graph has nodes (parts) and edges (mates)
+- Root node detection (user-defined or centrality-based)
+- Topological ordering calculation
+- Node navigation (`get_children()`, `get_parent()`)
+- Metadata access (`get_node_metadata()`)
+- Mate data retrieval (`get_mate_data()`)
+- Tree representation and visualization
+- Tests across different max_depth values
+- Verifies nodes are PathKeys
+- Validates nodes match parts in CAD
+
+**`TestKinematicTreeInternals` class:**
+
+- Mate collection from root and subassemblies (`_collect_all_mates()`)
+- Mate validation and filtering (`_validate_mates()`)
+- Valid mate target checking (`_is_valid_mate_target()`)
+- Parts involved in mates extraction (`_get_parts_involved_in_mates()`)
+- User-defined root detection (`_find_user_defined_root()`)
+- Relative to absolute PathKey conversion (`_make_absolute_pathkey()`)
+- Idempotent PathKey conversion
+
+**`TestRigidAssemblyMateHandling` class:**
+
+- Rigid assembly ancestor detection (`_find_rigid_assembly_ancestor()`)
+- Subassembly mate conversion to absolute PathKeys
+- Internal mate filtering (within same rigid assembly)
+- Cross-boundary mate remapping (to rigid assembly roots)
+
+**`TestKinematicTreeVisualization` class:**
+
+- `show()` method existence and functionality
+- Label mapping creation (PathKey → part/assembly names)
+
+**`TestKinematicTreeConnectivity` class:**
+
+- Single connected component verification
+- No self-loops in graph
+- All nodes reachable from root
+
+**Note:** These tests require assembly data at `data/assembly.json`. If the file is missing, tests will error during fixture setup.
 
 ## Parametrized Testing
 
