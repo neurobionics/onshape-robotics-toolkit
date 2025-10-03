@@ -481,6 +481,147 @@ for key in tree.graph.nodes:
 
 **Expected Result**: Single connected component with all kinematic parts.
 
+## Robot Creation from KinematicGraph
+
+### Workflow
+
+```python
+from onshape_robotics_toolkit.parse import CAD, fetch_mass_properties_for_kinematic_parts
+from onshape_robotics_toolkit.graph import KinematicGraph
+from onshape_robotics_toolkit.robot import get_robot_from_kinematic_graph, RobotType
+
+# 1. Create CAD structure
+cad = CAD.from_assembly(assembly, max_depth=1)
+
+# 2. Process mates and build graph
+cad.process_mates_and_relations()
+kinematic_graph = KinematicGraph(cad=cad, use_user_defined_root=True)
+
+# 3. Fetch mass properties (selective for efficiency)
+fetch_mass_properties_for_kinematic_parts(
+    cad=cad,
+    kinematic_graph=kinematic_graph,
+    client=client
+)
+
+# 4. Generate robot structure
+robot = get_robot_from_kinematic_graph(
+    cad=cad,
+    kinematic_graph=kinematic_graph,
+    client=client,
+    robot_name="my_robot"
+)
+
+# 5. Save URDF with assets
+robot.save("robot.urdf", download_assets=True)
+```
+
+### Mass Property Fetching
+
+**Selective fetching** only retrieves mass properties for parts in the kinematic chain:
+
+```python
+async def _fetch_mass_properties_for_pathkeys_async(
+    cad: CAD,
+    part_keys: list[PathKey],
+    client: Client
+) -> None:
+    tasks = []
+    for key in part_keys:
+        part = cad.parts[key]
+        if part.MassProperty is not None:
+            continue  # Skip if already fetched
+
+        # Use asyncio.to_thread for concurrent API calls
+        task = asyncio.to_thread(
+            client.get_mass_property,
+            did=part.documentId,
+            wtype=WorkspaceType.M.value,
+            wid=part.documentMicroversion or cad.document_microversion,
+            eid=part.elementId,
+            partID=part.partId,
+        )
+        tasks.append((key, task))
+
+    # Execute concurrently
+    results = await asyncio.gather(*[task for _, task in tasks], return_exceptions=True)
+```
+
+### Graph Edge Data Preservation
+
+**Critical**: `nx.bfs_tree()` creates trees without edge data. Must restore mate data after BFS:
+
+```python
+def convert_to_digraph(graph: nx.Graph, user_defined_root: Any = None) -> tuple[nx.DiGraph, Any]:
+    # BFS tree loses edge data!
+    bfs_graph = nx.bfs_tree(graph, root_node)
+    di_graph = nx.DiGraph(bfs_graph)
+
+    # Restore edge data for BFS tree edges
+    for u, v in list(di_graph.edges()):
+        if graph.has_edge(u, v):
+            di_graph[u][v].update(graph[u][v])
+        elif graph.has_edge(v, u):
+            di_graph[u][v].update(graph[v][u])
+
+    return di_graph, root_node
+```
+
+### Asset Download: Workspace Types
+
+Different entity types require different workspace types for STL downloads:
+
+```python
+# Regular parts: Use microversion type
+if not part.isRigidAssembly:
+    wtype = WorkspaceType.M.value
+    wid = part.documentMicroversion or cad.document_microversion
+
+# Rigid assemblies: Use workspace type
+elif part.isRigidAssembly:
+    wtype = WorkspaceType.W.value  # Assembly STL API requires workspace type
+    wid = part.rigidAssemblyWorkspaceId or cad.document_microversion
+
+# Versioned parts: Use version type
+elif part.documentVersion:
+    wtype = WorkspaceType.V.value
+    wid = part.documentVersion
+```
+
+**API Endpoints**:
+
+- Parts: `/api/parts/d/{did}/m/{microversion}/e/{eid}/partid/{partId}/stl`
+- Assemblies: `/api/assemblies/d/{did}/w/{workspace}/e/{eid}/translations`
+
+### Rigid Assembly Part Creation
+
+**SubAssembly vs AssemblyInstance**:
+
+- `SubAssembly`: Assembly definition (where it's defined in Onshape)
+- `AssemblyInstance`: Insertion point (where instance was created)
+
+For rigid assemblies, use **SubAssembly data** for Part creation:
+
+```python
+# Find matching SubAssembly for the AssemblyInstance
+for subassembly in assembly.subAssemblies:
+    if subassembly.elementId == assembly_instance.elementId:
+        matching_subassembly = subassembly
+        break
+
+# Use SubAssembly's document info (NOT instance's)
+self.parts[key] = Part(
+    documentId=matching_subassembly.documentId,
+    elementId=matching_subassembly.elementId,
+    documentMicroversion=matching_subassembly.documentMicroversion,
+    isRigidAssembly=True,
+    rigidAssemblyWorkspaceId=matching_subassembly.documentMicroversion,  # Workspace ID for STL download
+    ...
+)
+```
+
+**Note**: `SubAssembly` lacks `documentMetaData`, so we use `documentMicroversion` as workspace ID. This works for same-document assemblies but may fail for cross-document references.
+
 ## Key Conventions
 
 - **Link Origins**: Always at zero vector after transformation
@@ -492,3 +633,6 @@ for key in tree.graph.nodes:
 - **PathKey Comparison**: Required for graph sorting, compares depth then path lexicographically
 - **Subassembly Mates**: Always stored as relative PathKeys, must convert to absolute before use
 - **Rigid Assembly Mates**: Filter internal, remap cross-boundary to rigid root
+- **Edge Data in Graphs**: `nx.bfs_tree()` loses edge attributes, must restore mate_data manually
+- **Mass Properties**: Fetch selectively for kinematic chain parts only, use `asyncio.to_thread()` for concurrency
+- **Workspace Types**: Parts use microversion ('m'), assemblies use workspace ('w'), versions use version ('v')

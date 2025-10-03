@@ -135,17 +135,21 @@ def get_robot_link(
 
     LOGGER.info(f"Creating robot link for {name}")
 
+    # Determine workspace type and ID for fetching the mesh
     mvwid: str
     if part.documentVersion:
+        # Part from a specific version
         wtype = WorkspaceType.V.value
         mvwid = part.documentVersion
-
     elif part.isRigidAssembly:
+        # Rigid assembly - use workspace type with its workspace ID
+        # The assembly STL API requires workspace type and workspace ID
         wtype = WorkspaceType.W.value
-        mvwid = part.rigidAssemblyWorkspaceId or wid
+        mvwid = part.rigidAssemblyWorkspaceId if part.rigidAssemblyWorkspaceId else wid
     else:
-        wtype = WorkspaceType.W.value
-        mvwid = wid
+        # Regular part - use its documentMicroversion with microversion type
+        wtype = WorkspaceType.M.value
+        mvwid = part.documentMicroversion if part.documentMicroversion else wid
 
     _asset = Asset(
         did=part.documentId,

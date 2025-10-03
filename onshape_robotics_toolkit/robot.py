@@ -9,15 +9,19 @@ Dataclass:
 import asyncio
 import os
 from enum import Enum
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import networkx as nx
 import numpy as np
 from lxml import etree as ET
 from scipy.spatial.transform import Rotation
 
+if TYPE_CHECKING:
+    from onshape_robotics_toolkit.graph import KinematicGraph
+    from onshape_robotics_toolkit.parse import CAD
+
 from onshape_robotics_toolkit.connect import Asset, Client
-from onshape_robotics_toolkit.graph import create_graph, plot_graph
+from onshape_robotics_toolkit.graph import plot_graph
 from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.models.assembly import (
     Assembly,
@@ -44,13 +48,6 @@ from onshape_robotics_toolkit.models.mjcf import Actuator, Encoder, ForceSensor,
 from onshape_robotics_toolkit.parse import (
     MATE_JOINER,
     RELATION_PARENT,
-    get_mates_and_relations,
-    get_parts,
-    get_parts_without_mass_properties,
-    get_subassemblies,
-)
-from onshape_robotics_toolkit.parse import (
-    get_instances_legacy as get_instances,
 )
 from onshape_robotics_toolkit.urdf import get_joint_name, get_robot_joint, get_robot_link, get_topological_mates
 from onshape_robotics_toolkit.utilities.helpers import format_number
@@ -874,6 +871,8 @@ class Robot:
         Returns:
             The robot model.
         """
+        from onshape_robotics_toolkit.graph import KinematicGraph
+        from onshape_robotics_toolkit.parse import CAD
 
         document = Document.from_url(url=url)
         client.set_base_url(document.base_url)
@@ -887,64 +886,32 @@ class Robot:
             with_meta_data=True,
         )
 
-        instances, instance_proxy_map, occurrences, id_to_name_map = get_instances(
-            assembly=assembly, max_depth=max_depth
-        )
-        subassemblies, rigid_subassemblies = get_subassemblies(assembly=assembly, client=client, instances=instances)
+        # Create CAD structure with PathKey-based system
+        cad = CAD.from_assembly(assembly=assembly, max_depth=max_depth)
 
-        # Create parts without mass properties first (for mates processing)
-        parts_temp = get_parts_without_mass_properties(
-            assembly=assembly, rigid_subassemblies=rigid_subassemblies, instances=instances
-        )
+        # Process mates and relations (filtering, remapping, pattern expansion)
+        cad.process_mates_and_relations()
 
-        mates, relations = get_mates_and_relations(
-            assembly=assembly,
-            instance_proxy_map=instance_proxy_map,
-            occurrences=occurrences,
-            subassemblies=subassemblies,
-            rigid_subassemblies=rigid_subassemblies,
-            id_to_name_map=id_to_name_map,
-            parts=parts_temp,
-        )
+        # Build kinematic graph from CAD structure
+        kinematic_graph = KinematicGraph(cad=cad, use_user_defined_root=use_user_defined_root)
 
-        graph, root_node = create_graph(
-            occurrences=occurrences,
-            instances=instances,
-            parts=parts_temp,
-            mates=mates,
-            use_user_defined_root=use_user_defined_root,
-        )
-
-        # Now use the optimized get_parts with graph for efficient mass property fetching
-        parts = get_parts(
-            assembly=assembly,
-            rigid_subassemblies=rigid_subassemblies,
+        # Fetch mass properties for parts in kinematic chain
+        cad.fetch_mass_properties(
             client=client,
-            instances=instances,
-            graph=graph,
+            graph=kinematic_graph.graph,
             include_rigid_subassembly_parts=include_rigid_subassembly_parts,
         )
 
-        robot = get_robot(
-            assembly=assembly,
-            graph=graph,
-            root_node=root_node,
-            parts=parts,
-            mates=mates,
-            relations=relations,
+        # Generate robot structure from kinematic graph
+        robot = get_robot_from_kinematic_graph(
+            cad=cad,
+            kinematic_graph=kinematic_graph,
             client=client,
             robot_name=name,
         )
 
-        robot.parts = parts
-        robot.mates = mates
-        robot.relations = relations
-
-        robot.flexible_assembly_data = subassemblies
-        robot.rigid_assembly_data = rigid_subassemblies
-
+        # Store references for backward compatibility
         robot.assembly = assembly
-
         robot.type = robot_type
 
         return robot
@@ -963,6 +930,144 @@ def load_element(file_name: str) -> ET._Element:
     tree = ET.parse(file_name)  # noqa: S320
     root = tree.getroot()
     return root
+
+
+def get_robot_from_kinematic_graph(
+    cad: "CAD",
+    kinematic_graph: "KinematicGraph",
+    client: Client,
+    robot_name: str,
+) -> Robot:
+    """
+    Generate a Robot instance from a CAD document and kinematic graph.
+
+    This is the new PathKey-based implementation that uses the CAD class
+    and KinematicGraph to efficiently build the robot structure.
+
+    Args:
+        cad: CAD document with PathKey-based registries
+        kinematic_graph: Kinematic graph with parts and mates
+        client: Onshape client for downloading assets
+        robot_name: Name of the robot
+
+    Returns:
+        Robot: The generated Robot instance
+    """
+    from onshape_robotics_toolkit.parse import PathKey
+
+    robot = Robot(name=robot_name)
+    assets_map: dict[str, Asset] = {}
+    stl_to_link_tf_map: dict[PathKey, np.matrix] = {}
+
+    # Get root node from kinematic graph
+    if kinematic_graph.root_node is None:
+        raise ValueError("Kinematic graph has no root node")
+
+    root_key = kinematic_graph.root_node
+    LOGGER.info(f"Processing root node: {root_key}")
+
+    # Get root part
+    if root_key not in cad.parts:
+        raise ValueError(f"Root node {root_key} not found in parts registry")
+
+    root_part = cad.parts[root_key]
+
+    # Get sanitized name for root link
+    root_instance = cad.root_assembly.instances.get_instance(root_key)
+    if root_instance is None:
+        raise ValueError(f"Root instance {root_key} not found")
+    root_name = cad.root_assembly.instances.get_hierarchical_name(root_key)
+
+    # Create root link
+    root_link, stl_to_root_tf, root_asset = get_robot_link(
+        name=root_name,
+        part=root_part,
+        wid=cad.workspace_id,
+        client=client,
+        mate=None,
+    )
+    robot.add_link(root_link)
+    assets_map[root_name] = root_asset
+    stl_to_link_tf_map[root_key] = stl_to_root_tf
+
+    LOGGER.info(f"Processing {len(kinematic_graph.graph.edges)} edges in the kinematic graph.")
+
+    # Process edges in topological order
+    for parent_key, child_key in kinematic_graph.graph.edges:
+        LOGGER.info(f"Processing edge: {parent_key} -> {child_key}")
+
+        # Get parent transform
+        parent_tf = stl_to_link_tf_map[parent_key]
+
+        # Get parts
+        if parent_key not in cad.parts or child_key not in cad.parts:
+            LOGGER.warning(f"Part {parent_key} or {child_key} not found in parts registry. Skipping.")
+            continue
+
+        parent_part = cad.parts[parent_key]
+        child_part = cad.parts[child_key]
+
+        # Get mate data from graph edge
+        mate_data = kinematic_graph.get_mate_data(parent_key, child_key)
+        if mate_data is None:
+            LOGGER.warning(f"No mate data found for edge {parent_key} -> {child_key}. Skipping.")
+            continue
+
+        # Get sanitized names
+        parent_instance = cad.root_assembly.instances.get_instance(parent_key)
+        child_instance = cad.root_assembly.instances.get_instance(child_key)
+        if parent_instance is None or child_instance is None:
+            LOGGER.warning(f"Instance not found for {parent_key} or {child_key}. Skipping.")
+            continue
+
+        parent_name = cad.root_assembly.instances.get_hierarchical_name(parent_key)
+        child_name = cad.root_assembly.instances.get_hierarchical_name(child_key)
+
+        # Check for mate relations (mimic joints)
+        joint_mimic = None
+        # TODO: Implement mate relation support with PathKey system
+        # This will require updating the relation processing to use PathKeys
+
+        # Create joint(s) and dummy links
+        joint_list, link_list = get_robot_joint(
+            parent=parent_name,
+            child=child_name,
+            mate=mate_data,
+            stl_to_parent_tf=parent_tf,
+            mimic=joint_mimic,
+            is_rigid_assembly=parent_part.isRigidAssembly,
+        )
+
+        # Create child link
+        link, stl_to_link_tf, asset = get_robot_link(
+            name=child_name,
+            part=child_part,
+            wid=cad.workspace_id,
+            client=client,
+            mate=mate_data,
+        )
+        stl_to_link_tf_map[child_key] = stl_to_link_tf
+        assets_map[child_name] = asset
+
+        # Add child link if not already in graph
+        if child_name not in robot.graph:
+            robot.add_link(link)
+        else:
+            LOGGER.warning(f"Link {child_name} already exists in the robot graph. Skipping.")
+
+        # Add dummy links (for ball joints, etc.)
+        for link_item in link_list or []:
+            if link_item.name not in robot.graph:
+                robot.add_link(link_item)
+            else:
+                LOGGER.warning(f"Link {link_item.name} already exists in the robot graph. Skipping.")
+
+        # Add joints
+        for joint in joint_list:
+            robot.add_joint(joint)
+
+    robot.assets = assets_map
+    return robot
 
 
 def get_robot(

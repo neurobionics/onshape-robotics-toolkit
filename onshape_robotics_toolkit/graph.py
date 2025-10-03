@@ -332,8 +332,8 @@ class KinematicGraph:
         """
         # Check each ancestor (parent key) to see if it's a rigid assembly
         current = key
-        while current and current.parent_key:
-            parent = current.parent_key
+        while current and current.parent:
+            parent = current.parent
             # Check if parent is a rigid assembly
             if parent in self.cad.root_assembly.instances.assemblies:
                 assembly_instance = self.cad.root_assembly.instances.assemblies[parent]
@@ -697,18 +697,28 @@ def convert_to_digraph(graph: nx.Graph, user_defined_root: Any = None) -> tuple[
     centrality = nx.closeness_centrality(graph)
     root_node = user_defined_root if user_defined_root else max(centrality, key=lambda x: centrality[x])
 
+    # Create BFS tree from root (this loses edge data!)
     bfs_graph = nx.bfs_tree(graph, root_node)
     di_graph = nx.DiGraph(bfs_graph)
 
+    # Restore edge data for BFS tree edges from original graph
+    for u, v in list(di_graph.edges()):
+        if graph.has_edge(u, v):
+            # Copy edge data from original undirected graph
+            di_graph[u][v].update(graph[u][v])
+        elif graph.has_edge(v, u):
+            # Edge might be reversed in undirected graph
+            di_graph[u][v].update(graph[v][u])
+
+    # Add back any edges not in BFS tree (loops, etc.)
     for u, v, data in graph.edges(data=True):
         if not di_graph.has_edge(u, v) and not di_graph.has_edge(v, u):
-            # decide which edge to keep
+            # Decide which direction to keep based on centrality
             if centrality[u] > centrality[v]:
                 di_graph.add_edge(u, v, **data)
             else:
                 di_graph.add_edge(v, u, **data)
 
-    # TODO: Edges and nodes lose their data during this conversion, fix this
     return di_graph, root_node
 
 
