@@ -30,6 +30,335 @@ sequenceDiagram
     Robot-->>User: Robot model (URDF)
 ```
 
+## CAD → Robot Conversion Pipeline
+
+### Overview
+
+The conversion from Onshape assembly JSON to URDF robot follows these phases:
+
+```
+Assembly JSON → CAD (flattened) → KinematicGraph → Robot → URDF/MJCF
+```
+
+### Phase Breakdown
+
+#### Phase 1: CAD Population (`CAD.from_assembly()`)
+
+**Input**: Onshape Assembly JSON (from API)
+
+**Output**: CAD object with flattened registries
+
+**Operations**:
+
+1. Build `id_to_name` mapping from all instances (root + subassemblies)
+2. Build PathKey indexes from occurrences (canonical source of truth)
+3. Populate flat registries: instances, occurrences, mates, patterns
+4. Mark rigid assemblies based on `max_depth`
+5. (Optional) Fetch nested subassemblies for flexible assemblies
+
+**Key Point**: All data is flattened to root level with absolute PathKeys
+
+#### Phase 2: KinematicGraph Construction (`KinematicGraph.__init__()`)
+
+**Input**: CAD object
+
+**Output**: NetworkX DiGraph with PathKey nodes and mate edges
+
+**Operations**:
+
+1. Collect mates from all sources (root + fetched subassemblies)
+2. Validate PathKeys (must exist in parts or instances)
+3. Build undirected graph (nodes = parts, edges = mates)
+4. Remove disconnected subgraphs
+5. Convert to directed graph with root detection
+6. Calculate topological order
+
+**Key Point**: All mates already use absolute PathKeys with assembly provenance baked into key structure
+
+#### Phase 3: Lazy Parts Population
+
+**Input**: CAD + KinematicGraph
+
+**Output**: CAD.parts populated for kinematic parts only
+
+**Operations**:
+
+1. Get list of parts in kinematic graph (graph.nodes)
+2. Populate CAD.parts from assembly data (no mass properties yet)
+3. Async batch fetch mass properties from Onshape API
+4. Update CAD.parts[key].MassProperty
+
+**Key Point**: Parts dict initially empty, only populated for kinematic chain (optimization)
+
+#### Phase 4: Robot Generation (`get_robot_from_kinematic_graph()`)
+
+**Input**: CAD + KinematicGraph + Client
+
+**Output**: Robot object with Links, Joints, Assets
+
+**Operations**:
+
+1. Process root node → create root Link
+2. Iterate edges in topological order
+3. For each edge (parent → child):
+   - Get mate data from edge
+   - Create Joint(s) from mate type
+   - Create child Link
+   - Download STL asset
+   - Calculate transforms (stl_to_link_tf)
+4. Handle mate relations (mimic joints)
+5. Package assets and metadata
+
+**Key Point**: Uses PathKeys to lookup parts, transforms, names
+
+### Data Requirements from CAD Class
+
+Based on the pipeline analysis, the CAD class must provide:
+
+#### 1. **PathKey Infrastructure**
+
+```python
+# Dual indexing for O(1) lookup
+cad.keys: dict[tuple[str, ...], PathKey]           # ID path → PathKey
+cad.keys_by_name: dict[tuple[str, ...], PathKey]   # Name path → PathKey
+
+# PathKey utilities
+cad.get_path_key(path: str | list[str]) -> PathKey | None
+cad.get_path_key_by_name(name: str | list[str]) -> PathKey | None
+```
+
+**Used by**: All phases for entity identification
+
+#### 2. **Instance Registry**
+
+```python
+cad.instances: dict[PathKey, PartInstance | AssemblyInstance]
+
+# Query methods
+cad.is_part(key: PathKey) -> bool
+cad.is_rigid_assembly(key: PathKey) -> bool
+cad.is_flexible_assembly(key: PathKey) -> bool
+```
+
+**Used by**:
+
+- KinematicGraph: Validate mate targets, check rigid assemblies
+- Robot: Get instance names for link/joint naming
+
+#### 3. **Occurrence Registry (Transforms)**
+
+```python
+cad.occurrences: dict[PathKey, Occurrence]
+
+# Query methods
+cad.get_transform(key: PathKey) -> np.ndarray | None  # 4x4 matrix
+```
+
+**Used by**:
+
+- KinematicGraph: Check if part is fixed (user-defined root)
+- Robot: Get world transforms for pattern expansion
+- (Future) Hierarchical transforms for rigid subassemblies
+
+#### 4. **Mate Registry**
+
+```python
+# Mate key: (assembly_key, parent_key, child_key)
+# assembly_key is None for root assembly, PathKey for subassembly
+cad.mates: dict[tuple[Optional[PathKey], PathKey, PathKey], MateFeatureData]
+
+# Query methods
+cad.get_mates_from_root() -> dict[tuple[PathKey, PathKey], MateFeatureData]
+cad.get_all_mates_flattened() -> dict[tuple[PathKey, PathKey], MateFeatureData]
+cad.get_mate_data(parent: PathKey, child: PathKey, assembly: Optional[PathKey] = None)
+cad.get_mate_assembly(parent: PathKey, child: PathKey) -> Optional[PathKey]
+```
+
+**Used by**:
+
+- KinematicGraph: Build graph edges, collect from subassemblies
+- Robot: Get joint type, coordinate systems
+
+**Key Design**: Assembly provenance baked into mate key instead of separate structure
+
+#### 5. **Parts Registry (Metadata + Mass)**
+
+```python
+cad.parts: dict[PathKey, Part]  # Initially empty - lazy population
+
+# Part fields required:
+# - documentId, elementId, documentMicroversion, partId
+# - configuration, fullConfiguration
+# - isRigidAssembly (bool)
+# - rigidAssemblyWorkspaceId (for STL downloads)
+# - MassProperty (populated later, may be None)
+
+# Population method
+cad.populate_parts_for_keys(keys: set[PathKey], assembly: Assembly) -> None
+```
+
+**Used by**:
+
+- KinematicGraph: Validate nodes, add part metadata to graph
+- Robot: Get mass properties, download STLs, workspace IDs
+
+**Population Strategy**:
+
+- Initially empty dict (optimization)
+- Populated after graph construction for kinematic parts only
+- Includes rigid assemblies (marked with `isRigidAssembly=True`)
+- Mass properties fetched separately in Phase 3
+
+#### 6. **Pattern Registry**
+
+```python
+cad.patterns: dict[str, Pattern]
+
+# Query methods
+cad.get_pattern_for_seed(seed_id: str) -> Pattern | None
+cad.get_patterned_instances(seed_id: str) -> list[str]
+```
+
+**Used by**: (Future) Mate processing for pattern expansion
+
+#### 7. **Fetched Subassemblies**
+
+```python
+# For recursively fetched flexible assemblies (external documents)
+cad.fetched_subassemblies: dict[PathKey, CAD]
+```
+
+**Used by**: KinematicGraph (collect mates from recursively fetched assemblies)
+
+**Note**: All subassembly data is flattened into root registries during population
+
+#### 8. **Document Metadata**
+
+```python
+cad.document_id: str
+cad.element_id: str
+cad.workspace_id: str
+cad.document_microversion: str
+cad.max_depth: int
+cad.current_depth: int
+```
+
+**Used by**: Robot (workspace ID for STL downloads)
+
+### Critical Design Requirements
+
+#### Requirement 1: Flat Storage, Absolute PathKeys
+
+**Rationale**: Simplifies lookups, avoids nested traversal
+
+```python
+# ✅ Good: Single lookup
+instance = cad.instances[key]
+
+# ❌ Bad: Nested traversal
+instance = cad.root_assembly.instances[key] or \
+           cad.sub_assemblies[sub_key].instances[rel_key]
+```
+
+#### Requirement 2: Lazy Parts Population
+
+**Rationale**: Avoid expensive data processing for non-kinematic parts
+
+```python
+# Phase 1: Parts dict initially empty
+cad.parts = {}
+
+# Phase 3: Populate ONLY for kinematic parts
+cad.populate_parts_for_keys(kinematic_graph.graph.nodes, assembly)
+fetch_mass_properties_for_kinematic_parts(cad, kinematic_graph, client)
+```
+
+#### Requirement 3: Mate Assembly Provenance
+
+**Rationale**: Track which assembly owns each mate without separate class
+
+```python
+# Mate key encodes assembly provenance
+(None, parent_key, child_key)  # Root assembly mate
+(sub_key, parent_key, child_key)  # Subassembly mate
+```
+
+#### Requirement 4: Rigid Assembly Handling
+
+**Rationale**: Support assemblies treated as single rigid bodies
+
+```python
+# Parts registry includes rigid assemblies
+cad.parts[rigid_key] = Part(
+    isRigidAssembly=True,
+    rigidAssemblyWorkspaceId=...,
+    ...
+)
+
+# Instances registry tracks rigid flag
+cad.instances[rigid_key] = AssemblyInstance(isRigid=True)
+
+# Mates filtered/remapped during graph construction
+if parent_rigid == child_rigid:
+    # Filter internal mate
+elif parent_rigid:
+    # Remap to rigid root
+```
+
+#### Requirement 5: Name Consistency
+
+**Rationale**: Names must match between PathKeys, instances, and URDF output
+
+```python
+# PathKey name matches sanitized instance name
+key.name == get_sanitized_name(instance.name)
+
+# Hierarchical names for URDF
+link_name = key.hierarchical_name(separator="-")
+# "assembly_1-subassembly_2-part_3"
+```
+
+### Data Flow Summary
+
+```
+Assembly JSON
+    ↓
+CAD.from_assembly()
+    ↓
+CAD (flat registries with absolute PathKeys)
+    ├─ keys, keys_by_name
+    ├─ instances (all parts + assemblies)
+    ├─ occurrences (transforms)
+    ├─ mates (with assembly provenance in key)
+    ├─ patterns
+    ├─ parts (initially empty)
+    └─ fetched_subassemblies (external documents)
+    ↓
+KinematicGraph(cad)
+    ├─ Collect mates from root + fetched subassemblies
+    ├─ Validate PathKeys (must exist in instances)
+    ├─ Build graph (nodes=PathKeys, edges=mates)
+    └─ Detect root, topological order
+    ↓
+cad.populate_parts_for_keys(graph.nodes, assembly)
+    └─ Populate cad.parts for kinematic chain only
+    ↓
+fetch_mass_properties_for_kinematic_parts(cad, graph)
+    └─ Add MassProperty to cad.parts[key] for graph nodes
+    ↓
+get_robot_from_kinematic_graph(cad, graph, client)
+    ├─ Root link: cad.parts[root_key], cad.instances[root_key]
+    ├─ For each edge:
+    │   ├─ Get parts: cad.parts[parent_key], cad.parts[child_key]
+    │   ├─ Get mate: graph.get_mate_data(parent, child)
+    │   ├─ Get names: cad.instances[key].name
+    │   └─ Download STL: part.documentId, part.partId
+    └─ Create Robot object
+    ↓
+Robot.save()
+    └─ Export URDF/MJCF + STL assets
+```
+
 ## Transform System
 
 ### Entity Order Convention
@@ -189,50 +518,45 @@ if parent_occurrences[0] in rigid_subassembly_sanitized_to_prefixed:
 
 ## CAD Class and PathKey System
 
-### Data Structure
+### Data Structure (Flat Design)
 
 ```python
-cad.root_assembly.instances  # Flat registry: all instances
-cad.sub_assemblies           # Hierarchical: dict[PathKey, AssemblyData]
-cad.parts                    # Flat registry: dict[PathKey, Part]
+# All data stored in flat registries with absolute PathKeys
+cad.keys: dict[tuple[str, ...], PathKey]
+cad.keys_by_name: dict[tuple[str, ...], PathKey]
+cad.instances: dict[PathKey, PartInstance | AssemblyInstance]
+cad.occurrences: dict[PathKey, Occurrence]
+cad.mates: dict[tuple[Optional[PathKey], PathKey, PathKey], MateFeatureData]
+cad.patterns: dict[str, Pattern]
+cad.parts: dict[PathKey, Part]  # Lazy - populated after graph construction
+cad.fetched_subassemblies: dict[PathKey, CAD]  # External documents only
 ```
 
-### PathKey Indexing
+### PathKey Creation
 
 ```python
-# PathKey examples
-root_part = PathKey(('M0cLO6yVimMv6KhRM',))
-nested_part = PathKey(('McQ65EsxX+4zImFWp', 'MUgiNm7M17UkTi3/g'))
+# PathKey requires both ID path and name path
+id_to_name = {"MqRDHdbA0tAm2ygBR": "test_part", ...}
+key = PathKey.from_path("MqRDHdbA0tAm2ygBR", id_to_name)
+# Or directly: PathKey(("MqRDHdbA0tAm2ygBR",), ("test_part",))
 
 # Access
-instance = cad.root_assembly.instances.parts[key]
-occurrence = cad.root_assembly.occurrences.occurrences[key]
+instance = cad.instances[key]
+occurrence = cad.occurrences[key]
+part = cad.parts[key]  # Only after populate_parts_for_keys()
 ```
 
 ### Rigid Assembly Detection
 
 ```python
-# ✅ Correct: Use isRigid flag
-if cad.root_assembly.instances.is_rigid_assembly(key):
+# ✅ Correct: Use helper methods
+if cad.is_rigid_assembly(key):
     # Handle rigid assembly
 
-# ❌ Avoid: Direct depth comparison (only for SETTING flag during population)
+# Mark during population
 if key.depth > max_depth:
     instance.isRigid = True
 ```
-
-### Mate Processing Pipeline
-
-```python
-cad = CAD.from_assembly(assembly, max_depth=1)
-cad.process_mates_and_relations()
-```
-
-**Steps:**
-
-1. **Filter and Remap**: Remove internal mates, remap buried parts to rigid roots, apply hierarchical transforms
-2. **Expand Patterns**: Create mates for pattern instances with proper transforms
-3. **Ensure Uniqueness**: Deduplicate by ID and rename for URDF compliance
 
 ### Rigid Mate Remapping Example
 
@@ -290,20 +614,20 @@ if parent_rigid_root == child_rigid_root:
     del mate_registry.mates[(parent_key, child_key)]
 ```
 
-## Data Flow: CAD.from_assembly()
+## CAD Population: CAD.from_assembly()
 
-1. **Create root assembly** - Populate from `rootAssembly` JSON
-2. **Populate subassemblies** - Add instances to both root (flat) and subassembly (hierarchical) registries, mark rigid assemblies by depth
-3. **Populate parts** - Create Part objects for regular parts and rigid subassemblies (`isRigidAssembly=True`)
+**Operations**:
 
-## Instance Storage Strategy
-
-| Registry                        | Contains                           | Purpose                     |
-| ------------------------------- | ---------------------------------- | --------------------------- |
-| `root_assembly.instances`       | All instances (parts + assemblies) | Fast flat lookup by PathKey |
-| `sub_assemblies[key].instances` | Instances within subassembly       | Preserves hierarchy         |
-
-Mates and patterns are exclusive to subassemblies (not duplicated in root).
+1. Build `id_to_name` mapping from all instances in assembly JSON
+2. Create PathKey indexes from occurrences (dual indexing: ID and name)
+3. Populate flat registries:
+   - `_populate_instances()`: All parts and assemblies from occurrences
+   - `_populate_occurrences()`: All occurrence transforms
+   - `_populate_mates()`: Mates with assembly provenance in key
+   - `_populate_patterns()`: Assembly patterns
+   - `_mark_rigid_assemblies()`: Flag assemblies beyond max_depth
+4. Parts dict remains empty (lazy population after graph construction)
+5. Optionally fetch external subassemblies (different documents)
 
 ## KinematicGraph: Graph Construction from CAD
 
@@ -348,138 +672,48 @@ class PathKey:
         return (self.depth, self._path) >= (other.depth, other._path)
 ```
 
-### Mate Collection from Subassemblies
+### Mate Collection
 
-Mates are stored in multiple locations:
-
-- `cad.root_assembly.mates` - Root-level mates
-- `cad.sub_assemblies[key].mates` - Subassembly-specific mates
-- `cad.fetched_subassemblies[key].mates` - Downloaded subassembly mates
-
-**Critical**: Subassembly mates use **relative PathKeys** (just leaf IDs), must convert to absolute.
+Mates are stored with assembly provenance baked into the key structure:
 
 ```python
 def _collect_all_mates(self) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
-    """Collect mates from all sources and convert to absolute PathKeys."""
-    all_mates = {}
+    """Collect mates from root and fetched subassemblies."""
+    # Get flattened mates (strips assembly provenance)
+    all_mates = self.cad.get_all_mates_flattened()
 
-    # Root mates (already absolute)
-    all_mates.update(self.cad.root_assembly.mates.mates)
-
-    # Subassembly mates (need conversion)
-    for sub_key, sub_assembly in self.cad.sub_assemblies.items():
-        converted = self._convert_subassembly_mates_to_absolute(
-            sub_assembly.mates.mates, sub_key
-        )
-        all_mates.update(converted)
+    # Add mates from recursively fetched subassemblies
+    for fetched_cad in self.cad.fetched_subassemblies.values():
+        fetched_mates = fetched_cad.get_all_mates_flattened()
+        all_mates.update(fetched_mates)
 
     return all_mates
 ```
 
-### Rigid Assembly Mate Handling
-
-**Problem**: Mates may reference parts inside rigid assemblies, creating disconnected graph components.
-
-**Solution**: Two-phase processing:
-
-1. **Filter internal mates** - Remove mates where both entities are inside the same rigid assembly
-2. **Remap cross-boundary mates** - Replace buried part references with rigid assembly root
-
-```python
-def _convert_subassembly_mates_to_absolute(
-    self,
-    mates: dict[tuple[PathKey, PathKey], MateFeatureData],
-    subassembly_key: PathKey
-) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
-    """Convert relative PathKeys to absolute AND filter/remap rigid mates."""
-    absolute_mates = {}
-
-    for (parent_rel, child_rel), mate in mates.items():
-        # Convert relative PathKeys to absolute
-        absolute_parent = self._make_absolute_pathkey(parent_rel, subassembly_key)
-        absolute_child = self._make_absolute_pathkey(child_rel, subassembly_key)
-
-        # Find rigid assembly ancestors (if any)
-        parent_rigid_root = self._find_rigid_assembly_ancestor(absolute_parent)
-        child_rigid_root = self._find_rigid_assembly_ancestor(absolute_child)
-
-        # Phase 1: Filter internal mates (both in same rigid assembly)
-        if parent_rigid_root and child_rigid_root and parent_rigid_root == child_rigid_root:
-            continue  # Skip this mate entirely
-
-        # Phase 2: Remap cross-boundary mates to rigid roots
-        final_parent = parent_rigid_root if parent_rigid_root else absolute_parent
-        final_child = child_rigid_root if child_rigid_root else absolute_child
-
-        absolute_mates[(final_parent, final_child)] = mate
-
-    return absolute_mates
-```
-
-### Rigid Assembly Ancestor Detection
-
-```python
-def _find_rigid_assembly_ancestor(self, key: PathKey) -> Optional[PathKey]:
-    """Find the rigid assembly containing this PathKey, if any."""
-    current = key
-
-    # Traverse up the hierarchy
-    while current and current.parent_key:
-        parent = current.parent_key
-
-        # Check if parent is a rigid assembly
-        if parent in self.cad.root_assembly.instances.assemblies:
-            assembly_instance = self.cad.root_assembly.instances.assemblies[parent]
-            if assembly_instance.isRigid:
-                return parent  # Found containing rigid assembly
-
-        current = parent
-
-    return None  # Not inside any rigid assembly
-```
-
-### Relative to Absolute PathKey Conversion
-
-```python
-def _make_absolute_pathkey(self, relative_key: PathKey, subassembly_key: PathKey) -> PathKey:
-    """Convert relative PathKey (leaf IDs) to absolute (full path from root)."""
-    # Relative key: PathKey(('leaf_id',))
-    # Subassembly key: PathKey(('parent1', 'parent2'))
-    # Result: PathKey(('parent1', 'parent2', 'leaf_id'))
-    absolute_path = subassembly_key.path + relative_key.path
-    return PathKey(absolute_path)
-```
+**Key Simplification**: All PathKeys are absolute, assembly provenance tracked in mate key structure `(assembly_key, parent_key, child_key)`
 
 ### Debugging Disconnected Graphs
 
-**Symptom**: Multiple disconnected components when expecting single connected tree.
-
 **Common Causes**:
 
-1. Mates referencing parts at depth > max_depth (inside rigid assemblies)
-2. Subassembly mates not converted from relative to absolute PathKeys
-3. Internal mates within rigid assemblies not filtered out
+1. Mates referencing invalid PathKeys (not in instances registry)
+2. Parts not meeting validation criteria (`_is_valid_mate_target()`)
 
 **Debugging Steps**:
 
 ```python
-# 1. Check component count
+# Check component count
+import networkx as nx
 components = list(nx.connected_components(tree.graph.to_undirected()))
 print(f"Components: {len(components)}")
 
-# 2. Inspect mate structure
+# Inspect mate structure
 for (parent, child), mate in tree._collect_all_mates().items():
     print(f"{parent} <-> {child}")
-    print(f"  Parent depth: {parent.depth}, Child depth: {child.depth}")
-
-# 3. Verify rigid assembly detection
-for key in tree.graph.nodes:
-    rigid_root = tree._find_rigid_assembly_ancestor(key)
-    if rigid_root:
-        print(f"{key} is inside rigid assembly {rigid_root}")
+    valid_parent = tree._is_valid_mate_target(parent)
+    valid_child = tree._is_valid_mate_target(child)
+    print(f"  Valid: parent={valid_parent}, child={valid_child}")
 ```
-
-**Expected Result**: Single connected component with all kinematic parts.
 
 ## Robot Creation from KinematicGraph
 
@@ -488,31 +722,24 @@ for key in tree.graph.nodes:
 ```python
 from onshape_robotics_toolkit.parse import CAD, fetch_mass_properties_for_kinematic_parts
 from onshape_robotics_toolkit.graph import KinematicGraph
-from onshape_robotics_toolkit.robot import get_robot_from_kinematic_graph, RobotType
+from onshape_robotics_toolkit.robot import get_robot_from_kinematic_graph
 
-# 1. Create CAD structure
+# 1. Create CAD structure (flat registries, parts dict initially empty)
 cad = CAD.from_assembly(assembly, max_depth=1)
 
-# 2. Process mates and build graph
-cad.process_mates_and_relations()
+# 2. Build kinematic graph
 kinematic_graph = KinematicGraph(cad=cad, use_user_defined_root=True)
 
-# 3. Fetch mass properties (selective for efficiency)
-fetch_mass_properties_for_kinematic_parts(
-    cad=cad,
-    kinematic_graph=kinematic_graph,
-    client=client
-)
+# 3. Lazy populate parts for kinematic chain only
+cad.populate_parts_for_keys(kinematic_graph.graph.nodes, assembly)
 
-# 4. Generate robot structure
-robot = get_robot_from_kinematic_graph(
-    cad=cad,
-    kinematic_graph=kinematic_graph,
-    client=client,
-    robot_name="my_robot"
-)
+# 4. Fetch mass properties (selective for efficiency)
+fetch_mass_properties_for_kinematic_parts(cad, kinematic_graph, client)
 
-# 5. Save URDF with assets
+# 5. Generate robot structure
+robot = get_robot_from_kinematic_graph(cad, kinematic_graph, client, "my_robot")
+
+# 6. Save URDF with assets
 robot.save("robot.urdf", download_assets=True)
 ```
 

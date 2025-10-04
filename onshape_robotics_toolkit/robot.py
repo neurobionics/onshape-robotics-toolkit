@@ -889,16 +889,20 @@ class Robot:
         # Create CAD structure with PathKey-based system
         cad = CAD.from_assembly(assembly=assembly, max_depth=max_depth)
 
-        # Process mates and relations (filtering, remapping, pattern expansion)
-        cad.process_mates_and_relations()
-
         # Build kinematic graph from CAD structure
         kinematic_graph = KinematicGraph(cad=cad, use_user_defined_root=use_user_defined_root)
 
+        # Populate parts for kinematic chain (lazy loading)
+        kinematic_part_keys = set(kinematic_graph.graph.nodes)
+        cad.populate_parts_for_keys(keys=kinematic_part_keys, assembly=assembly)
+
         # Fetch mass properties for parts in kinematic chain
-        cad.fetch_mass_properties(
+        from onshape_robotics_toolkit.parse import fetch_mass_properties_for_kinematic_parts
+
+        fetch_mass_properties_for_kinematic_parts(
+            cad=cad,
+            kinematic_graph=kinematic_graph,
             client=client,
-            graph=kinematic_graph.graph,
             include_rigid_subassembly_parts=include_rigid_subassembly_parts,
         )
 
@@ -973,10 +977,10 @@ def get_robot_from_kinematic_graph(
     root_part = cad.parts[root_key]
 
     # Get sanitized name for root link
-    root_instance = cad.root_assembly.instances.get_instance(root_key)
+    root_instance = cad.instances.get(root_key)
     if root_instance is None:
         raise ValueError(f"Root instance {root_key} not found")
-    root_name = cad.root_assembly.instances.get_hierarchical_name(root_key)
+    root_name = root_key.hierarchical_name(separator="-")
 
     # Create root link
     root_link, stl_to_root_tf, root_asset = get_robot_link(
@@ -1014,14 +1018,14 @@ def get_robot_from_kinematic_graph(
             continue
 
         # Get sanitized names
-        parent_instance = cad.root_assembly.instances.get_instance(parent_key)
-        child_instance = cad.root_assembly.instances.get_instance(child_key)
+        parent_instance = cad.instances.get(parent_key)
+        child_instance = cad.instances.get(child_key)
         if parent_instance is None or child_instance is None:
             LOGGER.warning(f"Instance not found for {parent_key} or {child_key}. Skipping.")
             continue
 
-        parent_name = cad.root_assembly.instances.get_hierarchical_name(parent_key)
-        child_name = cad.root_assembly.instances.get_hierarchical_name(child_key)
+        parent_name = parent_key.hierarchical_name(separator="-")
+        child_name = child_key.hierarchical_name(separator="-")
 
         # Check for mate relations (mimic joints)
         joint_mimic = None

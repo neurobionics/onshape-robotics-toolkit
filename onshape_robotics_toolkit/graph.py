@@ -206,161 +206,41 @@ class KinematicGraph:
         if key in self.cad.parts:
             return True
 
-        # Check part instances
-        if key in self.cad.root_assembly.instances.parts:
+        # Check instances registry
+        instance = self.cad.instances.get(key)
+        if instance is None:
+            return False
+
+        # Part instances are valid
+        if isinstance(instance, PartInstance):
             return True
 
-        # Check assembly instances (only rigid ones are valid)
-        if key in self.cad.root_assembly.instances.assemblies:
-            assembly_instance = self.cad.root_assembly.instances.assemblies[key]
-            return assembly_instance.isRigid
+        # Assembly instances are valid only if rigid
+        if isinstance(instance, AssemblyInstance):
+            return instance.isRigid
 
         return False
 
     def _collect_all_mates(self) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
         """
-        Collect all mates from root assembly and all subassemblies.
+        Collect all mates from CAD (already flattened with absolute PathKeys).
 
-        This includes:
-        - Mates from root assembly (absolute PathKeys)
-        - Mates from subassemblies (converted to absolute PathKeys)
-        - Mates from fetched flexible subassemblies (recursively)
-
-        Subassembly mates use relative PathKeys (just leaf IDs), so we need to
-        prefix them with the subassembly's path to create absolute PathKeys.
+        The CAD class now stores all mates flattened from root + subassemblies.
+        We just need to get them without assembly provenance for graph construction.
 
         Returns:
             Dictionary mapping (parent_key, child_key) to MateFeatureData with absolute PathKeys
         """
-        all_mates: dict[tuple[PathKey, PathKey], MateFeatureData] = {}
-
-        # Add mates from root assembly (already have absolute PathKeys)
-        all_mates.update(self.cad.root_assembly.mates.mates)
-        LOGGER.debug(f"Collected {len(self.cad.root_assembly.mates.mates)} mates from root assembly")
-
-        # Add mates from all subassemblies in the JSON (need to convert to absolute PathKeys)
-        for sub_key, assembly_data in self.cad.sub_assemblies.items():
-            sub_mates_count = len(assembly_data.mates.mates)
-            if sub_mates_count > 0:
-                LOGGER.debug(f"Processing {sub_mates_count} mates from subassembly {sub_key}")
-                absolute_mates = self._convert_subassembly_mates_to_absolute(assembly_data.mates.mates, sub_key)
-                all_mates.update(absolute_mates)
+        # Get all mates flattened (removes assembly provenance from keys)
+        all_mates = self.cad.get_all_mates_flattened()
 
         # Add mates from fetched flexible subassemblies (if any)
         for fetched_cad in self.cad.fetched_subassemblies.values():
-            # Recursively collect mates from fetched subassemblies
-            all_mates.update(fetched_cad.root_assembly.mates.mates)
-            for sub_assembly_data in fetched_cad.sub_assemblies.values():
-                all_mates.update(sub_assembly_data.mates.mates)
+            fetched_mates = fetched_cad.get_all_mates_flattened()
+            all_mates.update(fetched_mates)
 
-        LOGGER.debug(
-            f"Collected {len(all_mates)} total mates "
-            f"(root: {len(self.cad.root_assembly.mates.mates)}, "
-            f"subassemblies: {len(self.cad.sub_assemblies)}, "
-            f"fetched: {len(self.cad.fetched_subassemblies)})"
-        )
+        LOGGER.debug(f"Collected {len(all_mates)} total mates from CAD")
         return all_mates
-
-    def _convert_subassembly_mates_to_absolute(
-        self, mates: dict[tuple[PathKey, PathKey], MateFeatureData], subassembly_key: PathKey
-    ) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
-        """
-        Convert subassembly mates with relative PathKeys to absolute PathKeys.
-
-        Subassembly mates use relative PathKeys (leaf IDs only), but we need
-        absolute PathKeys (full path from root) to match the instance registries.
-
-        Also filters out mates that are completely within rigid subassemblies,
-        since those are internal to the rigid assembly and shouldn't be in the tree.
-
-        Args:
-            mates: Dictionary of mates with relative PathKeys
-            subassembly_key: PathKey of the subassembly (used as prefix)
-
-        Returns:
-            Dictionary of mates with absolute PathKeys (filtered)
-        """
-        absolute_mates: dict[tuple[PathKey, PathKey], MateFeatureData] = {}
-        filtered_count = 0
-
-        for (parent_key, child_key), mate_data in mates.items():
-            # Convert relative PathKeys to absolute by prepending subassembly path
-            absolute_parent = self._make_absolute_pathkey(parent_key, subassembly_key)
-            absolute_child = self._make_absolute_pathkey(child_key, subassembly_key)
-
-            # Check if entities are within rigid subassemblies
-            parent_rigid_root = self._find_rigid_assembly_ancestor(absolute_parent)
-            child_rigid_root = self._find_rigid_assembly_ancestor(absolute_child)
-
-            # Case 1: Both within same rigid assembly - filter out (internal mate)
-            if parent_rigid_root and child_rigid_root and parent_rigid_root == child_rigid_root:
-                LOGGER.debug(
-                    f"Filtering internal mate: {absolute_parent} <-> {absolute_child} "
-                    f"(both within {parent_rigid_root})"
-                )
-                filtered_count += 1
-                continue
-
-            # Case 2: One or both entities inside rigid assembly - remap to rigid root
-            final_parent = parent_rigid_root if parent_rigid_root else absolute_parent
-            final_child = child_rigid_root if child_rigid_root else absolute_child
-
-            if final_parent != absolute_parent or final_child != absolute_child:
-                LOGGER.debug(
-                    f"Remapping mate to rigid roots: {absolute_parent} -> {final_parent}, "
-                    f"{absolute_child} -> {final_child}"
-                )
-
-            absolute_mates[(final_parent, final_child)] = mate_data
-
-            LOGGER.debug(f"Converted mate: {parent_key} -> {absolute_parent}, " f"{child_key} -> {absolute_child}")
-
-        if filtered_count > 0:
-            LOGGER.info(f"Filtered {filtered_count} internal mates from subassembly {subassembly_key}")
-
-        return absolute_mates
-
-    def _find_rigid_assembly_ancestor(self, key: PathKey) -> Optional[PathKey]:
-        """
-        Find the rigid assembly that contains this PathKey, if any.
-
-        Args:
-            key: PathKey to check
-
-        Returns:
-            PathKey of containing rigid assembly, or None if not within one
-        """
-        # Check each ancestor (parent key) to see if it's a rigid assembly
-        current = key
-        while current and current.parent:
-            parent = current.parent
-            # Check if parent is a rigid assembly
-            if parent in self.cad.root_assembly.instances.assemblies:
-                assembly_instance = self.cad.root_assembly.instances.assemblies[parent]
-                if assembly_instance.isRigid:
-                    return parent
-            current = parent
-        return None
-
-    def _make_absolute_pathkey(self, relative_key: PathKey, prefix_key: PathKey) -> PathKey:
-        """
-        Convert a relative PathKey to absolute by prepending a prefix.
-
-        Args:
-            relative_key: PathKey with relative path (may be partial)
-            prefix_key: PathKey to prepend (subassembly path)
-
-        Returns:
-            Absolute PathKey with full path from root
-        """
-        # If relative_key already contains the prefix, return as-is
-        prefix_len = len(prefix_key.path)
-        if len(relative_key.path) > prefix_len and relative_key.path[:prefix_len] == prefix_key.path:
-            return relative_key
-
-        # Otherwise, prepend the prefix
-        absolute_path = prefix_key.path + relative_key.path
-        return PathKey(absolute_path)
 
     def _get_parts_involved_in_mates(self, mates: dict[tuple[PathKey, PathKey], MateFeatureData]) -> set[PathKey]:
         """
@@ -391,7 +271,7 @@ class KinematicGraph:
             PathKey of fixed part, or None if not found
         """
         for part_key in involved_parts:
-            occurrence = self.cad.root_assembly.occurrences.occurrences.get(part_key)
+            occurrence = self.cad.occurrences.get(part_key)
             if occurrence and occurrence.fixed:
                 LOGGER.debug(f"Found user-defined root: {part_key}")
                 return part_key
@@ -416,14 +296,12 @@ class KinematicGraph:
         for part_key in involved_parts:
             # Check if this is a part or rigid assembly in parts registry
             if part_key not in self.cad.parts:
-                # Check if it's a flexible assembly instance (not in parts registry)
-                if part_key in self.cad.root_assembly.instances.assemblies:
-                    assembly_instance = self.cad.root_assembly.instances.assemblies[part_key]
-                    if not assembly_instance.isRigid:
+                # Check if it's an instance
+                instance = self.cad.instances.get(part_key)
+                if isinstance(instance, AssemblyInstance):
+                    if not instance.isRigid:
                         # Flexible assembly - skip it, mates should reference parts inside it
-                        LOGGER.debug(
-                            f"Skipping flexible assembly {part_key} - " f"mates should reference parts inside it"
-                        )
+                        LOGGER.debug(f"Skipping flexible assembly {part_key} - mates should reference parts inside it")
                         skipped_assemblies += 1
                         continue
                     else:
@@ -433,9 +311,7 @@ class KinematicGraph:
                             f"This may indicate mate processing didn't complete properly."
                         )
                         continue
-
-                # Not in parts registry and not an assembly - check if it's a part instance
-                if part_key in self.cad.root_assembly.instances.parts:
+                elif isinstance(instance, PartInstance):
                     LOGGER.warning(
                         f"Part instance {part_key} involved in mate but corresponding Part object "
                         f"not found in parts registry. This may indicate the part wasn't populated."
@@ -443,12 +319,12 @@ class KinematicGraph:
                 else:
                     LOGGER.warning(
                         f"PathKey {part_key} involved in mate but not found in any registry "
-                        f"(not in parts, part instances, or assembly instances)"
+                        f"(not in parts or instances)"
                     )
                 continue
 
             # Check if occurrence is hidden
-            occurrence = self.cad.root_assembly.occurrences.occurrences.get(part_key)
+            occurrence = self.cad.occurrences.get(part_key)
             if occurrence and occurrence.hidden:
                 LOGGER.debug(f"Skipping hidden part: {part_key}")
                 continue
@@ -526,14 +402,10 @@ class KinematicGraph:
         # Create a mapping from PathKey to name
         label_mapping = {}
         for node in self.graph.nodes:
-            # Try to get name from part instances
-            if node in self.cad.root_assembly.instances.parts:
-                part_instance = self.cad.root_assembly.instances.parts[node]
-                label_mapping[node] = part_instance.name
-            # Try to get name from assembly instances (for rigid assemblies)
-            elif node in self.cad.root_assembly.instances.assemblies:
-                assembly_instance = self.cad.root_assembly.instances.assemblies[node]
-                label_mapping[node] = assembly_instance.name
+            # Try to get name from instances
+            instance = self.cad.instances.get(node)
+            if instance:
+                label_mapping[node] = instance.name
             else:
                 # Fallback to PathKey representation
                 label_mapping[node] = str(node)

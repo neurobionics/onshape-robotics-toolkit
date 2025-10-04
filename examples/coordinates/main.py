@@ -170,18 +170,19 @@ if __name__ == "__main__":
         LOGGER.info(f"Assembly cached to {NAME}.json")
 
     cad = CAD.from_assembly(assembly, max_depth=DEPTH)
-    cad.process_mates_and_relations()
+    print(cad.mates)
+    # cad.process_mates_and_relations()
 
-    tree = KinematicGraph(cad, use_user_defined_root=True)
-    tree.show(f"KinematicGraph_Depth_{DEPTH}")
+    # tree = KinematicGraph(cad, use_user_defined_root=True)
+    # tree.show(f"KinematicGraph_Depth_{DEPTH}")
 
-    # Create robot from kinematic graph
-    robot = create_robot_from_kinematic_graph(
-        cad=cad,
-        kinematic_graph=tree,
-        client=client,
-        robot_name=f"robot_{DEPTH}",
-        robot_type=RobotType.URDF,
-        include_rigid_subassembly_parts=False,
-    )
-    robot.save(f"robot_{DEPTH}.urdf", download_assets=True)
+    # # Create robot from kinematic graph
+    # robot = create_robot_from_kinematic_graph(
+    #     cad=cad,
+    #     kinematic_graph=tree,
+    #     client=client,
+    #     robot_name=f"robot_{DEPTH}",
+    #     robot_type=RobotType.URDF,
+    #     include_rigid_subassembly_parts=False,
+    # )
+    # robot.save(f"robot_{DEPTH}.urdf", download_assets=True)

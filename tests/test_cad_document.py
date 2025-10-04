@@ -2,35 +2,12 @@
 
 import pytest
 
-from onshape_robotics_toolkit.models.assembly import Assembly
-from onshape_robotics_toolkit.parse import CAD, PathKey, RootAssemblyData
+from onshape_robotics_toolkit.models.assembly import Assembly, AssemblyInstance, PartInstance
+from onshape_robotics_toolkit.parse import CAD, PathKey
 
 
 class TestCAD:
-    """Tests for CAD class."""
-
-    def test_assembly_data_structure(self, cad_doc: CAD):
-        """Document the test assembly data structure."""
-        # This test documents what's in the test data to help understand skip conditions
-        print("\n=== Test Assembly Structure ===")
-        print(f"Total parts: {len(cad_doc.parts)}")
-        print(f"Part instances: {len(cad_doc.root_assembly.instances.parts)}")
-        print(f"Assembly instances: {len(cad_doc.root_assembly.instances.assemblies)}")
-
-        # Part depths
-        part_depths = {}
-        for key in cad_doc.root_assembly.instances.parts:
-            part_depths[key.depth] = part_depths.get(key.depth, 0) + 1
-        print(f"Part depths: {dict(sorted(part_depths.items()))}")
-
-        # Assembly depths
-        assembly_depths = {}
-        for key in cad_doc.root_assembly.instances.assemblies:
-            assembly_depths[key.depth] = assembly_depths.get(key.depth, 0) + 1
-        print(f"Assembly depths: {dict(sorted(assembly_depths.items()))}")
-
-        # This will always pass - it's just for documentation
-        assert True
+    """Tests for CAD class with flat structure."""
 
     def test_create_from_assembly(self, cad_doc: CAD, assembly: Assembly):
         """Test creating CAD from Assembly."""
@@ -40,104 +17,149 @@ class TestCAD:
         assert cad_doc.current_depth == 0
         assert cad_doc.max_depth == 0
 
-    def test_root_assembly_populated(self, cad_doc: CAD):
-        """Test that root assembly data is populated."""
-        assert cad_doc.root_assembly is not None
-        assert isinstance(cad_doc.root_assembly, RootAssemblyData)
+    def test_flat_structure_populated(self, cad_doc: CAD):
+        """Test that flat registries are populated."""
+        # Check that flat registries exist
+        assert cad_doc.instances is not None
+        assert cad_doc.occurrences is not None
+        assert cad_doc.mates is not None
+        assert cad_doc.patterns is not None
 
-        # Check that registries exist
-        assert cad_doc.root_assembly.instances is not None
-        assert cad_doc.root_assembly.occurrences is not None
-        assert cad_doc.root_assembly.mates is not None
-        assert cad_doc.root_assembly.patterns is not None
+        # Should have some data
+        assert len(cad_doc.instances) > 0
+        assert len(cad_doc.occurrences) > 0
 
-    def test_parts_populated(self, cad_doc: CAD, assembly: Assembly):
-        """Test that parts dictionary is populated."""
-        assert cad_doc.parts is not None
-        # Parts dict includes regular parts (may also include rigid assemblies)
-        assert len(cad_doc.parts) >= len(cad_doc.root_assembly.instances.parts)
+    def test_instances_are_pathkey_indexed(self, cad_doc: CAD):
+        """Test that instances are indexed by PathKey."""
+        for key, instance in cad_doc.instances.items():
+            assert isinstance(key, PathKey), "Instance keys should be PathKey"
+            assert isinstance(instance, (PartInstance, AssemblyInstance))
 
-        # Check that parts are keyed by PathKey
-        for key in cad_doc.parts:
-            assert isinstance(key, PathKey), "Parts should be keyed by PathKey"
+    def test_occurrences_are_pathkey_indexed(self, cad_doc: CAD):
+        """Test that occurrences are indexed by PathKey."""
+        for key in cad_doc.occurrences:
+            assert isinstance(key, PathKey), "Occurrence keys should be PathKey"
 
-    def test_instances_populated(self, cad_doc: CAD):
-        """Test that instances are populated in the registry."""
-        # Should have both parts and assemblies
-        total_instances = len(cad_doc.root_assembly.instances.parts) + len(cad_doc.root_assembly.instances.assemblies)
+    def test_mates_have_assembly_provenance(self, cad_doc: CAD):
+        """Test that mates have assembly provenance in keys."""
+        # Mate keys should be 3-tuples: (assembly_key, parent_key, child_key)
+        for mate_key in cad_doc.mates:
+            assert isinstance(mate_key, tuple)
+            assert len(mate_key) == 3
+            assembly_key, parent_key, child_key = mate_key
+            # Assembly key is None for root, PathKey for subassembly
+            assert assembly_key is None or isinstance(assembly_key, PathKey)
+            assert isinstance(parent_key, PathKey)
+            assert isinstance(child_key, PathKey)
 
-        assert total_instances > 0
-        print(f"\nFound {len(cad_doc.root_assembly.instances.parts)} part instances")
-        print(f"Found {len(cad_doc.root_assembly.instances.assemblies)} assembly instances")
+    def test_occurrences_include_nested_parts(self, cad_doc: CAD):
+        """Test that occurrences include nested parts from subassemblies."""
+        # Occurrences includes ALL parts in the tree (including nested)
+        # Instances includes only root-level instances
+        # So occurrences >= instances
+        assert len(cad_doc.occurrences) >= len(
+            cad_doc.instances
+        ), f"Occurrences ({len(cad_doc.occurrences)}) should >= instances ({len(cad_doc.instances)})"
 
-    def test_occurrences_populated(self, cad_doc: CAD):
-        """Test that occurrences are populated in the registry."""
-        occurrences_count = len(cad_doc.root_assembly.occurrences.occurrences)
-        assert occurrences_count > 0
-        print(f"\nFound {occurrences_count} occurrences")
+        # All instance keys should be in occurrences
+        for key in cad_doc.instances:
+            assert key in cad_doc.occurrences, f"Instance {key} should have corresponding occurrence"
 
-    def test_instances_match_occurrences(self, cad_doc: CAD):
-        """Test that instance count matches occurrence count."""
-        total_instances = len(cad_doc.root_assembly.instances.parts) + len(cad_doc.root_assembly.instances.assemblies)
-        total_occurrences = len(cad_doc.root_assembly.occurrences.occurrences)
+    def test_parts_registry_initially_empty(self, cad_doc: CAD):
+        """Test that parts dict is initially empty (lazy population)."""
+        # Parts should be empty until populate_parts_for_keys() is called
+        assert len(cad_doc.parts) == 0, "Parts should be lazily populated"
 
-        assert (
-            total_instances == total_occurrences
-        ), f"Instances ({total_instances}) should match occurrences ({total_occurrences})"
+    def test_pathkey_dual_indexing(self, cad_doc: CAD):
+        """Test that PathKey dual indexing works."""
+        assert len(cad_doc.keys) > 0
+        assert len(cad_doc.keys_by_name) > 0
 
-    def test_subassembly_instances_have_full_paths(self, cad_doc: CAD):
-        """Test that instances from subassemblies have proper hierarchical paths."""
-        # Find instances with depth > 1 (these come from subassemblies)
-        nested_instances = [key for key in cad_doc.root_assembly.instances.parts if key.depth > 1]
-        nested_assemblies = [key for key in cad_doc.root_assembly.instances.assemblies if key.depth > 1]
+        # Both indexes should have same number of entries
+        assert len(cad_doc.keys) == len(cad_doc.keys_by_name)
 
-        # If we have nested instances, verify their paths
-        if nested_instances or nested_assemblies:
-            for key in nested_instances + nested_assemblies:
-                # Path should have multiple elements
-                assert len(key.path) > 1, f"Nested instance {key} should have path length > 1"
+    def test_get_path_key_lookup(self, cad_doc: CAD):
+        """Test PathKey lookup by ID."""
+        # Get a sample PathKey
+        sample_key = next(iter(cad_doc.instances.keys()))
 
-                # Should have a parent
-                assert key.parent_key is not None, f"Nested instance {key} should have a parent"
+        # Should be able to look it up by ID tuple
+        found_key = cad_doc.get_path_key(sample_key.path)
+        assert found_key == sample_key
 
-                # Parent should exist in instances or assemblies
-                parent = key.parent_key
-                assert (
-                    parent in cad_doc.root_assembly.instances.parts
-                    or parent in cad_doc.root_assembly.instances.assemblies
-                ), f"Parent {parent} should exist in instances registry"
+    def test_get_path_key_by_name_lookup(self, cad_doc: CAD):
+        """Test PathKey lookup by name."""
+        # Get a sample PathKey
+        sample_key = next(iter(cad_doc.instances.keys()))
 
-    def test_show_method_runs(self, cad_doc: CAD, capsys):
-        """Test that show() method runs without errors."""
-        # Should not raise any exceptions
-        cad_doc.show()
+        # Should be able to look it up by name tuple
+        found_key = cad_doc.get_path_key_by_name(sample_key.name_path)
+        assert found_key == sample_key
 
-        # Capture the output
-        captured = capsys.readouterr()
+    def test_is_part_and_is_rigid_assembly(self, cad_doc: CAD):
+        """Test instance type checking methods."""
+        for key in cad_doc.instances:
+            is_part = cad_doc.is_part(key)
+            is_rigid = cad_doc.is_rigid_assembly(key)
+            is_flex = cad_doc.is_flexible_assembly(key)
 
-        # Should print something
-        assert len(captured.out) > 0
+            # Should be one of the three types
+            assert is_part or is_rigid or is_flex
 
-        # Should show "Assembly Root"
-        assert "Assembly Root" in captured.out
+    def test_get_mates_from_root(self, cad_doc: CAD):
+        """Test getting only root-level mates."""
+        root_mates = cad_doc.get_mates_from_root()
 
-        # Should show at least some parts/assemblies with the tree marker |--
-        assert "|--" in captured.out
+        # All mates in result should have None as assembly key
+        for parent_key, child_key in root_mates:
+            assert isinstance(parent_key, PathKey)
+            assert isinstance(child_key, PathKey)
 
-    def test_show_displays_hierarchy(self, cad_doc_depth_2: CAD, capsys):
-        """Test that show() displays nested hierarchy correctly."""
-        cad_doc_depth_2.show()
-        captured = capsys.readouterr()
+            # Verify this mate exists in full mates dict with None assembly
+            assert (None, parent_key, child_key) in cad_doc.mates
 
-        # Count indentation levels to verify nesting
-        lines = captured.out.split("\n")
-        root_items = [line for line in lines if line.startswith("|--")]
-        nested_items = [line for line in lines if line.startswith("    |--")]
+    def test_get_all_mates_flattened(self, cad_doc: CAD):
+        """Test getting all mates without assembly provenance."""
+        flat_mates = cad_doc.get_all_mates_flattened()
 
-        # Should have both root and nested items if max_depth=2
-        assert len(root_items) > 0, "Should have root-level items"
-        # Nested items may or may not exist depending on assembly structure
-        print(f"\nRoot items: {len(root_items)}, Nested items: {len(nested_items)}")
+        # Should have (parent, child) tuples as keys
+        for mate_key in flat_mates:
+            assert isinstance(mate_key, tuple)
+            assert len(mate_key) == 2
+            parent_key, child_key = mate_key
+            assert isinstance(parent_key, PathKey)
+            assert isinstance(child_key, PathKey)
+
+    def test_assembly_data_structure(self, cad_doc: CAD):
+        """Document the test assembly data structure."""
+        print("\n=== Test Assembly Structure ===")
+        print(f"Total instances: {len(cad_doc.instances)}")
+
+        # Count part vs assembly instances
+        part_count = sum(1 for inst in cad_doc.instances.values() if isinstance(inst, PartInstance))
+        asm_count = sum(1 for inst in cad_doc.instances.values() if isinstance(inst, AssemblyInstance))
+        print(f"Part instances: {part_count}")
+        print(f"Assembly instances: {asm_count}")
+
+        # Part depths
+        part_depths = {}
+        for key, inst in cad_doc.instances.items():
+            if isinstance(inst, PartInstance):
+                part_depths[key.depth] = part_depths.get(key.depth, 0) + 1
+        print(f"Part depths: {dict(sorted(part_depths.items()))}")
+
+        # Assembly depths
+        assembly_depths = {}
+        for key, inst in cad_doc.instances.items():
+            if isinstance(inst, AssemblyInstance):
+                assembly_depths[key.depth] = assembly_depths.get(key.depth, 0) + 1
+        print(f"Assembly depths: {dict(sorted(assembly_depths.items()))}")
+
+        print(f"Total mates: {len(cad_doc.mates)}")
+        print(f"Total patterns: {len(cad_doc.patterns)}")
+
+        # This will always pass - it's just for documentation
+        assert True
 
 
 if __name__ == "__main__":
