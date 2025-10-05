@@ -614,7 +614,7 @@ class MatedCS(BaseModel):
     zAxis: list[float] = Field(..., description="The z-axis vector of the coordinate system.")
     origin: list[float] = Field(..., description="The origin point of the coordinate system.")
 
-    part_tf: Union[np.matrix, None] = Field(
+    part_tf: Union[np.ndarray, None] = Field(
         None, description="The 4x4 transformation matrix from the part coordinate system to the mate coordinate system."
     )
 
@@ -638,12 +638,12 @@ class MatedCS(BaseModel):
         return v
 
     @property
-    def part_to_mate_tf(self) -> np.matrix:
+    def part_to_mate_tf(self) -> np.ndarray:
         """
         Generates a transformation matrix from the part coordinate system to the mate coordinate system.
 
         Returns:
-            np.matrix: The 4x4 transformation matrix.
+            np.ndarray: The 4x4 transformation matrix.
         """
         if self.part_tf is not None:
             return self.part_tf
@@ -653,25 +653,27 @@ class MatedCS(BaseModel):
         part_to_mate_tf = np.eye(4)
         part_to_mate_tf[:3, :3] = rotation_matrix
         part_to_mate_tf[:3, 3] = translation_vector
-        return np.matrix(part_to_mate_tf)
+        return part_to_mate_tf
 
     @classmethod
-    def from_tf(cls, tf: np.matrix) -> "MatedCS":
+    def from_tf(cls, tf: np.ndarray) -> "MatedCS":
         """
         Creates a MatedCS object from a 4x4 transformation matrix.
 
         Args:
-            tf (np.matrix): The 4x4 transformation matrix.
+            tf (np.ndarray): The 4x4 transformation matrix.
 
         Returns:
             MatedCS: The MatedCS object created from the transformation matrix.
         """
+        # Ensure tf is a regular ndarray
+        tf_array = np.asarray(tf)
         return MatedCS(
-            xAxis=tf[:3, 0].flatten().tolist()[0],
-            yAxis=tf[:3, 1].flatten().tolist()[0],
-            zAxis=tf[:3, 2].flatten().tolist()[0],
-            origin=tf[:3, 3].flatten().tolist()[0],
-            part_tf=tf,
+            xAxis=tf_array[:3, 0].flatten().tolist(),
+            yAxis=tf_array[:3, 1].flatten().tolist(),
+            zAxis=tf_array[:3, 2].flatten().tolist(),
+            origin=tf_array[:3, 3].flatten().tolist(),
+            part_tf=tf_array,
         )
 
 

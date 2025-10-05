@@ -40,11 +40,15 @@ from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
 DEPTH = 1
 NAME = f"transforms_{DEPTH}"
-USE_CACHED = False  # Set to False to force fresh API call
+USE_CACHED = True  # Set to False to force fresh API call
 LOG_ASSEMBLY = False
 
+# TRANSFORMS = (
+#     "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/996c149cb195c9268ab062b4"
+# )
+
 TRANSFORMS = (
-    "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/996c149cb195c9268ab062b4"
+    "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/46679c6ab890a1b7a6d11a88"
 )
 
 

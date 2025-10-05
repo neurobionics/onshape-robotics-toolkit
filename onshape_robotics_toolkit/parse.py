@@ -21,6 +21,7 @@ from onshape_robotics_toolkit.models.assembly import (
     Assembly,
     AssemblyFeatureType,
     AssemblyInstance,
+    MatedCS,
     MateFeatureData,
     Occurrence,
     Part,
@@ -418,6 +419,73 @@ class CAD:
                 matches.append(key)
         return matches
 
+    def get_rigid_assembly_root(self, key: PathKey) -> Optional[PathKey]:
+        """
+        Find the rigid assembly root for a given PathKey.
+
+        If the key itself is a rigid assembly, returns it.
+        If the key is inside a rigid assembly, returns the rigid assembly's PathKey.
+        If the key is not inside any rigid assembly, returns None.
+
+        Args:
+            key: PathKey to find rigid assembly root for
+
+        Returns:
+            PathKey of rigid assembly root, or None if not inside rigid assembly
+
+        Examples:
+            >>> # Part at depth 2 inside rigid assembly at depth 1
+            >>> key = PathKey(("asm1", "sub1", "part1"), ("Assembly_1", "Sub_1", "Part_1"))
+            >>> rigid_root = cad.get_rigid_assembly_root(key)
+            >>> # Returns PathKey(("asm1", "sub1"), ("Assembly_1", "Sub_1"))
+        """
+        # Walk up the hierarchy from the key to find a rigid assembly
+        current: Optional[PathKey] = key
+        while current is not None:
+            instance = self.instances.get(current)
+            if isinstance(instance, AssemblyInstance) and instance.isRigid:
+                return current
+            current = current.parent
+        return None
+
+    def compute_relative_mate_transform(
+        self, part_key: PathKey, rigid_root_key: PathKey, part_to_mate_tf: np.ndarray
+    ) -> np.ndarray:
+        """
+        Compute mate transform relative to rigid assembly root.
+
+        Given a part buried inside a rigid assembly and its part_to_mate transform,
+        this computes the equivalent transform from the rigid assembly root to the mate.
+
+        Math:
+            T_rigid_mate = inv(T_world_rigid) @ T_world_part @ T_part_mate
+
+        Args:
+            part_key: PathKey of the buried part
+            rigid_root_key: PathKey of the rigid assembly root
+            part_to_mate_tf: Original part_to_mate transform (4x4 matrix)
+
+        Returns:
+            4x4 transform matrix from rigid root to mate coordinate system
+
+        Examples:
+            >>> rigid_key = PathKey(("asm1", "sub1"), ("Assembly_1", "Sub_1"))
+            >>> part_key = PathKey(("asm1", "sub1", "part1"), ("Assembly_1", "Sub_1", "Part_1"))
+            >>> original_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+            >>> new_tf = cad.compute_relative_mate_transform(part_key, rigid_key, original_tf)
+        """
+        # Get global transforms
+        rigid_tf = self.get_transform(rigid_root_key)
+        part_tf = self.get_transform(part_key)
+
+        if rigid_tf is None or part_tf is None:
+            raise ValueError(f"Missing transforms: rigid_tf={rigid_tf is not None}, part_tf={part_tf is not None}")
+
+        # Compute relative transform: T_rigid_mate = inv(T_world_rigid) @ T_world_part @ T_part_mate
+        rigid_to_mate_tf: np.ndarray = np.linalg.inv(rigid_tf) @ part_tf @ part_to_mate_tf
+
+        return rigid_to_mate_tf
+
     # ============================================================================
     # MATE QUERY METHODS
     # ============================================================================
@@ -560,10 +628,8 @@ class CAD:
         )
 
         # Populate all data using the pre-built PathKeys
+        # This includes marking rigid assemblies BEFORE populating mates
         cad._populate_from_assembly(assembly)
-
-        # Mark rigid assemblies based on max_depth
-        cad._mark_rigid_assemblies()
 
         LOGGER.info(f"Created {cad}")
 
@@ -659,16 +725,21 @@ class CAD:
         # Step 1: Populate instances (root + subassemblies)
         self._populate_instances(assembly)
 
-        # Step 2: Populate occurrences (root + subassemblies)
+        # Step 2: Mark rigid assemblies based on max_depth (MUST be before mates)
+        # This is needed for mate remapping to work correctly
+        self._mark_rigid_assemblies()
+
+        # Step 3: Populate occurrences (root + subassemblies)
         self._populate_occurrences(assembly)
 
-        # Step 3: Populate patterns (root + subassemblies)
+        # Step 4: Populate patterns (root + subassemblies)
         self._populate_patterns(assembly)
 
-        # Step 4: Populate mates with assembly provenance
+        # Step 5: Populate mates with assembly provenance
+        # Mates will be remapped if they reference parts inside rigid assemblies
         self._populate_mates(assembly)
 
-        # Step 5: Populate parts from assembly.parts (mass properties still None)
+        # Step 6: Populate parts from assembly.parts (mass properties still None)
         self._populate_parts(assembly)
 
         LOGGER.debug(
@@ -741,7 +812,12 @@ class CAD:
                         matching_instances.append(inst)
 
             if not matching_instances:
-                LOGGER.warning(f"Could not find instance for subassembly {subassembly.elementId}")
+                # Only warn for root-level subassemblies - nested ones will be found recursively
+                if not parent_path:
+                    LOGGER.debug(
+                        f"Subassembly {subassembly.elementId} not found at root level "
+                        f"(may be nested deeper in hierarchy)"
+                    )
                 continue
 
             # Process each matching instance (handles multiple instances of same subassembly)
@@ -854,12 +930,83 @@ class CAD:
 
         LOGGER.debug(f"Populated {len(self.patterns)} patterns")
 
+    def _remap_mate_for_rigid_assemblies(
+        self, parent_key: PathKey, child_key: PathKey, mate_data: MateFeatureData
+    ) -> tuple[PathKey, PathKey, MateFeatureData]:
+        """
+        Remap mate if either entity is inside a rigid assembly.
+
+        If a mated entity is buried inside a rigid assembly:
+        1. Find the rigid assembly root
+        2. Update PathKey to point to rigid assembly
+        3. Update matedCS transform to be relative to rigid assembly
+        4. Update matedOccurrence to match new PathKey
+
+        Args:
+            parent_key: Original parent PathKey
+            child_key: Original child PathKey
+            mate_data: Original mate data
+
+        Returns:
+            Tuple of (new_parent_key, new_child_key, updated_mate_data)
+        """
+        # Make a copy to avoid mutating the original
+        import copy
+
+        mate_data = copy.deepcopy(mate_data)
+
+        LOGGER.debug(f"Checking mate '{mate_data.name}' for remapping: {parent_key} <-> {child_key}")
+
+        # Check parent
+        parent_rigid_root = self.get_rigid_assembly_root(parent_key)
+        if parent_rigid_root and parent_rigid_root != parent_key:
+            # Parent is inside a rigid assembly, remap it
+            LOGGER.debug(f"Remapping parent from {parent_key} to rigid root {parent_rigid_root}")
+
+            # Get original part_to_mate transform
+            original_tf = np.array(mate_data.matedEntities[PARENT].matedCS.part_to_mate_tf).reshape(4, 4)
+
+            # Compute new transform relative to rigid assembly
+            new_tf = self.compute_relative_mate_transform(parent_key, parent_rigid_root, original_tf)
+
+            # Update mate data with new MatedCS from transform
+            mate_data.matedEntities[PARENT].matedCS = MatedCS.from_tf(new_tf)
+            mate_data.matedEntities[PARENT].matedOccurrence = list(parent_rigid_root.path)
+
+            # Update PathKey
+            parent_key = parent_rigid_root
+
+        # Check child
+        child_rigid_root = self.get_rigid_assembly_root(child_key)
+        if child_rigid_root and child_rigid_root != child_key:
+            # Child is inside a rigid assembly, remap it
+            LOGGER.debug(f"Remapping child from {child_key} to rigid root {child_rigid_root}")
+
+            # Get original part_to_mate transform
+            original_tf = np.array(mate_data.matedEntities[CHILD].matedCS.part_to_mate_tf).reshape(4, 4)
+
+            # Compute new transform relative to rigid assembly
+            new_tf = self.compute_relative_mate_transform(child_key, child_rigid_root, original_tf)
+
+            # Update mate data with new MatedCS from transform
+            mate_data.matedEntities[CHILD].matedCS = MatedCS.from_tf(new_tf)
+            mate_data.matedEntities[CHILD].matedOccurrence = list(child_rigid_root.path)
+
+            # Update PathKey
+            child_key = child_rigid_root
+
+        return parent_key, child_key, mate_data
+
     def _populate_mates(self, assembly: Assembly) -> None:
         """
         Populate mates from root and all subassemblies with assembly provenance.
 
         Root mates: Key = (None, parent, child)
         Subassembly mates: Key = (sub_key, parent, child)
+
+        For mates referencing parts inside rigid assemblies:
+        - Remap PathKey to rigid assembly root
+        - Update matedCS transform to be relative to rigid assembly
 
         Args:
             assembly: Assembly from Onshape API
@@ -876,6 +1023,18 @@ class CAD:
                     child_key = self.keys.get(child_path)
 
                     if parent_key and child_key:
+                        # Remap if inside rigid assembly
+                        parent_key, child_key, mate_data = self._remap_mate_for_rigid_assemblies(
+                            parent_key, child_key, mate_data
+                        )
+
+                        # Filter out internal mates (both entities in same rigid assembly)
+                        if parent_key == child_key:
+                            LOGGER.debug(
+                                f"Filtering internal mate '{mate_data.name}' within rigid assembly {parent_key}"
+                            )
+                            continue
+
                         # Store with None as assembly key (root)
                         self.mates[(None, parent_key, child_key)] = mate_data
                     else:
@@ -883,54 +1042,64 @@ class CAD:
 
         # Process subassembly mates
         for subassembly in assembly.subAssemblies:
-            # Find the AssemblyInstance that corresponds to this subassembly
-            sub_instance = next(
-                (
-                    inst
-                    for inst in assembly.rootAssembly.instances
-                    if isinstance(inst, AssemblyInstance) and inst.uid == subassembly.uid
-                ),
-                None,
-            )
-            if not sub_instance:
+            # Find the AssemblyInstance(s) that correspond to this subassembly
+            # Look in the flat instances registry (includes all nested instances)
+            matching_keys = [
+                key
+                for key, inst in self.instances.items()
+                if isinstance(inst, AssemblyInstance) and inst.uid == subassembly.uid
+            ]
+
+            if not matching_keys:
                 LOGGER.warning(f"Could not find instance for subassembly {subassembly.uid}")
                 continue
 
-            sub_key = self.get_path_key(sub_instance.id)
-            if not sub_key:
-                LOGGER.warning(f"No PathKey for subassembly instance {sub_instance.id}")
-                continue
+            # Process mates for each instance of this subassembly
+            for sub_key in matching_keys:
+                # Skip mates from rigid subassemblies (depth > max_depth)
+                # Rigid subassemblies are treated as single bodies, so their internal mates are not relevant
+                if self.max_depth == 0 or sub_key.depth > self.max_depth:
+                    LOGGER.debug(
+                        f"Skipping mates from rigid subassembly {sub_key} at depth "
+                        f"{sub_key.depth} (max_depth={self.max_depth})"
+                    )
+                    continue
 
-            # Skip mates from rigid subassemblies (depth > max_depth)
-            # Rigid subassemblies are treated as single bodies, so their internal mates are not relevant
-            if self.max_depth == 0 or sub_key.depth > self.max_depth:
-                LOGGER.debug(
-                    f"Skipping mates from rigid subassembly {sub_key} at depth "
-                    f"{sub_key.depth} (max_depth={self.max_depth})"
-                )
-                continue
+                # Process mates from this subassembly
+                for feature in subassembly.features:
+                    if feature.featureType == AssemblyFeatureType.MATE and isinstance(
+                        feature.featureData, MateFeatureData
+                    ):
+                        mate_data = feature.featureData
+                        if len(mate_data.matedEntities) >= 2:
+                            # Relative paths from subassembly JSON
+                            parent_rel_path = tuple(mate_data.matedEntities[PARENT].matedOccurrence)
+                            child_rel_path = tuple(mate_data.matedEntities[CHILD].matedOccurrence)
 
-            # Process mates from this subassembly
-            for feature in subassembly.features:
-                if feature.featureType == AssemblyFeatureType.MATE and isinstance(feature.featureData, MateFeatureData):
-                    mate_data = feature.featureData
-                    if len(mate_data.matedEntities) >= 2:
-                        # Relative paths from subassembly JSON
-                        parent_rel_path = tuple(mate_data.matedEntities[PARENT].matedOccurrence)
-                        child_rel_path = tuple(mate_data.matedEntities[CHILD].matedOccurrence)
+                            # Convert to absolute by prepending subassembly path
+                            parent_abs_path = sub_key.path + parent_rel_path
+                            child_abs_path = sub_key.path + child_rel_path
 
-                        # Convert to absolute by prepending subassembly path
-                        parent_abs_path = sub_key.path + parent_rel_path
-                        child_abs_path = sub_key.path + child_rel_path
+                            parent_key = self.keys.get(parent_abs_path)
+                            child_key = self.keys.get(child_abs_path)
 
-                        parent_key = self.keys.get(parent_abs_path)
-                        child_key = self.keys.get(child_abs_path)
+                            if parent_key and child_key:
+                                # Remap if inside rigid assembly
+                                parent_key, child_key, mate_data = self._remap_mate_for_rigid_assemblies(
+                                    parent_key, child_key, mate_data
+                                )
 
-                        if parent_key and child_key:
-                            # Store with subassembly key
-                            self.mates[(sub_key, parent_key, child_key)] = mate_data
-                        else:
-                            LOGGER.warning(f"Missing PathKey for subassembly {sub_key} mate")
+                                # Filter out internal mates (both entities in same rigid assembly)
+                                if parent_key == child_key:
+                                    LOGGER.debug(
+                                        f"Filtering internal mate '{mate_data.name}' within rigid assembly {parent_key}"
+                                    )
+                                    continue
+
+                                # Store with subassembly key
+                                self.mates[(sub_key, parent_key, child_key)] = mate_data
+                            else:
+                                LOGGER.warning(f"Missing PathKey for subassembly {sub_key} mate")
 
         LOGGER.debug(f"Populated {len(self.mates)} mates")
 

@@ -52,15 +52,21 @@ Assembly JSON → CAD (flattened) → KinematicGraph → Robot → URDF/MJCF
 
 1. Build `id_to_name` mapping from all instances (root + subassemblies)
 2. Build PathKey indexes from occurrences (canonical source of truth)
-3. Populate flat registries:
+3. Populate flat registries in this order (order is critical):
    - **Instances**: ALL instances regardless of max_depth (data availability)
+   - **Mark rigid assemblies**: Flag assemblies based on `max_depth` (MUST be before mates!)
    - **Occurrences**: ALL occurrences regardless of max_depth (transforms)
-   - **Mates**: Only from flexible assemblies (depth ≤ max_depth) for kinematic graph
    - **Patterns**: Only from flexible assemblies (depth ≤ max_depth) for kinematic graph
-4. Mark rigid assemblies based on `max_depth`
-5. (Optional) Fetch nested subassemblies for flexible assemblies
+   - **Mates**: Only from flexible assemblies (depth ≤ max_depth), with automatic remapping for rigid assemblies
+   - **Parts**: Eagerly populated from assembly.parts (including rigid assemblies as synthetic Part objects)
+4. (Optional) Fetch nested subassemblies for flexible assemblies
 
-**Key Point**: All structural data (instances, occurrences) is available regardless of max_depth. Only kinematic data (mates, patterns) is filtered by max_depth.
+**Key Points**:
+
+- All structural data (instances, occurrences) is available regardless of max_depth
+- Only kinematic data (mates, patterns) is filtered by max_depth
+- **Critical**: Rigid assemblies MUST be marked BEFORE processing mates for remapping to work
+- Mates referencing parts inside rigid assemblies are automatically remapped to the rigid assembly root with updated transforms
 
 #### Phase 2: KinematicGraph Construction (`KinematicGraph.__init__()`)
 
@@ -142,6 +148,10 @@ cad.instances: dict[PathKey, PartInstance | AssemblyInstance]
 cad.is_part(key: PathKey) -> bool
 cad.is_rigid_assembly(key: PathKey) -> bool
 cad.is_flexible_assembly(key: PathKey) -> bool
+
+# Rigid assembly helpers
+cad.get_rigid_assembly_root(key: PathKey) -> Optional[PathKey]
+cad.compute_relative_mate_transform(part_key, rigid_root_key, part_to_mate_tf) -> np.ndarray
 ```
 
 **Used by**:
@@ -467,30 +477,172 @@ def build_hierarchical_transform_for_rigid_subassembly(
 | `[rigid_sub, level1]`         | `rigid_sub_JOINER_level1`               | `level1`               |
 | `[rigid_sub, level1, level2]` | `rigid_sub_JOINER_level1_JOINER_level2` | `level1_JOINER_level2` |
 
-## Disconnected Graph Resolution
+## Mate Remapping for Rigid Assemblies
 
-At shallow `max_depth`, mates may reference parts inside rigid subassemblies that aren't individually accessible.
+At shallow `max_depth`, mates may reference parts buried inside rigid subassemblies. The CAD system automatically remaps these mates during population to reference the rigid assembly root instead.
 
-### Instance Proxy Mapping
+### Problem
 
-```python
-instance_proxy_map = {
-    "wheel_subassembly_JOINER_hub": "wheel_subassembly",
-    "wheel_subassembly_JOINER_roller_1": "wheel_subassembly",
-}
-```
-
-### Proxy-Aware Functions
+When `max_depth=1`, assemblies at depth=2+ are treated as rigid bodies. However, mates from depth=1 flexible assemblies may reference parts at depth=2+:
 
 ```python
-def join_mate_occurrences_with_proxy(
-    parent_occurrences, child_occurrences,
-    instance_proxy_map, subassembly_prefix=None
-) -> str:
-    parent = get_proxy_occurrence_name(parent_occurrences, instance_proxy_map, subassembly_prefix)
-    child = get_proxy_occurrence_name(child_occurrences, instance_proxy_map, subassembly_prefix)
-    return f"{parent}{MATE_JOINER}{child}"
+# Assembly structure:
+# Part_1 (depth=0)
+# └─ Assembly_2 (depth=1, flexible)
+#    ├─ Part_6 (depth=1)
+#    └─ Assembly_1 (depth=2, RIGID)
+#       └─ Part_10 (depth=2, buried)
+
+# Mate from flexible assembly references buried part:
+Mate('Revolute 1', parent=Part_6, child=Part_10)  # Part_10 is inside rigid Assembly_1!
 ```
+
+This creates disconnected graphs because `Part_10` doesn't exist in the parts registry (only `Assembly_1` exists as a single rigid body).
+
+### Solution: Automatic Mate Remapping
+
+The CAD system automatically detects and remaps such mates during `_populate_mates()`:
+
+```python
+def _remap_mate_for_rigid_assemblies(
+    parent_key: PathKey,
+    child_key: PathKey,
+    mate_data: MateFeatureData
+) -> tuple[PathKey, PathKey, MateFeatureData]:
+    """Remap mate if either entity is inside a rigid assembly."""
+
+    # 1. Find rigid assembly root for each entity
+    parent_rigid_root = cad.get_rigid_assembly_root(parent_key)
+    child_rigid_root = cad.get_rigid_assembly_root(child_key)
+
+    # 2. If entity is inside rigid assembly, remap it
+    if parent_rigid_root and parent_rigid_root != parent_key:
+        # Compute new transform: T_rigid_mate = inv(T_world_rigid) @ T_world_part @ T_part_mate
+        original_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+        new_tf = compute_relative_mate_transform(parent_key, parent_rigid_root, original_tf)
+
+        # Update mate data
+        mate.matedEntities[PARENT].matedCS = MatedCS.from_tf(new_tf)
+        mate.matedEntities[PARENT].matedOccurrence = list(parent_rigid_root.path)
+        parent_key = parent_rigid_root
+
+    # 3. Filter internal mates (both entities in same rigid assembly)
+    if parent_key == child_key:
+        return None  # Filtered out
+
+    return parent_key, child_key, mate_data
+```
+
+### Helper Methods
+
+#### Finding Rigid Assembly Root
+
+```python
+def get_rigid_assembly_root(key: PathKey) -> Optional[PathKey]:
+    """Find the rigid assembly root for a given PathKey.
+
+    Walks up the hierarchy to find if a part is inside a rigid assembly.
+    """
+    current = key
+    while current is not None:
+        instance = self.instances.get(current)
+        if isinstance(instance, AssemblyInstance) and instance.isRigid:
+            return current
+        current = current.parent
+    return None
+```
+
+#### Computing Relative Transform
+
+```python
+def compute_relative_mate_transform(
+    part_key: PathKey,
+    rigid_root_key: PathKey,
+    part_to_mate_tf: np.ndarray
+) -> np.ndarray:
+    """Compute mate transform relative to rigid assembly root.
+
+    Math: T_rigid_mate = inv(T_world_rigid) @ T_world_part @ T_part_mate
+
+    This transforms the part_to_mate coordinate system from being relative
+    to the buried part to being relative to the rigid assembly root.
+    """
+    rigid_tf = self.get_transform(rigid_root_key)  # World transform of rigid root
+    part_tf = self.get_transform(part_key)         # World transform of buried part
+
+    # Compute relative transform
+    rigid_to_mate_tf = np.linalg.inv(rigid_tf) @ part_tf @ part_to_mate_tf
+
+    return rigid_to_mate_tf
+```
+
+### Remapping Example
+
+**Before remapping:**
+
+```python
+Mate(
+    name='Revolute 1',
+    parent=PathKey(('asm2', 'part6')),  # OK - in flexible assembly
+    child=PathKey(('asm2', 'asm1', 'part10')),  # BAD - buried in rigid assembly
+    child.matedCS.part_to_mate_tf = [[...]]  # Relative to part10
+)
+```
+
+**After remapping:**
+
+```python
+Mate(
+    name='Revolute 1',
+    parent=PathKey(('asm2', 'part6')),  # Unchanged
+    child=PathKey(('asm2', 'asm1')),  # REMAPPED to rigid assembly root!
+    child.matedCS.part_to_mate_tf = [[...]]  # UPDATED - now relative to asm1
+)
+```
+
+### Critical Implementation Details
+
+1. **Order Matters**: `_mark_rigid_assemblies()` MUST be called BEFORE `_populate_mates()` so the remapping logic can detect which assemblies are rigid.
+
+2. **Transform Math**: The transform is computed in world space then converted back to local:
+
+   ```python
+   # Get global transforms
+   T_world_rigid = get_transform(rigid_root)
+   T_world_part = get_transform(buried_part)
+   T_part_mate = original_mate_cs
+
+   # Compute: T_rigid_mate = inv(T_world_rigid) @ T_world_part @ T_part_mate
+   T_rigid_mate = inv(T_world_rigid) @ T_world_part @ T_part_mate
+   ```
+
+3. **MatedCS Immutability**: Cannot directly set `part_to_mate_tf` (it's a computed property). Must use `MatedCS.from_tf()` to create a new instance.
+
+4. **Internal Mate Filtering**: If both entities end up at the same rigid assembly root, the mate is completely internal and gets filtered out.
+
+### Nested Subassembly Processing
+
+Mates from nested subassemblies are processed by looking in the flat instances registry instead of just root-level instances:
+
+```python
+# OLD (only finds root-level subassemblies):
+for subassembly in assembly.subAssemblies:
+    sub_instance = next(
+        inst for inst in assembly.rootAssembly.instances
+        if inst.uid == subassembly.uid
+    )
+
+# NEW (finds all subassemblies at any depth):
+for subassembly in assembly.subAssemblies:
+    matching_keys = [
+        key for key, inst in self.instances.items()
+        if isinstance(inst, AssemblyInstance) and inst.uid == subassembly.uid
+    ]
+    for sub_key in matching_keys:
+        # Process mates from each instance
+```
+
+This handles cases where subassemblies are nested inside other subassemblies (e.g., `Assembly 1` inside `Assembly 2`).
 
 ### Unique Mate Names
 
@@ -622,24 +774,30 @@ if parent_rigid_root == child_rigid_root:
 
 ## CAD Population: CAD.from_assembly()
 
-**Operations**:
+**Operations (in this exact order)**:
 
 1. Build `id_to_name` mapping from all instances in assembly JSON
 2. Create PathKey indexes from occurrences (dual indexing: ID and name)
-3. Populate flat registries:
+3. Populate flat registries **in order** (order is critical):
    - `_populate_instances()`: ALL parts and assemblies (no depth filtering - data availability)
+   - `_mark_rigid_assemblies()`: **Flag assemblies beyond max_depth (MUST BE BEFORE MATES!)**
    - `_populate_occurrences()`: ALL occurrence transforms (no depth filtering)
-   - `_populate_mates()`: Mates with assembly provenance, FILTERED by max_depth (kinematic only)
    - `_populate_patterns()`: Assembly patterns, FILTERED by max_depth (kinematic only)
-   - `_mark_rigid_assemblies()`: Flag assemblies beyond max_depth
-4. Parts populated eagerly from assembly.parts (mass properties remain None)
-5. Optionally fetch external subassemblies (different documents)
+   - `_populate_mates()`: Mates with assembly provenance, FILTERED by max_depth, **with automatic remapping**
+   - `_populate_parts()`: Eagerly populate parts from assembly.parts (mass properties remain None)
+4. Optionally fetch external subassemblies (different documents)
 
 **max_depth Semantics**:
 
 - **Structural data** (instances, occurrences): Always complete, enables CAD queries at any depth
 - **Kinematic data** (mates, patterns): Filtered to depth ≤ max_depth, controls robot complexity
 - **Rigid assemblies** (depth > max_depth): Treated as single rigid bodies in kinematic graph
+
+**Critical Ordering**:
+
+- `_mark_rigid_assemblies()` MUST be called BEFORE `_populate_mates()` for mate remapping to work
+- Mate remapping depends on knowing which assemblies are rigid
+- Parts are populated after mates since rigid assembly parts are created during mate processing
 
 ## KinematicGraph: Graph Construction from CAD
 
@@ -866,12 +1024,15 @@ self.parts[key] = Part(
 - **Link Origins**: Always at zero vector after transformation
 - **Joint Origins**: At mate coordinate system locations
 - **Mesh Positioning**: STL files transformed to link coordinate systems
-- **Internal Mates**: Removed if both entities within same rigid assembly
+- **Internal Mates**: Automatically filtered if both entities within same rigid assembly
 - **Pattern Transforms**: Applied in world space, converted to local coordinates
 - **Floating Point**: Clean values < 1e-10 to zero
 - **PathKey Comparison**: Required for graph sorting, compares depth then path lexicographically
-- **Subassembly Mates**: Always stored as relative PathKeys, must convert to absolute before use
-- **Rigid Assembly Mates**: Filter internal, remap cross-boundary to rigid root
+- **Subassembly Mates**: Paths are relative in JSON, converted to absolute during population
+- **Rigid Assembly Mates**: Automatically remapped from buried parts to rigid assembly root with updated transforms
+- **Mate Remapping Order**: `_mark_rigid_assemblies()` MUST execute before `_populate_mates()`
+- **Nested Subassembly Mates**: Processed by searching flat instances registry, not just root-level
 - **Edge Data in Graphs**: `nx.bfs_tree()` loses edge attributes, must restore mate_data manually
 - **Mass Properties**: Fetch selectively for kinematic chain parts only, use `asyncio.to_thread()` for concurrency
 - **Workspace Types**: Parts use microversion ('m'), assemblies use workspace ('w'), versions use version ('v')
+- **MatedCS Immutability**: Use `MatedCS.from_tf()` to create new instances, cannot set `part_to_mate_tf` directly

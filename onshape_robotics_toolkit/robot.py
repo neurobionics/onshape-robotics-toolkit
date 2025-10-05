@@ -585,7 +585,7 @@ class Robot:
                             element.set("pos", " ".join(format_number(float(v)) for v in new_pos))
                             element.set("euler", " ".join(format_number(float(v)) for v in new_euler))
 
-                        parent_body.append(element)  # type: ignore[arg-type]
+                        parent_body.append(element)
 
                     root_body.remove(child_body)
                     body_elements[child_name] = parent_body
@@ -611,7 +611,7 @@ class Robot:
             new_inertial.set("euler", " ".join(format_number(v) for v in combined_euler))
             new_inertial.set("diaginertia", " ".join(format_number(v) for v in combined_diaginertia))
             if parent_body is not None:
-                parent_body.append(new_inertial)  # type: ignore[arg-type]
+                parent_body.append(new_inertial)
 
         # Then process revolute joints
         joint_data_raw2: Optional[BaseJoint]
