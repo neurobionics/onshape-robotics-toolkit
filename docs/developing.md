@@ -52,11 +52,15 @@ Assembly JSON → CAD (flattened) → KinematicGraph → Robot → URDF/MJCF
 
 1. Build `id_to_name` mapping from all instances (root + subassemblies)
 2. Build PathKey indexes from occurrences (canonical source of truth)
-3. Populate flat registries: instances, occurrences, mates, patterns
+3. Populate flat registries:
+   - **Instances**: ALL instances regardless of max_depth (data availability)
+   - **Occurrences**: ALL occurrences regardless of max_depth (transforms)
+   - **Mates**: Only from flexible assemblies (depth ≤ max_depth) for kinematic graph
+   - **Patterns**: Only from flexible assemblies (depth ≤ max_depth) for kinematic graph
 4. Mark rigid assemblies based on `max_depth`
 5. (Optional) Fetch nested subassemblies for flexible assemblies
 
-**Key Point**: All data is flattened to root level with absolute PathKeys
+**Key Point**: All structural data (instances, occurrences) is available regardless of max_depth. Only kinematic data (mates, patterns) is filtered by max_depth.
 
 #### Phase 2: KinematicGraph Construction (`KinematicGraph.__init__()`)
 
@@ -184,17 +188,14 @@ cad.get_mate_assembly(parent: PathKey, child: PathKey) -> Optional[PathKey]
 #### 5. **Parts Registry (Metadata + Mass)**
 
 ```python
-cad.parts: dict[PathKey, Part]  # Initially empty - lazy population
+cad.parts: dict[PathKey, Part]  # Populated eagerly from assembly.parts
 
 # Part fields required:
 # - documentId, elementId, documentMicroversion, partId
 # - configuration, fullConfiguration
 # - isRigidAssembly (bool)
 # - rigidAssemblyWorkspaceId (for STL downloads)
-# - MassProperty (populated later, may be None)
-
-# Population method
-cad.populate_parts_for_keys(keys: set[PathKey], assembly: Assembly) -> None
+# - MassProperty (None initially, populated via API call)
 ```
 
 **Used by**:
@@ -204,10 +205,9 @@ cad.populate_parts_for_keys(keys: set[PathKey], assembly: Assembly) -> None
 
 **Population Strategy**:
 
-- Initially empty dict (optimization)
-- Populated after graph construction for kinematic parts only
-- Includes rigid assemblies (marked with `isRigidAssembly=True`)
-- Mass properties fetched separately in Phase 3
+- Populated eagerly during `from_assembly()` from `assembly.parts`
+- Includes all parts (PartInstance) and rigid assemblies (AssemblyInstance with isRigid=True)
+- Mass properties are None initially, fetched separately via `fetch_mass_properties_for_kinematic_parts()`
 
 #### 6. **Pattern Registry**
 
@@ -240,10 +240,18 @@ cad.element_id: str
 cad.workspace_id: str
 cad.document_microversion: str
 cad.max_depth: int
-cad.current_depth: int
 ```
 
 **Used by**: Robot (workspace ID for STL downloads)
+
+**max_depth Parameter**:
+
+- Controls which assemblies are treated as flexible (kinematic) vs rigid (single body)
+- `max_depth=0`: All assemblies are rigid (only root-level parts are flexible)
+- `max_depth=1`: Depth-1 assemblies are flexible, depth-2+ are rigid
+- `max_depth=∞`: All assemblies are flexible (full kinematic expansion)
+- **Does NOT filter** instances or occurrences (all structural data always available)
+- **Does filter** mates and patterns (only from assemblies at depth ≤ max_depth)
 
 ### Critical Design Requirements
 
@@ -260,16 +268,17 @@ instance = cad.root_assembly.instances[key] or \
            cad.sub_assemblies[sub_key].instances[rel_key]
 ```
 
-#### Requirement 2: Lazy Parts Population
+#### Requirement 2: Eager Parts Population, Lazy Mass Properties
 
-**Rationale**: Avoid expensive data processing for non-kinematic parts
+**Rationale**: Part metadata is in assembly JSON (no cost), but mass properties require expensive API calls
 
 ```python
-# Phase 1: Parts dict initially empty
-cad.parts = {}
+# Phase 1: Parts populated from assembly.parts (MassProperty=None)
+cad = CAD.from_assembly(assembly)  # Populates all parts
+assert len(cad.parts) > 0
+assert all(p.MassProperty is None for p in cad.parts.values())
 
-# Phase 3: Populate ONLY for kinematic parts
-cad.populate_parts_for_keys(kinematic_graph.graph.nodes, assembly)
+# Phase 3: Fetch mass properties ONLY for kinematic parts
 fetch_mass_properties_for_kinematic_parts(cad, kinematic_graph, client)
 ```
 
@@ -331,7 +340,7 @@ CAD (flat registries with absolute PathKeys)
     ├─ occurrences (transforms)
     ├─ mates (with assembly provenance in key)
     ├─ patterns
-    ├─ parts (initially empty)
+    ├─ parts (populated from assembly.parts, MassProperty=None)
     └─ fetched_subassemblies (external documents)
     ↓
 KinematicGraph(cad)
@@ -340,11 +349,8 @@ KinematicGraph(cad)
     ├─ Build graph (nodes=PathKeys, edges=mates)
     └─ Detect root, topological order
     ↓
-cad.populate_parts_for_keys(graph.nodes, assembly)
-    └─ Populate cad.parts for kinematic chain only
-    ↓
 fetch_mass_properties_for_kinematic_parts(cad, graph)
-    └─ Add MassProperty to cad.parts[key] for graph nodes
+    └─ Add MassProperty to cad.parts[key] for kinematic parts only
     ↓
 get_robot_from_kinematic_graph(cad, graph, client)
     ├─ Root link: cad.parts[root_key], cad.instances[root_key]
@@ -543,7 +549,7 @@ key = PathKey.from_path("MqRDHdbA0tAm2ygBR", id_to_name)
 # Access
 instance = cad.instances[key]
 occurrence = cad.occurrences[key]
-part = cad.parts[key]  # Only after populate_parts_for_keys()
+part = cad.parts[key]  # Available immediately after from_assembly()
 ```
 
 ### Rigid Assembly Detection
@@ -621,13 +627,19 @@ if parent_rigid_root == child_rigid_root:
 1. Build `id_to_name` mapping from all instances in assembly JSON
 2. Create PathKey indexes from occurrences (dual indexing: ID and name)
 3. Populate flat registries:
-   - `_populate_instances()`: All parts and assemblies from occurrences
-   - `_populate_occurrences()`: All occurrence transforms
-   - `_populate_mates()`: Mates with assembly provenance in key
-   - `_populate_patterns()`: Assembly patterns
+   - `_populate_instances()`: ALL parts and assemblies (no depth filtering - data availability)
+   - `_populate_occurrences()`: ALL occurrence transforms (no depth filtering)
+   - `_populate_mates()`: Mates with assembly provenance, FILTERED by max_depth (kinematic only)
+   - `_populate_patterns()`: Assembly patterns, FILTERED by max_depth (kinematic only)
    - `_mark_rigid_assemblies()`: Flag assemblies beyond max_depth
-4. Parts dict remains empty (lazy population after graph construction)
+4. Parts populated eagerly from assembly.parts (mass properties remain None)
 5. Optionally fetch external subassemblies (different documents)
+
+**max_depth Semantics**:
+
+- **Structural data** (instances, occurrences): Always complete, enables CAD queries at any depth
+- **Kinematic data** (mates, patterns): Filtered to depth ≤ max_depth, controls robot complexity
+- **Rigid assemblies** (depth > max_depth): Treated as single rigid bodies in kinematic graph
 
 ## KinematicGraph: Graph Construction from CAD
 
@@ -638,18 +650,21 @@ The `KinematicGraph` class builds a directed graph from CAD assembly data where 
 ```python
 from onshape_robotics_toolkit.graph import KinematicGraph
 
-# Create tree from CAD document
-tree = KinematicGraph(cad_doc, use_user_defined_root=True)
+# Create graph from CAD document (recommended API)
+graph = KinematicGraph.from_cad(cad_doc, use_user_defined_root=True)
 
 # Access graph structure
-graph = tree.graph  # NetworkX DiGraph
-root = tree.root_node  # PathKey of root part
-order = tree.topological_order  # Tuple of PathKeys from root to leaves
+digraph = graph.graph  # NetworkX DiGraph
+root = graph.root_node  # PathKey of root part
+order = graph.topological_order  # Tuple of PathKeys from root to leaves
 
-# Navigate tree
-children = tree.get_children(part_key)
-parent = tree.get_parent(part_key)
-mate_data = tree.get_mate_data(parent_key, child_key)
+# Navigate graph
+children = graph.get_children(part_key)
+parent = graph.get_parent(part_key)
+mate_data = graph.get_mate_data(parent_key, child_key)
+
+# Backward compatible (also works):
+# graph = KinematicGraph(cad_doc, use_user_defined_root=True)
 ```
 
 ### PathKey Comparison Operators
@@ -724,22 +739,19 @@ from onshape_robotics_toolkit.parse import CAD, fetch_mass_properties_for_kinema
 from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.robot import get_robot_from_kinematic_graph
 
-# 1. Create CAD structure (flat registries, parts dict initially empty)
+# 1. Create CAD structure (flat registries with all parts, MassProperty=None)
 cad = CAD.from_assembly(assembly, max_depth=1)
 
 # 2. Build kinematic graph
-kinematic_graph = KinematicGraph(cad=cad, use_user_defined_root=True)
+kinematic_graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
 
-# 3. Lazy populate parts for kinematic chain only
-cad.populate_parts_for_keys(kinematic_graph.graph.nodes, assembly)
-
-# 4. Fetch mass properties (selective for efficiency)
+# 3. Fetch mass properties for kinematic parts only (optimization)
 fetch_mass_properties_for_kinematic_parts(cad, kinematic_graph, client)
 
-# 5. Generate robot structure
+# 4. Generate robot structure
 robot = get_robot_from_kinematic_graph(cad, kinematic_graph, client, "my_robot")
 
-# 6. Save URDF with assets
+# 5. Save URDF with assets
 robot.save("robot.urdf", download_assets=True)
 ```
 

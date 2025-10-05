@@ -13,7 +13,7 @@ Functions:
     get_root_node: Get root node of directed graph
     convert_to_digraph: Convert undirected graph to directed with root detection
     get_topological_order: Calculate topological ordering
-    create_graph: Legacy function for creating graphs from old string-based system
+    remove_unconnected_subgraphs: Remove disconnected components from graph
 """
 
 import random
@@ -23,15 +23,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 from onshape_robotics_toolkit.log import LOGGER
-from onshape_robotics_toolkit.models.assembly import (
-    AssemblyInstance,
-    InstanceType,
-    MateFeatureData,
-    Occurrence,
-    Part,
-    PartInstance,
-)
-from onshape_robotics_toolkit.parse import CAD, MATE_JOINER, SUBASSEMBLY_JOINER, PathKey
+from onshape_robotics_toolkit.models.assembly import MateFeatureData
+from onshape_robotics_toolkit.parse import CAD, PathKey
 
 
 class KinematicGraph:
@@ -58,17 +51,21 @@ class KinematicGraph:
 
     def __init__(self, cad: CAD, use_user_defined_root: bool = True):
         """
-        Initialize and build kinematic graph from CAD assembly.
+        Initialize and build kinematic graph from CAD data.
+
+        Note: The preferred way to create a KinematicGraph is via the `from_cad()`
+        classmethod, which makes the construction more explicit.
 
         Args:
             cad: CAD assembly with PathKey-based registries
             use_user_defined_root: Whether to use user-marked fixed part as root
 
         Examples:
-            >>> cad = CAD.from_assembly(assembly, max_depth=1)
-            >>> tree = KinematicGraph(cad, use_user_defined_root=True)
-            >>> print(f"Root: {tree.root_node}")
-            >>> print(f"Nodes: {len(tree.graph.nodes)}")
+            >>> # Preferred (explicit):
+            >>> graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+
+            >>> # Also works (backward compatible):
+            >>> graph = KinematicGraph(cad, use_user_defined_root=True)
         """
         self.cad = cad
         self.graph: nx.DiGraph = nx.DiGraph()
@@ -77,6 +74,30 @@ class KinematicGraph:
 
         # Build the kinematic graph
         self._build_graph(use_user_defined_root)
+
+    @classmethod
+    def from_cad(cls, cad: CAD, use_user_defined_root: bool = True) -> "KinematicGraph":
+        """
+        Create and build kinematic graph from CAD assembly.
+
+        This is the recommended way to create a KinematicGraph. It constructs
+        the graph by processing mates, validating PathKeys, and determining
+        the kinematic structure.
+
+        Args:
+            cad: CAD assembly with PathKey-based registries
+            use_user_defined_root: Whether to use user-marked fixed part as root
+
+        Returns:
+            Fully constructed KinematicGraph with nodes, edges, and root
+
+        Examples:
+            >>> cad = CAD.from_assembly(assembly, max_depth=1)
+            >>> graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+            >>> print(f"Root: {graph.root_node}")
+            >>> print(f"Nodes: {len(graph.graph.nodes)}")
+        """
+        return cls(cad, use_user_defined_root=use_user_defined_root)
 
     def _build_graph(self, use_user_defined_root: bool) -> None:
         """
@@ -172,10 +193,10 @@ class KinematicGraph:
             else:
                 invalid_keys = []
                 if not parent_valid:
-                    invalid_keys.append(f"parent={parent_key}")
+                    invalid_keys.append(f"parent={parent_key} (not in parts)")
                 if not child_valid:
-                    invalid_keys.append(f"child={child_key}")
-                LOGGER.debug(f"Filtering out mate with invalid PathKeys: {', '.join(invalid_keys)}")
+                    invalid_keys.append(f"child={child_key} (not in parts)")
+                LOGGER.debug(f"Filtering mate '{mate_data.name}': {', '.join(invalid_keys)}")
                 invalid_count += 1
 
         if invalid_count > 0:
@@ -191,35 +212,25 @@ class KinematicGraph:
         """
         Check if a PathKey is a valid target for a mate relationship.
 
-        Valid targets are:
-        - Parts in the parts registry (includes rigid assemblies)
-        - Part instances in the instances registry
-        - Rigid assembly instances in the instances registry
+        Valid targets exist in the parts registry. With eager parts population,
+        this includes all PartInstances and rigid AssemblyInstances.
+
+        However, mates from flexible subassemblies may reference parts that
+        aren't in the root parts registry yet (they're in fetched_subassemblies).
+        We still validate primarily against parts registry for consistency.
 
         Args:
             key: PathKey to validate
 
         Returns:
-            True if key is valid mate target
+            True if key is valid mate target (exists in parts registry)
         """
-        # Check parts registry (includes rigid assemblies)
+        # Primary check: parts registry (all PartInstances + rigid assemblies)
         if key in self.cad.parts:
             return True
 
-        # Check instances registry
-        instance = self.cad.instances.get(key)
-        if instance is None:
-            return False
-
-        # Part instances are valid
-        if isinstance(instance, PartInstance):
-            return True
-
-        # Assembly instances are valid only if rigid
-        if isinstance(instance, AssemblyInstance):
-            return instance.isRigid
-
-        return False
+        # Fallback: check fetched subassemblies for nested parts
+        return any(key in fetched_cad.parts for fetched_cad in self.cad.fetched_subassemblies.values())
 
     def _collect_all_mates(self) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
         """
@@ -279,54 +290,30 @@ class KinematicGraph:
 
     def _add_nodes(self, involved_parts: set[PathKey], user_defined_root: Optional[PathKey]) -> None:
         """
-        Add nodes to graph for parts/assemblies involved in mates.
+        Add nodes to graph for parts involved in mates.
 
-        Nodes are added with part metadata as attributes. Some mates may reference
-        assembly instances (for rigid subassemblies), which we treat as nodes if
-        they're in the parts registry (rigid assemblies are stored as parts).
+        With eager parts population, all valid mate targets are guaranteed to be
+        in cad.parts. We only need to filter hidden occurrences.
 
         Args:
             involved_parts: Set of PathKeys to add as nodes
             user_defined_root: Optional user-defined root node
         """
         nodes_added = 0
-        skipped_assemblies = 0
+        skipped_hidden = 0
 
-        LOGGER.debug(f"Processing {len(involved_parts)} involved parts/assemblies")
+        LOGGER.debug(f"Processing {len(involved_parts)} involved parts")
         for part_key in involved_parts:
-            # Check if this is a part or rigid assembly in parts registry
+            # With eager parts population, part MUST exist if it passed validation
             if part_key not in self.cad.parts:
-                # Check if it's an instance
-                instance = self.cad.instances.get(part_key)
-                if isinstance(instance, AssemblyInstance):
-                    if not instance.isRigid:
-                        # Flexible assembly - skip it, mates should reference parts inside it
-                        LOGGER.debug(f"Skipping flexible assembly {part_key} - mates should reference parts inside it")
-                        skipped_assemblies += 1
-                        continue
-                    else:
-                        # Rigid assembly but not in parts registry - this shouldn't happen
-                        LOGGER.warning(
-                            f"Rigid assembly {part_key} in mate but not in parts registry. "
-                            f"This may indicate mate processing didn't complete properly."
-                        )
-                        continue
-                elif isinstance(instance, PartInstance):
-                    LOGGER.warning(
-                        f"Part instance {part_key} involved in mate but corresponding Part object "
-                        f"not found in parts registry. This may indicate the part wasn't populated."
-                    )
-                else:
-                    LOGGER.warning(
-                        f"PathKey {part_key} involved in mate but not found in any registry "
-                        f"(not in parts or instances)"
-                    )
+                LOGGER.warning(f"Part {part_key} not in parts registry despite passing validation")
                 continue
 
             # Check if occurrence is hidden
             occurrence = self.cad.occurrences.get(part_key)
             if occurrence and occurrence.hidden:
                 LOGGER.debug(f"Skipping hidden part: {part_key}")
+                skipped_hidden += 1
                 continue
 
             # Add node with part metadata
@@ -338,7 +325,7 @@ class KinematicGraph:
             )
             nodes_added += 1
 
-        LOGGER.debug(f"Added {nodes_added} nodes to graph " f"(skipped {skipped_assemblies} flexible assemblies)")
+        LOGGER.debug(f"Added {nodes_added} nodes to graph (skipped {skipped_hidden} hidden parts)")
 
     def _add_edges(self, mates: dict[tuple[PathKey, PathKey], MateFeatureData]) -> None:
         """
@@ -615,149 +602,6 @@ def get_topological_order(graph: nx.DiGraph) -> Optional[tuple[Any, ...]]:
         order = None
 
     return order
-
-
-def get_parts_involved_in_mates(mates: dict[str, Union[MateFeatureData]]) -> set[str]:
-    """
-    Extract all part IDs that are involved in mates.
-
-    Args:
-        mates: Dictionary of mates in the assembly.
-
-    Returns:
-        Set of part IDs that are involved in mates.
-    """
-    involved_parts = set()
-    for mate_key in mates:
-        try:
-            child, parent = mate_key.split(MATE_JOINER)
-            involved_parts.add(child)
-            involved_parts.add(parent)
-        except ValueError:
-            LOGGER.warning(f"Mate key: {mate_key} is not in the correct format")
-            continue
-    return involved_parts
-
-
-def create_graph(
-    occurrences: dict[str, Occurrence],
-    instances: dict[str, Union[PartInstance, AssemblyInstance]],
-    parts: dict[str, Part],
-    mates: dict[str, Union[MateFeatureData]],
-    use_user_defined_root: bool = True,
-) -> tuple[nx.DiGraph, Optional[Any]]:
-    """
-    Create a graph from onshape assembly data.
-
-    Args:
-        occurrences: Dictionary of occurrences in the assembly.
-        instances: Dictionary of instances in the assembly.
-        parts: Dictionary of parts in the assembly.
-        mates: Dictionary of mates in the assembly.
-        use_user_defined_root: Whether to use the user defined root node.
-
-    Returns:
-        A tuple containing:
-        - The graph created from the assembly data.
-        - The root node of the graph.
-
-    Examples:
-        >>> occurrences = get_occurrences(assembly)
-        >>> instances = get_instances(assembly)
-        >>> parts = get_parts(assembly, client)
-        >>> mates = get_mates(assembly)
-        >>> create_graph(occurrences, instances, parts, mates)
-    """
-
-    graph: nx.DiGraph = nx.DiGraph()
-
-    # First, get all parts involved in mates
-    involved_parts = get_parts_involved_in_mates(mates)
-
-    user_defined_root = add_nodes_to_graph(graph, occurrences, instances, parts, involved_parts, use_user_defined_root)
-
-    if user_defined_root and user_defined_root.split(SUBASSEMBLY_JOINER)[0] in parts:
-        # this means that the user defined root is a rigid subassembly
-        user_defined_root = user_defined_root.split(SUBASSEMBLY_JOINER)[0]
-
-    add_edges_to_graph(graph, mates)
-
-    cur_graph = remove_unconnected_subgraphs(graph)
-    output_graph, root_node = convert_to_digraph(cur_graph, user_defined_root)
-
-    LOGGER.info(
-        f"Graph created with {len(output_graph.nodes)} nodes and "
-        f"{len(output_graph.edges)} edges with root node: {root_node}"
-    )
-
-    return output_graph, root_node
-
-
-def add_nodes_to_graph(
-    graph: nx.Graph,
-    occurrences: dict[str, Occurrence],
-    instances: dict[str, Union[PartInstance, AssemblyInstance]],
-    parts: dict[str, Part],
-    involved_parts: set[str],
-    use_user_defined_root: bool,
-) -> Optional[str]:
-    """
-    Add nodes to the graph for parts that are involved in mates.
-
-    Args:
-        graph: The graph to add nodes to.
-        occurrences: Dictionary of occurrences in the assembly.
-        instances: Dictionary of instances in the assembly.
-        parts: Dictionary of parts in the assembly.
-        involved_parts: Set of part IDs that are involved in mates.
-        use_user_defined_root: Whether to use the user defined root node.
-
-    Returns:
-        The user defined root node if it exists.
-
-    Examples:
-        >>> add_nodes_to_graph(graph, occurrences, instances, parts, involved_parts, use_user_defined_root=True)
-    """
-    user_defined_root = None
-    for occurrence in occurrences:
-        if use_user_defined_root and occurrences[occurrence].fixed:
-            user_defined_root = occurrence
-
-        # Only add nodes for parts that are involved in mates
-        if instances[occurrence].type == InstanceType.PART and occurrence in involved_parts:
-            try:
-                if occurrences[occurrence].hidden:
-                    continue
-
-                graph.add_node(occurrence, **parts[occurrence].model_dump())
-            except KeyError:
-                LOGGER.warning(f"Part {occurrence} not found")
-    return user_defined_root
-
-
-def add_edges_to_graph(graph: nx.Graph, mates: dict[str, Union[MateFeatureData]]) -> None:
-    """
-    Add edges to the graph.
-
-    Args:
-        graph: The graph to add edges to.
-        mates: Dictionary of mates in the assembly.
-
-    Examples:
-        >>> add_edges_to_graph(graph, mates)
-    """
-    for mate in mates:
-        try:
-            child, parent = mate.split(MATE_JOINER)
-            graph.add_edge(
-                parent,
-                child,
-            )
-        except KeyError:
-            LOGGER.warning(f"Mate {mate} not found")
-        except ValueError:
-            LOGGER.warning(f"Mate key: {mate} is not in the correct format")
-            exit(1)
 
 
 def _print_graph_tree(graph: nx.Graph) -> None:

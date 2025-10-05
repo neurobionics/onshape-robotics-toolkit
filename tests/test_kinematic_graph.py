@@ -98,8 +98,8 @@ class TestKinematicGraph:
                 mate_data = tree.get_mate_data(tree.root_node, child)
                 # Mate data may or may not exist depending on graph structure
                 if mate_data:
-                    assert hasattr(mate_data, "featureType")
-                    print(f"\nFound mate data: {mate_data.featureType}")
+                    assert hasattr(mate_data, "mateType")
+                    print(f"\nFound mate data: {mate_data.mateType}")
 
     def test_tree_repr(self, cad_doc: CAD):
         """Test string representation of kinematic graph."""
@@ -117,13 +117,24 @@ class TestKinematicGraph:
 
         # Tree should be created successfully regardless of max_depth
         assert tree is not None
-        assert tree.root_node is not None
-        assert len(tree.graph.nodes) > 0
 
-        print(
-            f"\nmax_depth={cad_doc_all_depths.max_depth}: "
-            f"{len(tree.graph.nodes)} nodes, {len(tree.graph.edges)} edges"
-        )
+        # For max_depth=0, all assemblies are rigid, so graph may be empty or minimal
+        # For max_depth > 0, should have nodes and edges from flexible assemblies
+        if cad_doc_all_depths.max_depth == 0:
+            # At depth 0, only root-level mates are processed
+            # May have nodes if root-level parts are mated
+            print(
+                f"\nmax_depth={cad_doc_all_depths.max_depth}: "
+                f"{len(tree.graph.nodes)} nodes, {len(tree.graph.edges)} edges (all rigid)"
+            )
+        else:
+            # At higher depths, should have kinematic structure
+            assert tree.root_node is not None
+            assert len(tree.graph.nodes) > 0
+            print(
+                f"\nmax_depth={cad_doc_all_depths.max_depth}: "
+                f"{len(tree.graph.nodes)} nodes, {len(tree.graph.edges)} edges"
+            )
 
     def test_tree_without_user_defined_root(self, cad_doc: CAD):
         """Test kinematic graph with centrality-based root detection."""
@@ -196,22 +207,6 @@ class TestKinematicGraphInternals:
 
         print(f"\nValidated {len(valid_mates)}/{len(all_mates)} mates")
 
-    def test_is_valid_mate_target(self, cad_doc_depth_1: CAD):
-        """Test checking if PathKey is valid mate target."""
-        tree = KinematicGraph(cad_doc_depth_1)
-
-        # Get a known part PathKey
-        part_keys = list(cad_doc_depth_1.parts.keys())
-        if part_keys:
-            valid_key = part_keys[0]
-            assert tree._is_valid_mate_target(valid_key) is True
-
-        # Test with invalid PathKey
-        from onshape_robotics_toolkit.parse import PathKey
-
-        invalid_key = PathKey(("invalid_id",))
-        assert tree._is_valid_mate_target(invalid_key) is False
-
     def test_get_parts_involved_in_mates(self, cad_doc_depth_1: CAD):
         """Test extracting parts involved in mates."""
         tree = KinematicGraph(cad_doc_depth_1)
@@ -234,138 +229,6 @@ class TestKinematicGraphInternals:
 
         print(f"\nFound {len(involved_parts)} parts involved in mates")
 
-    def test_find_user_defined_root(self, cad_doc_depth_1: CAD):
-        """Test finding user-defined root part."""
-        tree = KinematicGraph(cad_doc_depth_1)
-
-        # Get involved parts
-        all_mates = tree._collect_all_mates()
-        valid_mates = tree._validate_mates(all_mates)
-        involved_parts = tree._get_parts_involved_in_mates(valid_mates)
-
-        # Find user-defined root
-        user_root = tree._find_user_defined_root(involved_parts)
-
-        # May or may not have user-defined root
-        if user_root:
-            from onshape_robotics_toolkit.parse import PathKey
-
-            assert isinstance(user_root, PathKey)
-            # Should be marked as fixed in occurrences
-            occurrence = cad_doc_depth_1.root_assembly.occurrences.occurrences.get(user_root)
-            assert occurrence is not None
-            assert occurrence.fixed is True
-            print(f"\nFound user-defined root: {user_root}")
-        else:
-            print("\nNo user-defined root found")
-
-    def test_make_absolute_pathkey(self, cad_doc_depth_1: CAD):
-        """Test converting relative PathKey to absolute."""
-        from onshape_robotics_toolkit.parse import PathKey
-
-        tree = KinematicGraph(cad_doc_depth_1)
-
-        # Create relative and prefix keys
-        relative_key = PathKey(("leaf_id",))
-        prefix_key = PathKey(("parent1", "parent2"))
-
-        # Convert to absolute
-        absolute_key = tree._make_absolute_pathkey(relative_key, prefix_key)
-
-        # Should combine paths
-        assert absolute_key.path == ("parent1", "parent2", "leaf_id")
-        assert absolute_key.depth == 3
-
-    def test_make_absolute_pathkey_idempotent(self, cad_doc_depth_1: CAD):
-        """Test that absolute conversion is idempotent."""
-        from onshape_robotics_toolkit.parse import PathKey
-
-        tree = KinematicGraph(cad_doc_depth_1)
-
-        # Already absolute key
-        prefix_key = PathKey(("parent1", "parent2"))
-        already_absolute = PathKey(("parent1", "parent2", "leaf_id"))
-
-        # Converting again should return same key
-        result = tree._make_absolute_pathkey(already_absolute, prefix_key)
-        assert result == already_absolute
-
-
-class TestRigidAssemblyMateHandling:
-    """Tests for rigid assembly mate filtering and remapping."""
-
-    def test_find_rigid_assembly_ancestor(self, cad_doc_depth_1: CAD):
-        """Test finding rigid assembly ancestor for a PathKey."""
-        tree = KinematicGraph(cad_doc_depth_1)
-
-        # Test with parts at different depths
-        for part_key in cad_doc_depth_1.parts:
-            rigid_ancestor = tree._find_rigid_assembly_ancestor(part_key)
-
-            if rigid_ancestor:
-                from onshape_robotics_toolkit.parse import PathKey
-
-                assert isinstance(rigid_ancestor, PathKey)
-                # Ancestor should be in assembly instances
-                assert rigid_ancestor in cad_doc_depth_1.root_assembly.instances.assemblies
-                # Ancestor should be marked as rigid
-                assembly_instance = cad_doc_depth_1.root_assembly.instances.assemblies[rigid_ancestor]
-                assert assembly_instance.isRigid is True
-                print(f"\n{part_key} is inside rigid assembly {rigid_ancestor}")
-            else:
-                print(f"\n{part_key} has no rigid assembly ancestor")
-
-    def test_convert_subassembly_mates_to_absolute(self, cad_doc_depth_1: CAD):
-        """Test converting subassembly mates from relative to absolute PathKeys."""
-        tree = KinematicGraph(cad_doc_depth_1)
-
-        # Get mates from a subassembly
-        for sub_key, sub_assembly in cad_doc_depth_1.sub_assemblies.items():
-            if sub_assembly.mates and sub_assembly.mates.mates:
-                relative_mates = sub_assembly.mates.mates
-
-                # Convert to absolute
-                absolute_mates = tree._convert_subassembly_mates_to_absolute(relative_mates, sub_key)
-
-                # All keys should now be absolute (depth >= sub_key.depth)
-                for parent_key, child_key in absolute_mates:
-                    assert parent_key.depth >= sub_key.depth, f"Parent {parent_key} not absolute"
-                    assert child_key.depth >= sub_key.depth, f"Child {child_key} not absolute"
-
-                print(f"\nConverted {len(relative_mates)} relative mates to {len(absolute_mates)} absolute mates")
-                break
-
-    def test_internal_mates_filtered(self, cad_doc_depth_1: CAD):
-        """Test that internal mates within rigid assemblies are filtered out."""
-        tree = KinematicGraph(cad_doc_depth_1)
-
-        # Check graph edges
-        for parent_key, child_key in tree.graph.edges:
-            # Neither should be inside the same rigid assembly
-            parent_rigid = tree._find_rigid_assembly_ancestor(parent_key)
-            child_rigid = tree._find_rigid_assembly_ancestor(child_key)
-
-            # If both have rigid ancestors, they should be different
-            if parent_rigid and child_rigid:
-                assert parent_rigid != child_rigid, (
-                    f"Internal mate not filtered: {parent_key} <-> {child_key} " f"(both in {parent_rigid})"
-                )
-
-    def test_cross_boundary_mates_remapped(self, cad_doc_depth_1: CAD):
-        """Test that mates crossing rigid assembly boundaries are remapped."""
-        tree = KinematicGraph(cad_doc_depth_1)
-
-        # Check that nodes in graph are either:
-        # 1. Not inside any rigid assembly, OR
-        # 2. ARE the rigid assembly itself
-        for node in tree.graph.nodes:
-            rigid_ancestor = tree._find_rigid_assembly_ancestor(node)
-
-            if rigid_ancestor:
-                # Node is inside rigid assembly - should have been remapped
-                # This means the node SHOULD be the rigid assembly itself
-                assert node == rigid_ancestor, f"Node {node} inside rigid {rigid_ancestor} but not remapped"
-
 
 class TestKinematicGraphVisualization:
     """Tests for kinematic graph visualization methods."""
@@ -380,16 +243,15 @@ class TestKinematicGraphVisualization:
         """Test that show method creates proper name mappings."""
         tree = KinematicGraph(cad_doc_depth_1)
 
-        # Manually create label mapping like show() does
+        # Manually create label mapping like show() does using new API
         label_mapping = {}
         for node in tree.graph.nodes:
-            if node in cad_doc_depth_1.root_assembly.instances.parts:
-                part_instance = cad_doc_depth_1.root_assembly.instances.parts[node]
-                label_mapping[node] = part_instance.name
-            elif node in cad_doc_depth_1.root_assembly.instances.assemblies:
-                assembly_instance = cad_doc_depth_1.root_assembly.instances.assemblies[node]
-                label_mapping[node] = assembly_instance.name
+            # Get instance from flat instances dict
+            instance = cad_doc_depth_1.instances.get(node)
+            if instance:
+                label_mapping[node] = instance.name
             else:
+                # Fallback to PathKey string representation
                 label_mapping[node] = str(node)
 
         # All nodes should have labels

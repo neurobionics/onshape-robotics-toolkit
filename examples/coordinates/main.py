@@ -40,7 +40,7 @@ from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
 DEPTH = 1
 NAME = f"transforms_{DEPTH}"
-USE_CACHED = True  # Set to False to force fresh API call
+USE_CACHED = False  # Set to False to force fresh API call
 LOG_ASSEMBLY = False
 
 TRANSFORMS = (
@@ -170,7 +170,9 @@ if __name__ == "__main__":
         LOGGER.info(f"Assembly cached to {NAME}.json")
 
     cad = CAD.from_assembly(assembly, max_depth=DEPTH)
-    print(cad.mates)
+    graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+    graph.show(f"KinematicGraph_Depth_{DEPTH}")
+
     # cad.process_mates_and_relations()
 
     # tree = KinematicGraph(cad, use_user_defined_root=True)

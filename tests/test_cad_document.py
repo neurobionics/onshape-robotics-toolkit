@@ -14,8 +14,7 @@ class TestCAD:
         assert cad_doc is not None
         assert cad_doc.document_id == assembly.rootAssembly.documentId
         assert cad_doc.element_id == assembly.rootAssembly.elementId
-        assert cad_doc.current_depth == 0
-        assert cad_doc.max_depth == 0
+        assert cad_doc.max_depth == 2  # Using max_depth=2 for test fixture
 
     def test_flat_structure_populated(self, cad_doc: CAD):
         """Test that flat registries are populated."""
@@ -65,10 +64,15 @@ class TestCAD:
         for key in cad_doc.instances:
             assert key in cad_doc.occurrences, f"Instance {key} should have corresponding occurrence"
 
-    def test_parts_registry_initially_empty(self, cad_doc: CAD):
-        """Test that parts dict is initially empty (lazy population)."""
-        # Parts should be empty until populate_parts_for_keys() is called
-        assert len(cad_doc.parts) == 0, "Parts should be lazily populated"
+    def test_parts_registry_populated(self, cad_doc: CAD):
+        """Test that parts dict is populated from assembly.parts."""
+        # Parts should be populated during from_assembly()
+        # Should have parts for all part instances + rigid assemblies
+        assert len(cad_doc.parts) > 0, "Parts should be populated from assembly"
+
+        # Every part should have a corresponding instance
+        for part_key in cad_doc.parts:
+            assert part_key in cad_doc.instances, f"Part {part_key} should have instance"
 
     def test_pathkey_dual_indexing(self, cad_doc: CAD):
         """Test that PathKey dual indexing works."""

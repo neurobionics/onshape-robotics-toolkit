@@ -51,8 +51,8 @@ def cad_doc_all_depths(assembly: Assembly, request) -> CAD:
 
 @pytest.fixture
 def cad_doc(assembly: Assembly) -> CAD:
-    """Create CAD from assembly with max_depth=0 (all rigid)."""
-    return CAD.from_assembly(assembly, max_depth=0)
+    """Create CAD from assembly with max_depth=2 (all flexible for this test assembly)."""
+    return CAD.from_assembly(assembly, max_depth=2)
 
 
 @pytest.fixture

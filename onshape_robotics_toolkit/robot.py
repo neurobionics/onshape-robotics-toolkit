@@ -892,10 +892,6 @@ class Robot:
         # Build kinematic graph from CAD structure
         kinematic_graph = KinematicGraph(cad=cad, use_user_defined_root=use_user_defined_root)
 
-        # Populate parts for kinematic chain (lazy loading)
-        kinematic_part_keys = set(kinematic_graph.graph.nodes)
-        cad.populate_parts_for_keys(keys=kinematic_part_keys, assembly=assembly)
-
         # Fetch mass properties for parts in kinematic chain
         from onshape_robotics_toolkit.parse import fetch_mass_properties_for_kinematic_parts
 
