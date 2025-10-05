@@ -31,6 +31,7 @@ Root Assembly (depth=0)
 ### At max_depth=1
 
 - **Flexible Assemblies** (depth ≤ 1):
+
   - Root assembly (depth=0)
   - Assembly 2 (depth=1)
 
@@ -68,6 +69,7 @@ The mate remapping system should:
 After remapping, the kinematic graph should have:
 
 - **7 nodes** (no disconnected components):
+
   - Part 1 (root, fixed)
   - Part 14
   - Part 15
@@ -142,6 +144,7 @@ If you see disconnected graphs:
 ### Assembly 1 Contents (depth=2, RIGID)
 
 Each Assembly 1 instance contains:
+
 - **Part 4 <1>**: Interior part
 - **Part 10 <1>**: Interior part
 

@@ -113,19 +113,53 @@ class Robot:
     """
     Represents a robot model with a graph structure for links and joints.
 
-    Attributes:
-        name (str): The name of the robot.
-        graph (nx.DiGraph): The graph structure holding links (nodes) and joints (edges).
-        assets (Optional[dict[str, Asset]]): Assets associated with the robot.
-        type (RobotType): The type of the robot (URDF, MJCF, etc.).
+    The Robot class is the final output of the CAD → KinematicGraph → Robot pipeline.
+    It stores the robot structure as a NetworkX directed graph where nodes are links
+    and edges are joints, along with associated STL assets.
 
-    Methods:
-        add_link: Add a link to the graph.
-        add_joint: Add a joint to the graph.
-        to_urdf: Generate URDF XML from the graph.
-        save: Save the robot model to a URDF file.
-        show: Display the robot's graph as a tree.
-        from_urdf: Create a robot model from a URDF file.
+    **Recommended Creation Methods:**
+    - `Robot.from_graph()`: Create from pre-built CAD + KinematicGraph (most efficient)
+    - `Robot.from_url()`: Create directly from Onshape URL (most convenient)
+    - `Robot.from_urdf()`: Load from existing URDF file
+
+    **Attributes:**
+        name (str): The name of the robot
+        graph (nx.DiGraph): Graph structure holding links (nodes) and joints (edges)
+        assets (dict[str, Asset]): STL assets associated with the robot's links
+        type (RobotType): The type of the robot (URDF or MJCF)
+
+    **Key Methods:**
+        add_link: Add a link to the graph
+        add_joint: Add a joint to the graph
+        to_urdf: Generate URDF XML from the graph
+        to_mjcf: Generate MuJoCo MJCF XML from the graph
+        save: Save the robot model to a file (URDF or MJCF)
+        show_tree: Display the robot's graph as a tree
+        show_graph: Display the robot's graph as a directed graph
+        from_graph: Create robot from CAD + KinematicGraph (recommended)
+        from_url: Create robot from Onshape URL
+        from_urdf: Load robot from URDF file
+
+    **Example:**
+        >>> from onshape_robotics_toolkit.connect import Client
+        >>> from onshape_robotics_toolkit.parse import CAD
+        >>> from onshape_robotics_toolkit.graph import KinematicGraph
+        >>>
+        >>> # Option 1: From URL (convenient)
+        >>> robot = Robot.from_url(
+        ...     name="my_robot",
+        ...     url="https://cad.onshape.com/documents/...",
+        ...     client=Client(),
+        ...     max_depth=1
+        ... )
+        >>>
+        >>> # Option 2: From CAD + Graph (efficient, more control)
+        >>> cad = CAD.from_assembly(assembly, max_depth=1)
+        >>> graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+        >>> robot = Robot.from_graph(cad, graph, Client(), "my_robot")
+        >>>
+        >>> # Save to file
+        >>> robot.save("robot.urdf", download_assets=True)
     """
 
     def __init__(self, name: str, assets: Optional[dict[str, Asset]] = None, robot_type: RobotType = RobotType.URDF):
@@ -136,16 +170,19 @@ class Robot:
 
         self.type: RobotType = robot_type
 
-        # Onshape assembly attributes
-        self.parts: dict[str, Part] = {}
-        self.mates: dict[str, MateFeatureData] = {}
-        self.relations: dict[str, MateRelationFeatureData] = {}
+        # DEPRECATED: Legacy Onshape assembly attributes
+        # These are kept for backward compatibility but are no longer used
+        # in the new CAD → KinematicGraph → Robot pipeline.
+        # Use Robot.from_graph() or Robot.from_url() instead of directly accessing these.
+        self.parts: dict[str, Part] = {}  # DEPRECATED: Use CAD.parts with PathKeys
+        self.mates: dict[str, MateFeatureData] = {}  # DEPRECATED: Use CAD.mates with PathKeys
+        self.relations: dict[str, MateRelationFeatureData] = {}  # DEPRECATED: Use CAD relations
 
-        self.flexible_assembly_data: dict[str, SubAssembly] = {}
-        self.rigid_assembly_data: dict[str, RootAssembly] = {}
+        self.flexible_assembly_data: dict[str, SubAssembly] = {}  # DEPRECATED
+        self.rigid_assembly_data: dict[str, RootAssembly] = {}  # DEPRECATED
 
-        self.assembly: Optional[Assembly] = None
-        self.model: Optional[ET._Element] = None
+        self.assembly: Optional[Assembly] = None  # DEPRECATED: Stored for backward compatibility only
+        self.model: Optional[ET._Element] = None  # DEPRECATED
 
         # MuJoCo attributes
         self.lights: dict[str, Any] = {}
@@ -844,6 +881,64 @@ class Robot:
         return robot
 
     @classmethod
+    def from_graph(
+        cls,
+        cad: "CAD",
+        kinematic_graph: "KinematicGraph",
+        client: Client,
+        name: str,
+        robot_type: RobotType = RobotType.URDF,
+        include_rigid_subassembly_parts: bool = False,
+    ) -> "Robot":
+        """
+        Create a Robot from pre-built CAD and KinematicGraph objects.
+
+        This is the recommended method for creating robots when you already have
+        CAD and KinematicGraph instances. It handles mass property fetching
+        and robot generation in an efficient, streamlined way.
+
+        Args:
+            cad: CAD document with PathKey-based registries
+            kinematic_graph: Kinematic graph with parts and mates
+            client: Onshape client for downloading assets and fetching mass properties
+            name: The name of the robot
+            robot_type: The type of the robot (URDF or MJCF)
+            include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies
+
+        Returns:
+            Robot: The generated robot model
+
+        Example:
+            >>> from onshape_robotics_toolkit.parse import CAD
+            >>> from onshape_robotics_toolkit.graph import KinematicGraph
+            >>> cad = CAD.from_assembly(assembly, max_depth=1)
+            >>> graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+            >>> robot = Robot.from_graph(cad, graph, client, "my_robot")
+            >>> robot.save("robot.urdf", download_assets=True)
+        """
+        from onshape_robotics_toolkit.parse import fetch_mass_properties_for_kinematic_parts
+
+        # Fetch mass properties for parts in kinematic chain
+        fetch_mass_properties_for_kinematic_parts(
+            cad=cad,
+            kinematic_graph=kinematic_graph,
+            client=client,
+            include_rigid_subassembly_parts=include_rigid_subassembly_parts,
+        )
+
+        # Generate robot structure from kinematic graph
+        robot = get_robot_from_kinematic_graph(
+            cad=cad,
+            kinematic_graph=kinematic_graph,
+            client=client,
+            robot_name=name,
+        )
+
+        robot.type = robot_type
+
+        return robot
+
+    @classmethod
     def from_url(
         cls,
         name: str,
@@ -856,24 +951,39 @@ class Robot:
         include_rigid_subassembly_parts: bool = False,
     ) -> "Robot":
         """
-        Load a robot model from an Onshape CAD assembly.
+        Load a robot model from an Onshape CAD assembly URL.
+
+        This method fetches the assembly from Onshape, builds the CAD structure
+        and kinematic graph, then delegates to Robot.from_graph() for robot creation.
 
         Args:
-            name: The name of the robot.
-            url: The URL of the Onshape CAD assembly.
-            client: The Onshape client object.
-            max_depth: The maximum depth to process the assembly.
-            use_user_defined_root: Whether to use the user-defined root.
-            robot_type: The type of the robot.
-            log_assembly: Whether to log the assembly response.
-            include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies.
+            name: The name of the robot
+            url: The URL of the Onshape CAD assembly
+            client: The Onshape client object
+            max_depth: The maximum depth to process the assembly (controls rigid vs flexible)
+            use_user_defined_root: Whether to use the user-defined root
+            robot_type: The type of the robot (URDF or MJCF)
+            log_assembly: Whether to log the assembly response
+            include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies
 
         Returns:
-            The robot model.
+            Robot: The generated robot model
+
+        Example:
+            >>> from onshape_robotics_toolkit.connect import Client
+            >>> client = Client()
+            >>> robot = Robot.from_url(
+            ...     name="my_robot",
+            ...     url="https://cad.onshape.com/documents/...",
+            ...     client=client,
+            ...     max_depth=1
+            ... )
+            >>> robot.save("robot.urdf", download_assets=True)
         """
         from onshape_robotics_toolkit.graph import KinematicGraph
         from onshape_robotics_toolkit.parse import CAD
 
+        # Fetch assembly from Onshape
         document = Document.from_url(url=url)
         client.set_base_url(document.base_url)
 
@@ -890,29 +1000,20 @@ class Robot:
         cad = CAD.from_assembly(assembly=assembly, max_depth=max_depth)
 
         # Build kinematic graph from CAD structure
-        kinematic_graph = KinematicGraph(cad=cad, use_user_defined_root=use_user_defined_root)
+        kinematic_graph = KinematicGraph.from_cad(cad=cad, use_user_defined_root=use_user_defined_root)
 
-        # Fetch mass properties for parts in kinematic chain
-        from onshape_robotics_toolkit.parse import fetch_mass_properties_for_kinematic_parts
-
-        fetch_mass_properties_for_kinematic_parts(
+        # Delegate to from_graph for robot creation
+        robot = cls.from_graph(
             cad=cad,
             kinematic_graph=kinematic_graph,
             client=client,
+            name=name,
+            robot_type=robot_type,
             include_rigid_subassembly_parts=include_rigid_subassembly_parts,
         )
 
-        # Generate robot structure from kinematic graph
-        robot = get_robot_from_kinematic_graph(
-            cad=cad,
-            kinematic_graph=kinematic_graph,
-            client=client,
-            robot_name=name,
-        )
-
-        # Store references for backward compatibility
+        # Store assembly reference for backward compatibility
         robot.assembly = assembly
-        robot.type = robot_type
 
         return robot
 
@@ -941,8 +1042,15 @@ def get_robot_from_kinematic_graph(
     """
     Generate a Robot instance from a CAD document and kinematic graph.
 
-    This is the new PathKey-based implementation that uses the CAD class
-    and KinematicGraph to efficiently build the robot structure.
+    This is the PathKey-based implementation that uses the CAD class
+    and KinematicGraph to efficiently build the robot structure following
+    the CAD → KinematicGraph → Robot pipeline.
+
+    The function:
+    1. Creates the root link from the kinematic graph root node
+    2. Processes edges in topological order to create joints and child links
+    3. Downloads STL assets for each part
+    4. Handles mate relations for mimic joints (TODO)
 
     Args:
         cad: CAD document with PathKey-based registries
@@ -951,13 +1059,16 @@ def get_robot_from_kinematic_graph(
         robot_name: Name of the robot
 
     Returns:
-        Robot: The generated Robot instance
+        Robot: The generated Robot instance with links, joints, and assets
+
+    Raises:
+        ValueError: If kinematic graph has no root node or parts are missing
     """
     from onshape_robotics_toolkit.parse import PathKey
 
     robot = Robot(name=robot_name)
     assets_map: dict[str, Asset] = {}
-    stl_to_link_tf_map: dict[PathKey, np.matrix] = {}
+    stl_to_link_tf_map: dict[PathKey, np.ndarray] = {}
 
     # Get root node from kinematic graph
     if kinematic_graph.root_node is None:

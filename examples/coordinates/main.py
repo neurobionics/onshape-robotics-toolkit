@@ -38,7 +38,7 @@ from onshape_robotics_toolkit.robot import Robot, RobotType, get_robot_from_kine
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
-DEPTH = 1
+DEPTH = 0
 NAME = f"transforms_{DEPTH}"
 USE_CACHED = True  # Set to False to force fresh API call
 LOG_ASSEMBLY = False
@@ -177,18 +177,13 @@ if __name__ == "__main__":
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
     graph.show(f"KinematicGraph_Depth_{DEPTH}")
 
-    # cad.process_mates_and_relations()
-
-    # tree = KinematicGraph(cad, use_user_defined_root=True)
-    # tree.show(f"KinematicGraph_Depth_{DEPTH}")
-
-    # # Create robot from kinematic graph
-    # robot = create_robot_from_kinematic_graph(
-    #     cad=cad,
-    #     kinematic_graph=tree,
-    #     client=client,
-    #     robot_name=f"robot_{DEPTH}",
-    #     robot_type=RobotType.URDF,
-    #     include_rigid_subassembly_parts=False,
-    # )
-    # robot.save(f"robot_{DEPTH}.urdf", download_assets=True)
+    # Create robot from kinematic graph using new Robot.from_graph() method
+    robot = Robot.from_graph(
+        cad=cad,
+        kinematic_graph=graph,
+        client=client,
+        name=f"robot_{DEPTH}",
+        robot_type=RobotType.URDF,
+        include_rigid_subassembly_parts=False,
+    )
+    robot.save(f"robot_{DEPTH}.urdf", download_assets=True)

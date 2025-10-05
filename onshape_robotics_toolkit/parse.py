@@ -421,17 +421,21 @@ class CAD:
 
     def get_rigid_assembly_root(self, key: PathKey) -> Optional[PathKey]:
         """
-        Find the rigid assembly root for a given PathKey.
+        Find the top-most rigid assembly root for a given PathKey.
 
-        If the key itself is a rigid assembly, returns it.
-        If the key is inside a rigid assembly, returns the rigid assembly's PathKey.
+        Walks up the hierarchy to find the highest-level rigid assembly.
+        This ensures that if an assembly is inside another rigid assembly,
+        we return the outermost one.
+
+        If the key itself is a rigid assembly, checks if it's inside another rigid assembly.
+        If the key is inside a rigid assembly, returns the top-most rigid assembly's PathKey.
         If the key is not inside any rigid assembly, returns None.
 
         Args:
             key: PathKey to find rigid assembly root for
 
         Returns:
-            PathKey of rigid assembly root, or None if not inside rigid assembly
+            PathKey of top-most rigid assembly root, or None if not inside rigid assembly
 
         Examples:
             >>> # Part at depth 2 inside rigid assembly at depth 1
@@ -439,14 +443,18 @@ class CAD:
             >>> rigid_root = cad.get_rigid_assembly_root(key)
             >>> # Returns PathKey(("asm1", "sub1"), ("Assembly_1", "Sub_1"))
         """
-        # Walk up the hierarchy from the key to find a rigid assembly
+        # Walk up the hierarchy from the key to find ALL rigid assemblies
+        # Return the top-most one (closest to root)
+        rigid_root: Optional[PathKey] = None
         current: Optional[PathKey] = key
+
         while current is not None:
             instance = self.instances.get(current)
             if isinstance(instance, AssemblyInstance) and instance.isRigid:
-                return current
+                rigid_root = current  # Keep updating to get the top-most
             current = current.parent
-        return None
+
+        return rigid_root
 
     def compute_relative_mate_transform(
         self, part_key: PathKey, rigid_root_key: PathKey, part_to_mate_tf: np.ndarray

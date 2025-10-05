@@ -4,10 +4,36 @@
 
 The library converts Onshape CAD assemblies into URDF robot models. Key components:
 
-- **Client**: API authentication and communication
-- **Robot**: Main entry point (`Robot.from_url()`), URDF export, visualization
-- **CAD**: PathKey-based assembly representation with registries
-- **Graph**: Kinematic graph construction from mates
+- **Client**: API authentication and communication with Onshape API
+- **CAD**: PathKey-based assembly representation with flat registries (instances, occurrences, mates, parts)
+- **KinematicGraph**: NetworkX directed graph built from mates, represents the robot's kinematic chain
+- **Robot**: Final output containing links (nodes) and joints (edges) with STL assets, exports to URDF/MJCF
+
+### Robot Class Architecture
+
+The `Robot` class is the final output of the conversion pipeline:
+
+**Creation Methods** (in order of recommendation):
+
+1. `Robot.from_graph(cad, kinematic_graph, client, name)` - Most efficient when you have CAD + KinematicGraph
+2. `Robot.from_url(name, url, client, max_depth)` - Most convenient for one-step creation from Onshape URL
+3. `Robot.from_urdf(file_name, robot_type)` - Load from existing URDF file
+
+**Key Features:**
+
+- Stores robot structure as NetworkX DiGraph (links = nodes, joints = edges)
+- Manages STL assets for each link
+- Exports to URDF or MuJoCo MJCF format
+- Supports visualization and tree display
+- Integrates mass property fetching automatically in `from_graph()` and `from_url()`
+
+**Data Flow:**
+
+```
+Onshape URL → Assembly JSON → CAD (flat) → KinematicGraph → Robot → URDF/MJCF
+                                                              ↓
+                                                         STL Assets
+```
 
 ## Workflow Sequence
 
@@ -539,17 +565,29 @@ def _remap_mate_for_rigid_assemblies(
 
 ```python
 def get_rigid_assembly_root(key: PathKey) -> Optional[PathKey]:
-    """Find the rigid assembly root for a given PathKey.
+    """Find the TOP-MOST rigid assembly root for a given PathKey.
 
-    Walks up the hierarchy to find if a part is inside a rigid assembly.
+    Walks up the hierarchy to find ALL rigid assemblies and returns the
+    highest-level one. This is crucial for nested rigid assemblies.
+
+    Returns:
+        PathKey of top-most rigid assembly root, or None if not inside rigid assembly
+
+    Example:
+        Assembly_2 (depth=1, rigid) contains Assembly_1 (depth=2, rigid)
+        get_rigid_assembly_root(Assembly_1) → Assembly_2 (top-most)
+        get_rigid_assembly_root(part inside Assembly_1) → Assembly_2 (top-most)
     """
-    current = key
+    rigid_root: Optional[PathKey] = None
+    current: Optional[PathKey] = key
+
     while current is not None:
         instance = self.instances.get(current)
         if isinstance(instance, AssemblyInstance) and instance.isRigid:
-            return current
+            rigid_root = current  # Keep updating to get the top-most
         current = current.parent
-    return None
+
+    return rigid_root
 ```
 
 #### Computing Relative Transform
@@ -890,7 +928,45 @@ for (parent, child), mate in tree._collect_all_mates().items():
 
 ## Robot Creation from KinematicGraph
 
-### Workflow
+### Recommended Workflow (Using Robot.from_graph)
+
+```python
+from onshape_robotics_toolkit.parse import CAD
+from onshape_robotics_toolkit.graph import KinematicGraph
+from onshape_robotics_toolkit.robot import Robot
+
+# 1. Create CAD structure (flat registries with all parts, MassProperty=None)
+cad = CAD.from_assembly(assembly, max_depth=1)
+
+# 2. Build kinematic graph
+kinematic_graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+
+# 3. Create robot (automatically fetches mass properties for kinematic parts)
+robot = Robot.from_graph(cad, kinematic_graph, client, "my_robot")
+
+# 4. Save URDF with assets
+robot.save("robot.urdf", download_assets=True)
+```
+
+### Alternative: Direct from URL
+
+```python
+from onshape_robotics_toolkit.robot import Robot
+from onshape_robotics_toolkit.connect import Client
+
+# One-step creation from Onshape URL
+robot = Robot.from_url(
+    name="my_robot",
+    url="https://cad.onshape.com/documents/...",
+    client=Client(),
+    max_depth=1,
+    use_user_defined_root=True
+)
+
+robot.save("robot.urdf", download_assets=True)
+```
+
+### Low-Level Workflow (Manual Control)
 
 ```python
 from onshape_robotics_toolkit.parse import CAD, fetch_mass_properties_for_kinematic_parts
@@ -903,10 +979,10 @@ cad = CAD.from_assembly(assembly, max_depth=1)
 # 2. Build kinematic graph
 kinematic_graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
 
-# 3. Fetch mass properties for kinematic parts only (optimization)
+# 3. Fetch mass properties for kinematic parts only (manual)
 fetch_mass_properties_for_kinematic_parts(cad, kinematic_graph, client)
 
-# 4. Generate robot structure
+# 4. Generate robot structure (low-level function)
 robot = get_robot_from_kinematic_graph(cad, kinematic_graph, client, "my_robot")
 
 # 5. Save URDF with assets
