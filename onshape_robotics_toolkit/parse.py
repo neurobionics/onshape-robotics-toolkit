@@ -734,12 +734,12 @@ class CAD:
         # Step 4: Populate patterns (root + subassemblies)
         self._populate_patterns(assembly)
 
+        # Step 6: Populate parts from assembly.parts (mass properties still None)
+        self._populate_parts(assembly)
+
         # Step 5: Populate mates with assembly provenance
         # Mates will be remapped if they reference parts inside rigid assemblies
         self._populate_mates(assembly)
-
-        # Step 6: Populate parts from assembly.parts (mass properties still None)
-        self._populate_parts(assembly)
 
         LOGGER.debug(
             f"Populated CAD: {len(self.instances)} instances, "
@@ -962,12 +962,15 @@ class CAD:
             # Parent is inside a rigid assembly, remap it
             LOGGER.debug(f"Remapping parent from {parent_key} to rigid root {parent_rigid_root}")
 
-            # Get original part_to_mate transform
-            original_tf = np.array(mate_data.matedEntities[PARENT].matedCS.part_to_mate_tf).reshape(4, 4)
+            # Get original part_to_mate transform, rigid assembly to part transform, and mate's part_to_mate transform
+            og_part_tf = np.array(self.occurrences.get(parent_key).tf).reshape(4, 4)
+            og_part_to_mate_tf = np.array(mate_data.matedEntities[PARENT].matedCS.part_to_mate_tf).reshape(4, 4)
+            rigid_sub_to_part_tf = np.array(self.parts.get(parent_key).rigidAssemblyToPartTF.part_to_mate_tf).reshape(
+                4, 4
+            )
 
             # Compute new transform relative to rigid assembly
-            new_tf = self.compute_relative_mate_transform(parent_key, parent_rigid_root, original_tf)
-
+            new_tf = rigid_sub_to_part_tf @ og_part_tf @ og_part_to_mate_tf
             # Update mate data with new MatedCS from transform
             mate_data.matedEntities[PARENT].matedCS = MatedCS.from_tf(new_tf)
             mate_data.matedEntities[PARENT].matedOccurrence = list(parent_rigid_root.path)
@@ -981,11 +984,15 @@ class CAD:
             # Child is inside a rigid assembly, remap it
             LOGGER.debug(f"Remapping child from {child_key} to rigid root {child_rigid_root}")
 
-            # Get original part_to_mate transform
-            original_tf = np.array(mate_data.matedEntities[CHILD].matedCS.part_to_mate_tf).reshape(4, 4)
+            # Get original part_to_mate transform, rigid assembly to part transform, and mate's part_to_mate transform
+            og_part_tf = np.array(self.occurrences.get(child_key).tf).reshape(4, 4)
+            og_part_to_mate_tf = np.array(mate_data.matedEntities[CHILD].matedCS.part_to_mate_tf).reshape(4, 4)
+            rigid_sub_to_part_tf = np.array(self.parts.get(child_key).rigidAssemblyToPartTF.part_to_mate_tf).reshape(
+                4, 4
+            )
 
             # Compute new transform relative to rigid assembly
-            new_tf = self.compute_relative_mate_transform(child_key, child_rigid_root, original_tf)
+            new_tf = rigid_sub_to_part_tf @ og_part_tf @ og_part_to_mate_tf
 
             # Update mate data with new MatedCS from transform
             mate_data.matedEntities[CHILD].matedCS = MatedCS.from_tf(new_tf)

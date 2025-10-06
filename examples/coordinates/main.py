@@ -17,12 +17,13 @@ from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models import Assembly
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.parse import CAD
+from onshape_robotics_toolkit.robot import Robot
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 
 # Configuration
 USE_CACHED = True
 LOG_ASSEMBLY = False
-MAX_DEPTH = 2
+MAX_DEPTH = 0
 
 # Root assembly URL
 ROOT_URL = (
@@ -96,3 +97,6 @@ if __name__ == "__main__":
     graph = KinematicGraph.from_cad(root_cad, use_user_defined_root=True)
 
     graph.show(file_name="root_assembly")
+
+    robot = Robot.from_graph(cad=root_cad, kinematic_graph=graph, client=client, name="rootassembly")
+    robot.save()
