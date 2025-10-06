@@ -134,7 +134,7 @@ class PathKey:
     @property
     def depth(self) -> int:
         """Get depth in hierarchy (0 = root level)."""
-        return len(self._path)
+        return len(self._path) - 1
 
     def hierarchical_name(self, separator: str = "-") -> str:
         """
@@ -284,6 +284,7 @@ class CAD:
 
     # Recursively fetched flexible subassemblies (external documents)
     fetched_subassemblies: dict[PathKey, "CAD"]
+    rigid_part_transforms: dict[PathKey, MatedCS]  # Cache of rigid part transforms
 
     def __init__(
         self,
@@ -318,6 +319,7 @@ class CAD:
         self.patterns = {}
         self.parts = {}
         self.fetched_subassemblies = {}
+        self.rigid_part_transforms = {}
 
     # ============================================================================
     # HELPER METHODS
@@ -407,23 +409,6 @@ class CAD:
         if pattern and seed_id in pattern.seedToPatternInstances:
             return pattern.seedToPatternInstances[seed_id]
         return []
-
-    def lookup_by_name(self, name: str, depth: Optional[int] = None) -> list[PathKey]:
-        """
-        Find PathKeys by name.
-
-        Args:
-            name: Sanitized instance name
-            depth: Optional depth filter
-
-        Returns:
-            List of matching PathKeys
-        """
-        matches = []
-        for key in self.instances:
-            if key.name == name and (depth is None or key.depth == depth):
-                matches.append(key)
-        return matches
 
     def get_rigid_assembly_root(self, key: PathKey) -> Optional[PathKey]:
         """
@@ -739,12 +724,12 @@ class CAD:
         # Step 1: Populate instances (root + subassemblies)
         self._populate_instances(assembly)
 
-        # Step 2: Mark rigid assemblies based on max_depth (MUST be before mates)
-        # This is needed for mate remapping to work correctly
-        self._mark_rigid_assemblies()
-
-        # Step 3: Populate occurrences (root + subassemblies)
+        # Step 2: Populate occurrences (root + subassemblies)
         self._populate_occurrences(assembly)
+
+        # Step 3: Mark rigid assemblies after transforms are available
+        # This is needed for mate remapping and rigid assembly transform calculation
+        self._mark_rigid_assemblies()
 
         # Step 4: Populate patterns (root + subassemblies)
         self._populate_patterns(assembly)
@@ -1138,6 +1123,7 @@ class CAD:
                 if source_part:
                     # Clone to avoid shared references
                     self.parts[key] = Part(**source_part.model_dump())
+                    self._attach_rigid_transform_to_part(key)
                 else:
                     LOGGER.warning(f"Part not found in assembly.parts for instance {key} (uid={instance.uid})")
 
@@ -1173,20 +1159,72 @@ class CAD:
             max_depth=1: Depth 1 flexible, depth 2+ rigid
             max_depth=2: Depth 1-2 flexible, depth 3+ rigid
         """
-        if self.max_depth == 0:
-            # All assemblies are rigid
-            for instance in self.instances.values():
-                if isinstance(instance, AssemblyInstance):
-                    instance.isRigid = True
-            LOGGER.debug("Marked all assemblies as rigid (max_depth=0)")
-        else:
-            # Mark assemblies BEYOND max_depth as rigid
-            rigid_count = 0
-            for key, instance in self.instances.items():
-                if isinstance(instance, AssemblyInstance) and key.depth > self.max_depth:
-                    instance.isRigid = True
-                    rigid_count += 1
-            LOGGER.debug(f"Marked {rigid_count} assemblies as rigid (max_depth={self.max_depth})")
+        # Reset cached transforms before recomputing
+        self.rigid_part_transforms.clear()
+
+        # Mark assemblies BEYOND max_depth as rigid
+        rigid_count = 0
+        for key, instance in self.instances.items():
+            if isinstance(instance, AssemblyInstance) and key.depth >= self.max_depth:
+                instance.isRigid = True
+                rigid_count += 1
+        LOGGER.debug(f"Marked {rigid_count} assemblies as rigid (max_depth={self.max_depth})")
+
+        # After marking, compute transforms from rigid assemblies to their contained parts
+        self._compute_rigid_part_transforms()
+
+    def _compute_rigid_part_transforms(self) -> None:
+        """
+        Cache transforms from rigid assemblies to their descendant parts.
+
+        For each part instance that lives inside a rigid assembly, compute the transform
+        that maps from the rigid assembly frame to the part frame. This mapping is stored
+        for later use when populating Part models.
+        """
+        computed = 0
+
+        for key, instance in self.instances.items():
+            if not isinstance(instance, PartInstance):
+                continue
+
+            rigid_root = self.get_rigid_assembly_root(key)
+            if not rigid_root:
+                continue
+
+            rigid_tf = self.get_transform(rigid_root)
+            part_tf = self.get_transform(key)
+
+            if rigid_tf is None or part_tf is None:
+                LOGGER.warning(
+                    "Cannot compute rigid assembly transform for part %s: rigid_tf=%s, part_tf=%s",
+                    key,
+                    rigid_tf is not None,
+                    part_tf is not None,
+                )
+                continue
+
+            # Transform taking the rigid assembly frame to the part frame
+            rigid_to_part_tf = np.linalg.inv(rigid_tf) @ part_tf
+            self.rigid_part_transforms[key] = MatedCS.from_tf(rigid_to_part_tf)
+
+            computed += 1
+
+        if computed:
+            LOGGER.info("Computed rigid assembly transforms for %d parts", computed)
+
+    def _attach_rigid_transform_to_part(self, key: PathKey) -> None:
+        """Apply cached rigid assembly transforms to the Part model."""
+        part_model = self.parts.get(key)
+        if not part_model:
+            return
+
+        rigid_to_part_tf = self.rigid_part_transforms.get(key)
+
+        if rigid_to_part_tf is not None:
+            part_model.rigidAssemblyToPartTF = rigid_to_part_tf
+        elif key.depth > self.max_depth:
+            LOGGER.warning(f"No rigid assembly transform found for part {key}")
+            exit(1)
 
 
 # ============================================================================

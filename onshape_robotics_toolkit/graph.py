@@ -387,16 +387,9 @@ class KinematicGraph:
             >>> tree.show("kinematic_tree.png")  # Save to file with names
         """
         # Create a mapping from PathKey to name
-        label_mapping = {}
+        label_mapping: dict[PathKey, str] = {}
         for node in self.graph.nodes:
-            # Try to get name from instances
-            instance = self.cad.instances.get(node)
-            if instance:
-                label_mapping[node] = instance.name
-            else:
-                # Fallback to PathKey representation
-                label_mapping[node] = str(node)
-
+            label_mapping[node] = str(node)
         # Create a copy of the graph with relabeled nodes
         labeled_graph = nx.relabel_nodes(self.graph, label_mapping, copy=True)
 
@@ -481,7 +474,7 @@ class KinematicGraph:
         )
 
 
-def plot_graph(graph: Union[nx.Graph, nx.DiGraph], file_name: Optional[str] = None) -> None:
+def plot_graph(graph: Union[nx.Graph, nx.DiGraph], file_name: Optional[str] = "robot") -> None:
     """
     Display the graph using networkx and matplotlib, or save it as an image file.
 
@@ -498,25 +491,16 @@ def plot_graph(graph: Union[nx.Graph, nx.DiGraph], file_name: Optional[str] = No
     plt.figure(figsize=(8, 8))
     pos = nx.shell_layout(graph)
 
-    if file_name:
-        nx.draw(
-            graph,
-            pos,
-            with_labels=True,
-            node_color=colors,
-            edge_color="white",
-            font_color="white",
-        )
-        plt.savefig(file_name, transparent=True)
-        plt.close()
-    else:
-        nx.draw(
-            graph,
-            pos,
-            with_labels=True,
-            node_color=colors,
-        )
-        plt.show()
+    nx.draw(
+        graph,
+        pos,
+        with_labels=True,
+        node_color=colors,
+        edge_color="white",
+        font_color="white",
+    )
+    plt.savefig(file_name, transparent=True)
+    plt.close()
 
 
 def get_root_node(graph: nx.DiGraph) -> Any:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from onshape_robotics_toolkit.models.assembly import Assembly, AssemblyInstance, PartInstance
+from onshape_robotics_toolkit.models.assembly import Assembly, AssemblyInstance, MatedCS, PartInstance
 from onshape_robotics_toolkit.parse import CAD, PathKey
 
 
@@ -164,6 +164,45 @@ class TestCAD:
 
         # This will always pass - it's just for documentation
         assert True
+
+    def test_parts_with_rigid_parent_have_transform(self, cad_doc_depth_1: CAD):
+        """Parts inside rigid subassemblies should record rigid transforms."""
+        parts_with_transform = [
+            (key, part)
+            for key, part in cad_doc_depth_1.parts.items()
+            if cad_doc_depth_1.is_part(key) and part.rigidAssemblyToPartTF
+        ]
+
+        assert parts_with_transform, "Expected at least one part inside a rigid subassembly to have transforms"
+
+        for key, part in parts_with_transform:
+            rigid_root = cad_doc_depth_1.get_rigid_assembly_root(key)
+            assert rigid_root is not None, "Transform present should imply rigid assembly ancestor"
+
+            transforms = part.rigidAssemblyToPartTF
+            assert isinstance(transforms, dict)
+            assert len(transforms) == 1
+
+            transform_key, mated_cs = next(iter(transforms.items()))
+            assert transform_key == "|".join(rigid_root.path)
+            assert isinstance(mated_cs, MatedCS)
+
+    def test_unique_names_with_duplicate_inputs(self, assembly: Assembly):
+        """Duplicated instance names should yield unique hierarchical paths."""
+        # Force duplicate names across root and subassembly instances
+        for inst in assembly.rootAssembly.instances:
+            inst.name = "duplicate"
+        for sub in assembly.subAssemblies:
+            for inst in sub.instances:
+                inst.name = "duplicate"
+
+        cad = CAD.from_assembly(assembly, max_depth=2)
+
+        name_paths = [key.name_path for key in cad.keys.values()]
+        assert len(name_paths) == len({tuple(path) for path in name_paths}), "Name paths must be unique"
+
+        hierarchical_names = [key.hierarchical_name(separator="-") for key in cad.keys.values()]
+        assert len(hierarchical_names) == len(set(hierarchical_names)), "Hierarchical names must be unique"
 
 
 if __name__ == "__main__":

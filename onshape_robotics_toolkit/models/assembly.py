@@ -413,7 +413,7 @@ class Part(IDBase):
     isRigidAssembly: bool = Field(
         False, description="Indicates if the part is a rigid assembly, i.e., a sub-assembly with no degrees of freedom."
     )
-    rigidAssemblyToPartTF: Union[dict[str, "MatedCS"], None] = Field(
+    rigidAssemblyToPartTF: Union["MatedCS", None] = Field(
         None, description="The transformation matrix from the rigid assembly to the part coordinate system."
     )
     rigidAssemblyWorkspaceId: Union[str, None] = Field(

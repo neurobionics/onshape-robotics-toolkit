@@ -12,6 +12,7 @@ import json
 import os
 
 from onshape_robotics_toolkit.connect import Client
+from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models import Assembly
 from onshape_robotics_toolkit.models.document import Document
@@ -21,7 +22,7 @@ from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_
 # Configuration
 USE_CACHED = True
 LOG_ASSEMBLY = False
-MAX_DEPTH = 1
+MAX_DEPTH = 2
 
 # Root assembly URL
 ROOT_URL = (
@@ -34,15 +35,6 @@ SUBASSEMBLY_URL = (
     "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/996c149cb195c9268ab062b4"
 )
 SUBASSEMBLY_NAME = "Assembly_2_1"
-
-PARTS_TO_COMPARE = [
-    # these parts below are direct children of the subassembly
-    "Part_6_1",
-    "Part_12_1",
-    # these parts below are within a subassembly within this subassembly
-    # "Part_10_1",
-    # "Part_4_1",
-]
 
 
 def save_occurrence_transforms(cad: CAD, filename: str):
@@ -98,22 +90,9 @@ if __name__ == "__main__":
     client.set_base_url(root_doc.base_url)
 
     rootassembly = fetch_assembly_json(client, root_doc, "rootassembly.json")
-    subassembly = fetch_assembly_json(client, subassembly_doc, "subassembly.json")
+    # subassembly = fetch_assembly_json(client, subassembly_doc, "subassembly.json")
 
     root_cad = CAD.from_assembly(rootassembly, max_depth=MAX_DEPTH)
-    sub_cad = CAD.from_assembly(subassembly, max_depth=MAX_DEPTH)
+    graph = KinematicGraph.from_cad(root_cad, use_user_defined_root=True)
 
-    root_tf_data = save_occurrence_transforms(root_cad, "global_occurrences.json")
-    sub_tf_data = save_occurrence_transforms(sub_cad, "local_occurrences.json")
-
-    for part_name in PARTS_TO_COMPARE:
-        root_key = root_cad.get_path_key_by_name((SUBASSEMBLY_NAME, part_name))
-        root_sub_key = root_cad.get_path_key_by_name(SUBASSEMBLY_NAME)
-        sub_key = sub_cad.get_path_key_by_name(part_name)
-
-        root_sub_tf = root_cad.get_transform(root_sub_key)
-
-        root_occ_tf = root_cad.get_transform(root_key, wrt=root_sub_tf)
-        sub_occ_tf = sub_cad.get_transform(sub_key)
-
-        print(root_occ_tf, sub_occ_tf)
+    graph.show(file_name="root_assembly")
