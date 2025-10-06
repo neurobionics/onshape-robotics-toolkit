@@ -569,7 +569,11 @@ class Client:
             )
             exit(1)
 
-        assembly = Assembly.model_validate(res.json())
+        # Clean numerical values from API response before validation
+        from onshape_robotics_toolkit.utilities.helpers import clean_json_numerics
+
+        assembly_data = clean_json_numerics(res.json(), threshold=1e-10, decimals=8)
+        assembly = Assembly.model_validate(assembly_data)
         document = Document(did=did, wtype=wtype, wid=wid, eid=eid)
         assembly.document = document
 

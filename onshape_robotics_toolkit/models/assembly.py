@@ -50,6 +50,7 @@ from enum import Enum
 from typing import Any, Union
 
 import numpy as np
+import numpy.typing as npt
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from onshape_robotics_toolkit.models.document import Document, DocumentMetaData
@@ -221,6 +222,29 @@ class Occurrence(BaseModel):
             raise ValueError("Transform must have 16 values")
 
         return v
+
+    @property
+    def tf(self) -> npt.NDArray[np.floating[Any]]:
+        """
+        Converts the flat list representation of the transformation matrix into a 4x4 numpy array.
+
+        Returns:
+            np.ndarray: A 4x4 numpy array representing the transformation matrix.
+        """
+        return np.array(self.transform).reshape(4, 4)
+
+    def tf_wrt(self, ref_tf: np.ndarray) -> npt.NDArray[np.floating[Any]]:
+        """
+        Computes the transformation matrix of this occurrence with respect to a reference transformation matrix.
+
+        Args:
+            ref_tf (np.ndarray): The reference 4x4 transformation matrix.
+
+        Returns:
+            np.ndarray: The 4x4 transformation matrix of this occurrence with respect to the reference.
+        """
+        result: npt.NDArray[np.floating[Any]] = np.linalg.inv(ref_tf) @ self.tf
+        return result
 
 
 class IDBase(BaseModel):

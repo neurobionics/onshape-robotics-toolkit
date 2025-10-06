@@ -383,10 +383,16 @@ class CAD:
         """Check if instance is a part."""
         return isinstance(self.instances.get(key), PartInstance)
 
-    def get_transform(self, key: PathKey) -> Optional[np.ndarray]:
+    def get_transform(self, key: PathKey, wrt: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
         """Get 4x4 transform matrix for occurrence."""
         occ = self.occurrences.get(key)
-        return np.array(occ.transform).reshape(4, 4) if occ else None
+
+        if occ:
+            if wrt is not None:
+                return occ.tf_wrt(wrt)
+            else:
+                return occ.tf
+        return None
 
     def get_pattern_for_seed(self, seed_id: str) -> Optional[Pattern]:
         """Get pattern containing a seed instance."""

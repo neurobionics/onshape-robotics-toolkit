@@ -1144,7 +1144,7 @@ def get_robot_from_kinematic_graph(
             parent=parent_name,
             child=child_name,
             mate=mate_data,
-            stl_to_parent_tf=parent_tf,
+            stl_to_parent_tf=np.matrix(parent_tf),
             mimic=joint_mimic,
             is_rigid_assembly=parent_part.isRigidAssembly,
         )
