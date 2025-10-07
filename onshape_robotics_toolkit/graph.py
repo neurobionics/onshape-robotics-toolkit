@@ -24,7 +24,7 @@ import networkx as nx
 
 from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.models.assembly import MateFeatureData
-from onshape_robotics_toolkit.parse import CAD, PathKey
+from onshape_robotics_toolkit.parse import CAD, CHILD, PARENT, PathKey
 
 
 class KinematicGraph:
@@ -124,7 +124,7 @@ class KinematicGraph:
 
         # Get all parts involved in valid mates
         involved_parts = self._get_parts_involved_in_mates(valid_mates)
-        LOGGER.debug(f"Parts involved in mates: {len(involved_parts)}")
+        LOGGER.info(f"Parts involved in mates: {len(involved_parts)}")
 
         # Find user-defined root if requested
         user_defined_root = self._find_user_defined_root(involved_parts) if use_user_defined_root else None
@@ -154,6 +154,9 @@ class KinematicGraph:
 
         # Convert to directed graph with root node
         self.graph, self.root_node = convert_to_digraph(main_graph, user_defined_root)
+
+        # Align mate entity ordering with the directed edge orientation
+        self._align_mated_entities_with_edges()
 
         # Calculate topological order
         self.topological_order = get_topological_order(self.graph)
@@ -207,6 +210,77 @@ class KinematicGraph:
 
         LOGGER.debug(f"Valid mates: {len(valid_mates)}")
         return valid_mates
+
+    def _align_mated_entities_with_edges(self) -> None:
+        """
+        Align mate entity ordering to match the directed graph edge orientation.
+
+        During graph construction, edges may be reoriented when converting from the undirected
+        representation to a directed tree rooted at the chosen base link. The MateFeatureData
+        attached to each edge retains its original matedEntities ordering, which can result in
+        swapped parent/child indices. Because downstream URDF generation relies on the global
+        CHILD/PARENT constants, we realign the list so that:
+
+            mate.matedEntities[CHILD]  -> child node of the directed edge
+            mate.matedEntities[PARENT] -> parent node of the directed edge
+        """
+
+        for parent_key, child_key, data in self.graph.edges(data=True):
+            mate = data.get("mate_data")
+            if not isinstance(mate, MateFeatureData):
+                continue
+
+            expected_parent_path = parent_key.path
+            expected_child_path = child_key.path
+
+            def entity_path(index: int, mate: MateFeatureData = mate) -> tuple[str, ...]:
+                try:
+                    return tuple(mate.matedEntities[index].matedOccurrence)
+                except (AttributeError, IndexError):
+                    return ()
+
+            current_child_path = entity_path(CHILD)
+            current_parent_path = entity_path(PARENT)
+
+            if current_child_path == expected_child_path and current_parent_path == expected_parent_path:
+                continue
+
+            parent_idx = child_idx = None
+            for idx, entity in enumerate(mate.matedEntities):
+                occurrence_path = tuple(getattr(entity, "matedOccurrence", ()))
+                if occurrence_path == expected_parent_path:
+                    parent_idx = idx
+                if occurrence_path == expected_child_path:
+                    child_idx = idx
+
+            if parent_idx is None or child_idx is None:
+                LOGGER.warning(
+                    "Mate '%s' entities do not match edge %s -> %s (parent_idx=%s, child_idx=%s).",
+                    getattr(mate, "name", "<unnamed mate>"),
+                    parent_key,
+                    child_key,
+                    parent_idx,
+                    child_idx,
+                )
+                continue
+
+            if parent_idx == PARENT and child_idx == CHILD:
+                # Order already matches constants; nothing to do.
+                continue
+
+            ordered_entities = list(mate.matedEntities)
+            ordered_entities[CHILD] = mate.matedEntities[child_idx]
+            ordered_entities[PARENT] = mate.matedEntities[parent_idx]
+            mate.matedEntities = ordered_entities
+
+            LOGGER.debug(
+                "Aligned mate '%s' entity order for edge %s -> %s (parent_idx=%s, child_idx=%s).",
+                getattr(mate, "name", "<unnamed mate>"),
+                parent_key,
+                child_key,
+                parent_idx,
+                child_idx,
+            )
 
     def _is_valid_mate_target(self, key: PathKey) -> bool:
         """

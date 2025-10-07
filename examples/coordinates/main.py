@@ -8,7 +8,6 @@ This script:
 5. Validates the computation against the actual subassembly data
 """
 
-import json
 import os
 
 from onshape_robotics_toolkit.connect import Client
@@ -21,44 +20,14 @@ from onshape_robotics_toolkit.robot import Robot
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 
 # Configuration
-USE_CACHED = True
+USE_CACHED = False
 LOG_ASSEMBLY = False
-MAX_DEPTH = 0
+MAX_DEPTH = 1
 
 # Root assembly URL
 ROOT_URL = (
-    "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/46679c6ab890a1b7a6d11a88"
+    "https://cad.onshape.com/documents/9c982cc66e2d3357ecf31371/w/21b699e5966180f4906fb6d1/e/3ef3c81430ecd68387fc3962"
 )
-
-# Subassembly URL - paste the URL of a subassembly within the root assembly here
-# You can get this by right-clicking on a subassembly in Onshape and copying its link
-SUBASSEMBLY_URL = (
-    "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/996c149cb195c9268ab062b4"
-)
-SUBASSEMBLY_NAME = "Assembly_2_1"
-
-
-def save_occurrence_transforms(cad: CAD, filename: str):
-    """Save occurrence transforms and positions to JSON for analysis."""
-    data = {}
-    for key, occurrence in cad.occurrences.items():
-        instance = cad.instances.get(key)
-        if instance:
-            # Extract position (translation) from transform matrix
-            tf_matrix = occurrence.tf
-            position = tf_matrix[:3, 3].tolist()  # [x, y, z]
-
-            data[str(key)] = {
-                "name": instance.name,
-                "transform": occurrence.transform,
-                "position": position,
-                "name_path": list(key.name_path),
-            }
-
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=2)
-    print(f"Saved occurrence transforms to {filename}")
-    return data
 
 
 def fetch_assembly_json(client: Client, doc: Document, cache_file: str) -> Assembly:
@@ -87,16 +56,12 @@ if __name__ == "__main__":
     client = Client(env=".env")
 
     root_doc = Document.from_url(url=ROOT_URL)
-    subassembly_doc = Document.from_url(url=SUBASSEMBLY_URL)
     client.set_base_url(root_doc.base_url)
 
     rootassembly = fetch_assembly_json(client, root_doc, "rootassembly.json")
-    # subassembly = fetch_assembly_json(client, subassembly_doc, "subassembly.json")
 
-    root_cad = CAD.from_assembly(rootassembly, max_depth=MAX_DEPTH)
-    graph = KinematicGraph.from_cad(root_cad, use_user_defined_root=True)
+    cad = CAD.from_assembly(rootassembly, max_depth=MAX_DEPTH)
+    graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
 
-    graph.show(file_name="root_assembly")
-
-    robot = Robot.from_graph(cad=root_cad, kinematic_graph=graph, client=client, name="rootassembly")
+    robot = Robot.from_graph(cad=cad, kinematic_graph=graph, client=client, name="rootassembly")
     robot.save()

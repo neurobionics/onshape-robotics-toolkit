@@ -99,7 +99,7 @@ def get_robot_link(
     if mate is None:
         try:
             if part.MassProperty is not None:
-                _link_to_stl_tf[:3, 3] = np.array(part.MassProperty.center_of_mass).reshape(3)
+                pass
             else:
                 LOGGER.warning(f"Part {part.partId} has no mass properties, using identity transform")
         except AttributeError:
