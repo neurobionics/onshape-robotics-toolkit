@@ -26,7 +26,7 @@ MAX_DEPTH = 1
 
 # Root assembly URL
 ROOT_URL = (
-    "https://cad.onshape.com/documents/9c982cc66e2d3357ecf31371/w/21b699e5966180f4906fb6d1/e/3ef3c81430ecd68387fc3962"
+    "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/46679c6ab890a1b7a6d11a88"
 )
 
 

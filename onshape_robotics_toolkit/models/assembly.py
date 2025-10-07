@@ -1256,7 +1256,13 @@ class SubAssembly(IDBase):
     features: list[AssemblyFeature] = Field(..., description="A list of features in the sub-assembly")
 
     MassProperty: Union[MassProperties, None] = Field(
-        None, description="The mass properties of the sub-assembly, this is a retrieved via a separate API call."
+        None, description="The mass properties of the sub-assembly, this is retrieved via a separate API call."
+    )
+
+    isRigid: bool = Field(False, description="Indicates if the sub-assembly is a rigid assembly")
+
+    RootOccurrences: Union[list[Occurrence], None] = Field(
+        None, description="A list of occurrences from the subassembly frame, this is retrieved via a separate API call"
     )
 
     @property
