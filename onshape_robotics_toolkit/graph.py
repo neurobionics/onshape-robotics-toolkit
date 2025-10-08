@@ -18,7 +18,7 @@ Functions:
 
 import copy
 import random
-from typing import Any, Optional, Union
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -26,9 +26,10 @@ import networkx as nx
 from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.models.assembly import MateFeatureData
 from onshape_robotics_toolkit.parse import CAD, CHILD, PARENT, PathKey
+from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
 
-class KinematicGraph:
+class KinematicGraph(nx.DiGraph):
     """
     kinematic graph representation of an assembly using PathKey-based system.
 
@@ -45,12 +46,11 @@ class KinematicGraph:
 
     Attributes:
         cad: CAD assembly data with PathKey-based registries
-        graph: NetworkX directed graph representation
         root_node: PathKey of the root node in the kinematic graph
         topological_order: Ordered sequence of nodes from root to leaves
     """
 
-    def __init__(self, cad: CAD, use_user_defined_root: bool = True):
+    def __init__(self, cad: CAD):
         """
         Initialize and build kinematic graph from CAD data.
 
@@ -58,6 +58,7 @@ class KinematicGraph:
         classmethod, which makes the construction more explicit.
 
         Args:
+            name: Name of the kinematic graph
             cad: CAD assembly with PathKey-based registries
             use_user_defined_root: Whether to use user-marked fixed part as root
 
@@ -69,15 +70,9 @@ class KinematicGraph:
             >>> graph = KinematicGraph(cad, use_user_defined_root=True)
         """
         self.cad = cad
-        self.use_user_defined_root = use_user_defined_root
-        self.user_defined_root: Union[PathKey, None] = None
+        self.root: Optional[PathKey] = None
 
-        self.graph: Union[nx.Graph, nx.DiGraph] = nx.Graph()
-        self.root_node: Optional[PathKey] = None
-        self.topological_order: Optional[tuple[PathKey, ...]] = None
-
-        # Build the kinematic graph
-        self._build_graph()
+        super().__init__()
 
     @classmethod
     def from_cad(cls, cad: CAD, use_user_defined_root: bool = True) -> "KinematicGraph":
@@ -101,12 +96,13 @@ class KinematicGraph:
             >>> print(f"Root: {graph.root_node}")
             >>> print(f"Nodes: {len(graph.graph.nodes)}")
         """
-        kinematic_graph = cls(cad, use_user_defined_root=use_user_defined_root)
+        kinematic_graph = cls(cad=cad)
+        kinematic_graph._build_graph(use_user_defined_root)
         kinematic_graph._process_graph()
 
         return kinematic_graph
 
-    def _build_graph(self) -> None:
+    def _build_graph(self, use_user_defined_root: bool) -> None:
         """
         Build kinematic graph from CAD assembly data.
 
@@ -122,26 +118,20 @@ class KinematicGraph:
         """
         # remap the mates to switch out any parts that belong to rigid subassemblies
         remapped_mates = self._remap_mates(self.cad)
-
-        # Get all parts involved in valid mates
         involved_parts = self._get_parts_involved_in_mates(remapped_mates)
-        LOGGER.debug(f"Parts involved in mates: {len(involved_parts)}")
 
-        # Find user-defined root if requested
-        self.user_defined_root = self._find_user_defined_root(involved_parts) if self.use_user_defined_root else None
-
-        # Add nodes for parts involved in mates
         self._add_nodes(involved_parts)
-
-        # Add edges from mates
         self._add_edges(remapped_mates)
+        self._find_root_node(involved_parts, use_user_defined_root)
 
-        # Check if graph is empty
-        if len(self.graph.nodes) == 0:
+        if len(self.nodes) == 0:
             LOGGER.warning("KinematicGraph is empty - no valid parts found in mates")
             return
 
-        LOGGER.debug(f"KinematicGraph created: {len(self.graph.nodes)} nodes, " f"{len(self.graph.edges)} edges")
+        LOGGER.info(
+            f"KinematicGraph processed: {len(self.nodes)} nodes, "
+            f"{len(self.edges)} edges with root node: {self.root}"
+        )
 
     def _process_graph(self) -> None:
         """
@@ -150,28 +140,10 @@ class KinematicGraph:
             2. Convert to directed graph with root detection
             3. Calculate topological order
         """
-
-        # Remove disconnected subgraphs
-        main_graph = remove_disconnected_subgraphs(self.graph)
-
-        # Check if user_defined_root is still in graph after filtering
-        if self.user_defined_root and self.user_defined_root not in main_graph.nodes:
-            LOGGER.warning(
-                f"User-defined root {self.user_defined_root} not in main graph after filtering. "
-                f"Will use centrality-based root detection."
-            )
-            self.user_defined_root = None
-
-        # Convert to directed graph with root node
-        self.graph, self.root_node = convert_to_digraph(main_graph, self.user_defined_root)
-
-        # Calculate topological order
-        self.topological_order = get_topological_order(self.graph)
-
-        LOGGER.info(
-            f"KinematicGraph processed: {len(self.graph.nodes)} nodes, "
-            f"{len(self.graph.edges)} edges with root node: {self.root_node}"
-        )
+        # TODO: add processing methods to:
+        # 1. Identify if the graph has disconnected subgraphs
+        # 2. Identify and process any loops present in the graph
+        pass
 
     def _remap_mates(self, cad: CAD) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
         """
@@ -245,7 +217,7 @@ class KinematicGraph:
         LOGGER.debug(f"Found {len(involved_parts)} parts involved in mates")
         return involved_parts
 
-    def _find_user_defined_root(self, involved_parts: set[PathKey]) -> Optional[PathKey]:
+    def _find_root_node(self, involved_parts: set[PathKey], use_user_defined_root: bool = True) -> None:
         """
         Find user-defined root part (marked as fixed in Onshape).
 
@@ -255,12 +227,32 @@ class KinematicGraph:
         Returns:
             PathKey of fixed part, or None if not found
         """
-        for part_key in involved_parts:
-            occurrence = self.cad.occurrences.get(part_key)
-            if occurrence and occurrence.fixed:
-                LOGGER.debug(f"Found user-defined root: {part_key}")
-                return part_key
-        return None
+        root = None
+        if use_user_defined_root:
+            for part_key in involved_parts:
+                occurrence = self.cad.occurrences.get(part_key)
+                if occurrence and occurrence.fixed:
+                    LOGGER.debug(f"Found user-defined root: {part_key}")
+                    root = part_key
+                    self.root = root
+                    self.nodes[root]["is_root"] = True
+                    break
+
+            if root is None:
+                LOGGER.warning("No user-defined root part found (marked as fixed in Onshape), auto-detecting root")
+                self._find_root_node(involved_parts, use_user_defined_root=False)
+        else:
+            try:
+                root = next(nx.topological_sort(self))
+            except nx.NetworkXUnfeasible:
+                LOGGER.warning("DiGraph has one or more cycles")
+
+            if root:
+                self.root = root
+                self.nodes[root]["is_root"] = True
+                LOGGER.debug(f"Auto-detected root node: {root}")
+            else:
+                LOGGER.warning("Could not determine root node via topological sort")
 
     def _add_nodes(self, involved_parts: set[PathKey]) -> None:
         """
@@ -288,12 +280,11 @@ class KinematicGraph:
                 skipped_hidden += 1
                 continue
 
-            # Add node with part metadata
             part = self.cad.parts[part_key]
-            self.graph.add_node(
+            self.add_node(
                 part_key,
                 **part.model_dump(mode="python", exclude_unset=False),
-                is_root=(part_key == self.user_defined_root),
+                is_root=False,
             )
             nodes_added += 1
 
@@ -308,9 +299,8 @@ class KinematicGraph:
         """
         edges_added = 0
         for (parent_key, child_key), mate in mates.items():
-            # Only add edge if both nodes exist in graph
-            if parent_key in self.graph.nodes and child_key in self.graph.nodes:
-                self.graph.add_edge(
+            if parent_key in self.nodes and child_key in self.nodes:
+                self.add_edge(
                     parent_key,
                     child_key,
                     mate_data=mate,
@@ -322,7 +312,7 @@ class KinematicGraph:
 
         LOGGER.debug(f"Added {edges_added} edges to graph")
 
-    def show(self, file_name: Optional[str] = "robot") -> None:
+    def show(self, file_name: Optional[str] = None) -> None:
         """
         Visualize the kinematic graph with part names as labels instead of PathKey IDs.
 
@@ -336,229 +326,20 @@ class KinematicGraph:
             >>> tree.show()  # Display interactively with names
             >>> tree.show("kinematic_tree.png")  # Save to file with names
         """
-        # Create a mapping from PathKey to name
-        label_mapping: dict[PathKey, str] = {}
-        for node in self.graph.nodes:
-            label_mapping[node] = str(node)
-        # Create a copy of the graph with relabeled nodes
-        labeled_graph = nx.relabel_nodes(self.graph, label_mapping, copy=True)
+        if file_name is None:
+            file_name = get_sanitized_name(self.cad.name if self.cad.name else "kinematic_graph")
 
-        # Plot the labeled graph
-        plot_graph(labeled_graph, file_name)
+        colors = [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(len(self.nodes))]  # noqa: S311
+        plt.figure(figsize=(8, 8))
+        pos = nx.planar_layout(self)
 
-    def get_node_data(self, node_key: PathKey) -> dict[str, Any]:
-        """
-        Get metadata for a specific node.
-
-        Args:
-            node_key: PathKey of the node
-
-        Returns:
-            Dictionary of node attributes
-
-        Examples:
-            >>> metadata = tree.get_node_data(some_part_key)
-            >>> print(metadata['name'])
-        """
-        return dict(self.graph.nodes[node_key])
-
-    def get_mate_data(self, parent_key: PathKey, child_key: PathKey) -> Optional[MateFeatureData]:
-        """
-        Get mate data for an edge between two nodes.
-
-        Args:
-            parent_key: PathKey of parent node
-            child_key: PathKey of child node
-
-        Returns:
-            MateFeatureData if edge exists, None otherwise
-
-        Examples:
-            >>> mate = tree.get_mate_data(parent_key, child_key)
-            >>> if mate:
-            >>>     print(mate.featureType)
-        """
-        if self.graph.has_edge(parent_key, child_key):
-            return self.graph.edges[parent_key, child_key].get("mate_data")
-        return None
-
-    def __repr__(self) -> str:
-        """String representation of the kinematic graph."""
-        return (
-            f"KinematicGraph(nodes={len(self.graph.nodes)}, " f"edges={len(self.graph.edges)}, root={self.root_node})"
+        nx.draw(
+            self,
+            pos,
+            with_labels=True,
+            node_color=colors,
+            edge_color="white",
+            font_color="white",
         )
-
-
-def plot_graph(graph: Union[nx.Graph, nx.DiGraph], file_name: Optional[str] = "robot") -> None:
-    """
-    Display the graph using networkx and matplotlib, or save it as an image file.
-
-    Args:
-        graph: The graph to display or save.
-        file_name: The name of the image file to save. If None, the graph will be displayed.
-
-    Examples:
-        >>> graph = nx.Graph()
-        >>> plot_graph(graph)
-        >>> plot_graph(graph, "graph.png")
-    """
-    colors = [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(len(graph.nodes))]  # noqa: S311
-    plt.figure(figsize=(8, 8))
-    pos = nx.planar_layout(graph)
-
-    nx.draw(
-        graph,
-        pos,
-        with_labels=True,
-        node_color=colors,
-        edge_color="white",
-        font_color="white",
-    )
-    plt.savefig(file_name, transparent=True)
-    plt.close()
-
-
-def get_root_node(graph: nx.DiGraph) -> Any:
-    """
-    Get the root node of a directed graph.
-
-    Args:
-        graph: The directed graph.
-
-    Returns:
-        The root node of the graph.
-
-    Examples:
-        >>> graph = nx.DiGraph()
-        >>> get_root_node(graph)
-    """
-    return next(nx.topological_sort(graph))
-
-
-def convert_to_digraph(graph: nx.Graph, user_defined_root: Any = None) -> tuple[nx.DiGraph, Any]:
-    """
-    Convert a graph to a directed graph and calculate the root node using closeness centrality.
-
-    Args:
-        graph: The graph to convert.
-        user_defined_root: The node to use as the root node.
-
-    Returns:
-        The directed graph and the root node of the graph, calculated using closeness centrality.
-
-    Examples:
-        >>> graph = nx.Graph()
-        >>> convert_to_digraph(graph)
-        (digraph, root_node)
-    """
-
-    centrality = nx.closeness_centrality(graph)
-    root_node = user_defined_root if user_defined_root else max(centrality, key=lambda x: centrality[x])
-
-    # Create BFS tree from root (this loses edge data!)
-    bfs_graph = nx.bfs_tree(graph, root_node)
-    di_graph = nx.DiGraph(bfs_graph)
-
-    # Restore edge data for BFS tree edges from original graph
-    for u, v in list(di_graph.edges()):
-        if graph.has_edge(u, v):
-            # Copy edge data from original undirected graph
-            di_graph[u][v].update(graph[u][v])
-        elif graph.has_edge(v, u):
-            # Edge might be reversed in undirected graph
-            # TODO: if there are scenarios where converting the graph to a digraph,
-            # alters the direction of the mates, we should reorient the mate data too
-            # this will then become a method tied to the class as it would then operate
-            # on mate data and requires some knowledge of the CAD structure
-            di_graph[u][v].update(graph[v][u])
-
-    # Add back any edges not in BFS tree (loops, etc.)
-    for u, v, data in graph.edges(data=True):
-        if not di_graph.has_edge(u, v) and not di_graph.has_edge(v, u):
-            # Decide which direction to keep based on centrality
-            if centrality[u] > centrality[v]:
-                di_graph.add_edge(u, v, **data)
-            else:
-                di_graph.add_edge(v, u, **data)
-
-    return di_graph, root_node
-
-
-def get_topological_order(graph: nx.DiGraph) -> Optional[tuple[Any, ...]]:
-    """
-    Get the topological order of a directed graph.
-
-    Args:
-        graph: The directed graph.
-
-    Returns:
-        The topological order of the graph.
-
-    Examples:
-        >>> graph = nx.DiGraph()
-        >>> get_topological_order(graph)
-    """
-    try:
-        order = tuple(nx.topological_sort(graph))
-    except nx.NetworkXUnfeasible:
-        LOGGER.warning("Graph has one or more cycles")
-        order = None
-
-    return order
-
-
-def _print_graph_tree(graph: nx.Graph) -> None:
-    """Print a text-based tree representation of the graph structure."""
-    if not graph.nodes:
-        print("  (empty graph)")
-        return
-
-    # Show connected components
-    components = list(nx.connected_components(graph))
-    for i, component in enumerate(components):
-        print(f"  Component {i + 1} ({len(component)} nodes):")
-        for j, node in enumerate(sorted(component)):
-            prefix = "    ├── " if j < len(component) - 1 else "    └── "
-            neighbors = list(graph.neighbors(node))
-            neighbor_info = f" -> {len(neighbors)} connections" if neighbors else ""
-            try:
-                print(f"{prefix}{node}{neighbor_info}")
-            except UnicodeEncodeError:
-                # Handle Unicode characters in node names that can't be encoded
-                # Use LOGGER instead of print to avoid console encoding issues
-                from onshape_robotics_toolkit.log import LOGGER
-
-                LOGGER.info(f"Node: {node} ({len(neighbors)} connections)")
-        if i < len(components) - 1:
-            print()
-
-
-def remove_disconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
-    """
-    Remove disconnected subgraphs from the graph.
-
-    Args:
-        graph: The graph to remove disconnected subgraphs from.
-
-    Returns:
-        The main connected subgraph of the graph, which is the largest connected subgraph.
-    """
-    if not nx.is_connected(graph):
-        LOGGER.warning("Graph has one or more unconnected subgraphs")
-
-        # Show tree visualization of original graph
-        LOGGER.info("Original graph structure:")
-        _print_graph_tree(graph)
-
-        sub_graphs = list(nx.connected_components(graph))
-        main_graph_nodes = max(sub_graphs, key=len)
-        main_graph = graph.subgraph(main_graph_nodes).copy()
-
-        # Show tree visualization of reduced graph
-        LOGGER.info("Reduced graph structure:")
-        _print_graph_tree(main_graph)
-
-        LOGGER.warning(f"Reduced graph nodes from {len(graph.nodes)} to {len(main_graph.nodes)}")
-        LOGGER.warning(f"Reduced graph edges from {len(graph.edges)} to {len(main_graph.edges)}")
-        return main_graph
-    return graph
+        plt.savefig(file_name, transparent=True)
+        plt.close()

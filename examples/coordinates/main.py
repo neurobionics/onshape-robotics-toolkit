@@ -21,7 +21,7 @@ from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_
 
 # Configuration
 USE_CACHED = True
-USE_PICKLE = True
+USE_PICKLE = False
 LOG_ASSEMBLY = False
 MAX_DEPTH = 0
 
@@ -78,5 +78,6 @@ if __name__ == "__main__":
     cad = fetch_cad_object(rootassembly, max_depth=MAX_DEPTH, cache_file=f"cad_{MAX_DEPTH}.pkl")
 
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
-    # robot = Robot.from_graph(cad=cad, kinematic_graph=graph, client=client, name="rootassembly")
+    graph.show()
+    # robot = Robot.from_graph(cad=cad, kinematic_graph=graph, client=client, name="assembly_{MAX_DEPTH}")
     # robot.save()

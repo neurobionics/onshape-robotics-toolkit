@@ -139,7 +139,7 @@ class PathKey:
 
     def __str__(self) -> str:
         """String representation showing the name path structure."""
-        return " > ".join(self._name_path) if self._name_path else "(empty)"
+        return "_".join(self._name_path) if self._name_path else "(empty)"
 
     def __lt__(self, other: "PathKey") -> bool:
         """
