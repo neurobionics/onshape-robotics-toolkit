@@ -18,15 +18,175 @@ Functions:
 
 import copy
 import random
-from typing import Optional
+from typing import Optional, Union
 
 import matplotlib.pyplot as plt
 import networkx as nx
 
 from onshape_robotics_toolkit.log import LOGGER
-from onshape_robotics_toolkit.models.assembly import MateFeatureData
+from onshape_robotics_toolkit.models.assembly import MateFeatureData, Part
 from onshape_robotics_toolkit.parse import CAD, CHILD, PARENT, PathKey
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
+
+
+def convert_to_digraph(graph: nx.Graph, user_defined_root: PathKey = None) -> tuple[nx.DiGraph, PathKey]:
+    """
+    Convert a graph to a directed graph and calculate the root node using closeness centrality.
+
+    Args:
+        graph: The graph to convert.
+        user_defined_root: The node to use as the root node.
+
+    Returns:
+        The directed graph and the root node of the graph, calculated using closeness centrality.
+
+    Examples:
+        >>> graph = nx.Graph()
+        >>> convert_to_digraph(graph)
+        (digraph, root_node)
+    """
+
+    centrality = nx.closeness_centrality(graph)
+    root_node = user_defined_root if user_defined_root else max(centrality, key=lambda x: centrality[x])
+
+    # Create BFS tree from root (this loses edge data!)
+    bfs_graph = nx.bfs_tree(graph, root_node)
+    di_graph = nx.DiGraph(bfs_graph)
+
+    # Restore edge data for BFS tree edges from original graph
+    for u, v in list(di_graph.edges()):
+        if graph.has_edge(u, v):
+            # Copy edge data from original undirected graph
+            di_graph[u][v].update(graph[u][v])
+        elif graph.has_edge(v, u):
+            # Edge might be reversed in undirected graph
+            di_graph[u][v].update(graph[v][u])
+
+    # Add back any edges not in BFS tree (loops, etc.)
+    for u, v, data in graph.edges(data=True):
+        if not di_graph.has_edge(u, v) and not di_graph.has_edge(v, u):
+            # Decide which direction to keep based on centrality
+            if centrality[u] > centrality[v]:
+                di_graph.add_edge(u, v, **data)
+            else:
+                di_graph.add_edge(v, u, **data)
+
+    return di_graph, root_node
+
+
+def create_graph(
+    part_keys: set[PathKey],
+    parts: dict[PathKey, Part],
+    mates: dict[tuple[PathKey, PathKey], MateFeatureData],
+) -> nx.Graph:
+    def _add_nodes(part_keys: set[PathKey], parts: dict[PathKey, Part], graph: nx.Graph) -> None:
+        """
+        Add nodes to graph for parts involved in mates.
+
+        With eager parts population, all valid mate targets are guaranteed to be
+        in cad.parts. We only need to filter hidden occurrences.
+
+        Args:
+            part_keys: Set of PathKeys to add as nodes
+            parts: Dictionary of all parts in the CAD assembly
+            graph: The graph to add nodes to
+        """
+        LOGGER.debug(f"Processing {len(part_keys)} involved parts")
+        for part_key in part_keys:
+            # Check if instance is suppressed
+            # instance = self.cad.instances.get(part_key)
+            # if instance and instance.suppressed:
+            #     # TODO: Should this happen here or within the CAD class?
+            #     # Skipping parts here is problematic since the mate registry still
+            #     # refers to them, leading to dangling edges.
+            #     LOGGER.debug(f"Skipping suppressed part: {part_key}")
+            #     skipped_hidden += 1
+            #     continue
+
+            part = parts[part_key]
+            graph.add_node(
+                part_key,
+                **part.model_dump(mode="python", exclude_unset=False),
+            )
+
+        LOGGER.debug(f"Added {len(graph.nodes)} nodes to graph")
+
+    def _add_edges(mates: dict[tuple[PathKey, PathKey], MateFeatureData], graph: nx.Graph) -> None:
+        """
+        Add edges to graph from mate relationships.
+
+        Args:
+            mates: Dictionary of mate relationships
+            graph: The graph to add edges to
+        """
+        for (parent_key, child_key), mate in mates.items():
+            if parent_key in graph.nodes and child_key in graph.nodes:
+                graph.add_edge(
+                    parent_key,
+                    child_key,
+                    mate_data=mate,
+                )
+                LOGGER.debug(f"Added edge: {parent_key} -> {child_key}")
+            else:
+                LOGGER.debug(f"Skipping edge {parent_key} -> {child_key} (nodes not in graph)")
+
+        LOGGER.debug(f"Added {len(graph.edges)} edges to graph")
+
+    graph = nx.Graph()
+    _add_nodes(part_keys, parts, graph)
+    _add_edges(mates, graph)
+
+    return graph
+
+
+def _print_graph_tree(graph: nx.Graph) -> None:
+    """Print a text-based tree representation of the graph structure."""
+    if not graph.nodes:
+        LOGGER.info("  (empty graph)")
+        return
+
+    # Show connected components
+    components = list(nx.connected_components(graph))
+    for i, component in enumerate(components):
+        LOGGER.info(f"  Root {i + 1} ({len(component)} nodes):")
+        for j, node in enumerate(sorted(component)):
+            prefix = "    ├── " if j < len(component) - 1 else "    └── "
+            neighbors = list(graph.neighbors(node))
+            neighbor_info = f" -> {len(neighbors)} connections" if neighbors else ""
+            LOGGER.info(f"{prefix}{node}{neighbor_info}")
+        if i < len(components) - 1:
+            LOGGER.info()
+
+
+def remove_disconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
+    """
+    Remove unconnected subgraphs from the graph.
+
+    Args:
+        graph: The graph to remove unconnected subgraphs from.
+
+    Returns:
+        The main connected subgraph of the graph, which is the largest connected subgraph.
+    """
+    if not nx.is_connected(graph):
+        LOGGER.warning("Graph has one or more unconnected subgraphs")
+
+        # Show tree visualization of original graph
+        LOGGER.info("Original graph structure:")
+        _print_graph_tree(graph)
+
+        sub_graphs = list(nx.connected_components(graph))
+        main_graph_nodes = max(sub_graphs, key=len)
+        main_graph = graph.subgraph(main_graph_nodes).copy()
+
+        # Show tree visualization of reduced graph
+        LOGGER.info("Reduced graph structure:")
+        _print_graph_tree(main_graph)
+
+        LOGGER.warning(f"Reduced graph nodes from {len(graph.nodes)} to {len(main_graph.nodes)}")
+        LOGGER.warning(f"Reduced graph edges from {len(graph.edges)} to {len(main_graph.edges)}")
+        return main_graph
+    return graph
 
 
 class KinematicGraph(nx.DiGraph):
@@ -98,7 +258,6 @@ class KinematicGraph(nx.DiGraph):
         """
         kinematic_graph = cls(cad=cad)
         kinematic_graph._build_graph(use_user_defined_root)
-        kinematic_graph._process_graph()
 
         return kinematic_graph
 
@@ -120,9 +279,13 @@ class KinematicGraph(nx.DiGraph):
         remapped_mates = self._remap_mates(self.cad)
         involved_parts = self._get_parts_involved_in_mates(remapped_mates)
 
-        self._add_nodes(involved_parts)
-        self._add_edges(remapped_mates)
-        self._find_root_node(involved_parts, use_user_defined_root)
+        raw_graph = create_graph(
+            part_keys=involved_parts,
+            parts=self.cad.parts,
+            mates=remapped_mates,
+        )
+
+        self._process_graph(raw_graph, involved_parts, remapped_mates, use_user_defined_root)
 
         if len(self.nodes) == 0:
             LOGGER.warning("KinematicGraph is empty - no valid parts found in mates")
@@ -133,7 +296,13 @@ class KinematicGraph(nx.DiGraph):
             f"{len(self.edges)} edges with root node: {self.root}"
         )
 
-    def _process_graph(self) -> None:
+    def _process_graph(
+        self,
+        raw_graph: nx.Graph,
+        parts: set[PathKey],
+        mates: dict[tuple[PathKey, PathKey], MateFeatureData],
+        use_user_defined_root: bool,
+    ) -> None:
         """
         Process the graph:
             1. Remove disconnected subgraphs
@@ -143,7 +312,60 @@ class KinematicGraph(nx.DiGraph):
         # TODO: add processing methods to:
         # 1. Identify if the graph has disconnected subgraphs
         # 2. Identify and process any loops present in the graph
-        pass
+
+        # remove disconnected subgraphs
+        graph = remove_disconnected_subgraphs(raw_graph)
+
+        self._find_root_node(
+            graph=graph,
+            parts=parts,
+            use_user_defined_root=use_user_defined_root,
+        )
+
+        # Create BFS tree from root (this loses edge data!)
+        bfs_graph = nx.bfs_tree(graph, self.root)
+
+        # NOTE: add all nodes in the BFS order
+        for node in bfs_graph.nodes:
+            part = self.cad.parts[node]
+            self.add_node(
+                node,
+                **part.model_dump(mode="python", exclude_unset=False),
+            )
+
+        # Restore edge data for BFS tree edges from original graph
+        for u, v in list(bfs_graph.edges()):
+            if graph.has_edge(u, v):
+                # the mate data has not flipped
+                mate = mates[(u, v)]
+                self.add_edge(
+                    u,
+                    v,
+                    **mate.model_dump(mode="python", exclude_unset=False),
+                )
+            elif graph.has_edge(v, u):
+                # Edge is reversed and the mate data has flipped
+                mate = mates[(v, u)]
+                mate.matedEntities = mate.matedEntities.reverse()
+                self.add_edge(
+                    v,
+                    u,
+                    **mate.model_dump(mode="python", exclude_unset=False),
+                )
+
+        # Add back any edges not in BFS tree (loops, etc.)
+        for u, v in graph.edges():
+            if not bfs_graph.has_edge(u, v) and not bfs_graph.has_edge(v, u):
+                mate = mates[(u, v)]
+                # Preserve the original mate direction
+                self.add_edge(
+                    u,
+                    v,
+                    **mate.model_dump(mode="python", exclude_unset=False),
+                )
+
+        for u, v in self.edges():
+            print(self.get_edge_data(u, v))
 
     def _remap_mates(self, cad: CAD) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
         """
@@ -217,7 +439,7 @@ class KinematicGraph(nx.DiGraph):
         LOGGER.debug(f"Found {len(involved_parts)} parts involved in mates")
         return involved_parts
 
-    def _find_root_node(self, involved_parts: set[PathKey], use_user_defined_root: bool = True) -> None:
+    def _find_root_node(self, graph: nx.Graph, parts: set[PathKey], use_user_defined_root: bool) -> None:
         """
         Find user-defined root part (marked as fixed in Onshape).
 
@@ -229,90 +451,27 @@ class KinematicGraph(nx.DiGraph):
         """
         root = None
         if use_user_defined_root:
-            for part_key in involved_parts:
+            for part_key in parts:
                 occurrence = self.cad.occurrences.get(part_key)
                 if occurrence and occurrence.fixed:
                     LOGGER.debug(f"Found user-defined root: {part_key}")
                     root = part_key
                     self.root = root
-                    self.nodes[root]["is_root"] = True
                     break
 
             if root is None:
                 LOGGER.warning("No user-defined root part found (marked as fixed in Onshape), auto-detecting root")
-                self._find_root_node(involved_parts, use_user_defined_root=False)
+                self._find_root_node(graph, parts, use_user_defined_root=False)
         else:
-            try:
-                root = next(nx.topological_sort(self))
-            except nx.NetworkXUnfeasible:
-                LOGGER.warning("DiGraph has one or more cycles")
-
+            centrality = nx.closeness_centrality(graph)
+            root = max(centrality, key=lambda x: centrality[x])
             if root:
                 self.root = root
-                self.nodes[root]["is_root"] = True
                 LOGGER.debug(f"Auto-detected root node: {root}")
             else:
                 LOGGER.warning("Could not determine root node via topological sort")
 
-    def _add_nodes(self, involved_parts: set[PathKey]) -> None:
-        """
-        Add nodes to graph for parts involved in mates.
-
-        With eager parts population, all valid mate targets are guaranteed to be
-        in cad.parts. We only need to filter hidden occurrences.
-
-        Args:
-            involved_parts: Set of PathKeys to add as nodes
-            user_defined_root: Optional user-defined root node
-        """
-        nodes_added = 0
-        skipped_hidden = 0
-
-        LOGGER.debug(f"Processing {len(involved_parts)} involved parts")
-        for part_key in involved_parts:
-            # Check if instance is suppressed
-            instance = self.cad.instances.get(part_key)
-            if instance and instance.suppressed:
-                # TODO: Should this happen here or within the CAD class?
-                # Skipping parts here is problematic since the mate registry still
-                # refers to them, leading to dangling edges.
-                LOGGER.debug(f"Skipping suppressed part: {part_key}")
-                skipped_hidden += 1
-                continue
-
-            part = self.cad.parts[part_key]
-            self.add_node(
-                part_key,
-                **part.model_dump(mode="python", exclude_unset=False),
-                is_root=False,
-            )
-            nodes_added += 1
-
-        LOGGER.debug(f"Added {nodes_added} nodes to graph (skipped {skipped_hidden} hidden parts)")
-
-    def _add_edges(self, mates: dict[tuple[PathKey, PathKey], MateFeatureData]) -> None:
-        """
-        Add edges to graph from mate relationships.
-
-        Args:
-            mates: Dictionary of mate relationships
-        """
-        edges_added = 0
-        for (parent_key, child_key), mate in mates.items():
-            if parent_key in self.nodes and child_key in self.nodes:
-                self.add_edge(
-                    parent_key,
-                    child_key,
-                    mate_data=mate,
-                )
-                edges_added += 1
-                LOGGER.debug(f"Added edge: {parent_key} -> {child_key}")
-            else:
-                LOGGER.debug(f"Skipping edge {parent_key} -> {child_key} (nodes not in graph)")
-
-        LOGGER.debug(f"Added {edges_added} edges to graph")
-
-    def show(self, file_name: Optional[str] = None) -> None:
+    def show(self, graph: Union[nx.Graph, nx.DiGraph], file_name: Optional[str] = None) -> None:
         """
         Visualize the kinematic graph with part names as labels instead of PathKey IDs.
 
@@ -329,12 +488,12 @@ class KinematicGraph(nx.DiGraph):
         if file_name is None:
             file_name = get_sanitized_name(self.cad.name if self.cad.name else "kinematic_graph")
 
-        colors = [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(len(self.nodes))]  # noqa: S311
+        colors = [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(len(graph.nodes))]  # noqa: S311
         plt.figure(figsize=(8, 8))
-        pos = nx.planar_layout(self)
+        pos = nx.planar_layout(graph)
 
         nx.draw(
-            self,
+            graph,
             pos,
             with_labels=True,
             node_color=colors,

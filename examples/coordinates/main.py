@@ -11,12 +11,13 @@ This script:
 import os
 import pickle
 
+from local.main_parse import CHILD
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models import Assembly
 from onshape_robotics_toolkit.models.document import Document
-from onshape_robotics_toolkit.parse import CAD
+from onshape_robotics_toolkit.parse import CAD, PARENT
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 
 # Configuration
@@ -35,7 +36,7 @@ def fetch_assembly_json(client: Client, doc: Document, cache_file: str) -> Assem
     """Fetch assembly from Onshape or load from cache."""
     if USE_CACHED and os.path.exists(cache_file):
         assembly = load_model_from_json(Assembly, cache_file)
-        print(f"Loaded cached assembly from {cache_file}")
+        # print(f"Loaded cached assembly from {cache_file}")
     else:
         assembly = client.get_assembly(
             did=doc.did,
@@ -46,7 +47,7 @@ def fetch_assembly_json(client: Client, doc: Document, cache_file: str) -> Assem
             with_meta_data=True,
         )
         save_model_as_json(assembly, cache_file)
-        print(f"Fetched and cached assembly to {cache_file}")
+        # print(f"Fetched and cached assembly to {cache_file}")
     return assembly
 
 
@@ -55,13 +56,13 @@ def fetch_cad_object(assembly: Assembly, max_depth: int, cache_file: str) -> CAD
     if USE_PICKLE and os.path.exists(cache_file):
         with open(cache_file, "rb") as f:
             cad = pickle.load(f)  # noqa: S301
-        print(f"Loaded cached CAD from {cache_file}")
+        # print(f"Loaded cached CAD from {cache_file}")
     else:
         cad = CAD.from_assembly(assembly, max_depth=max_depth)
         with open(cache_file, "wb") as f:
             pickle.dump(cad, f)
-        print("Created CAD object from assembly")
-        print(f"Cached CAD object to {cache_file}")
+        # print("Created CAD object from assembly")
+        # print(f"Cached CAD object to {cache_file}")
     return cad
 
 
@@ -78,6 +79,11 @@ if __name__ == "__main__":
     cad = fetch_cad_object(rootassembly, max_depth=MAX_DEPTH, cache_file=f"cad_{MAX_DEPTH}.pkl")
 
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
-    graph.show()
-    # robot = Robot.from_graph(cad=cad, kinematic_graph=graph, client=client, name="assembly_{MAX_DEPTH}")
+    for node in graph.nodes:
+        print(node)
+
+    print("Mates:")
+    for edge in graph.edges:
+        print(edge[PARENT], "->", edge[CHILD])
+    # robot = Robot.from_graph(kinematic_graph=graph, cad=cad, client=client, name="assembly_{MAX_DEPTH}")
     # robot.save()

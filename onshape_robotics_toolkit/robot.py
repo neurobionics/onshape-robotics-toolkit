@@ -9,48 +9,60 @@ Dataclass:
 import asyncio
 import os
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
-import networkx as nx
 import numpy as np
 from lxml import etree as ET
 from scipy.spatial.transform import Rotation
 
 if TYPE_CHECKING:
     from onshape_robotics_toolkit.graph import KinematicGraph
-    from onshape_robotics_toolkit.parse import CAD
+    from onshape_robotics_toolkit.parse import CAD, PathKey
+
+
+import random
 
 from onshape_robotics_toolkit.connect import Asset, Client
-from onshape_robotics_toolkit.graph import plot_graph
+from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.models.assembly import (
-    Assembly,
     MateFeatureData,
-    MateRelationFeatureData,
+    MateType,
     Part,
-    RelationType,
-    RootAssembly,
-    SubAssembly,
 )
-from onshape_robotics_toolkit.models.document import Document
+from onshape_robotics_toolkit.models.document import WorkspaceType
+from onshape_robotics_toolkit.models.geometry import MeshGeometry
 from onshape_robotics_toolkit.models.joint import (
     BaseJoint,
     ContinuousJoint,
+    DummyJoint,
     FixedJoint,
     FloatingJoint,
+    JointLimits,
+    # JointDynamics,
     JointMimic,
     JointType,
     PrismaticJoint,
     RevoluteJoint,
 )
-from onshape_robotics_toolkit.models.link import Link
+from onshape_robotics_toolkit.models.link import (
+    Axis,
+    CollisionLink,
+    Colors,
+    Inertia,
+    InertialLink,
+    Link,
+    Material,
+    Origin,
+    VisualLink,
+)
 from onshape_robotics_toolkit.models.mjcf import Actuator, Encoder, ForceSensor, Light, Sensor
 from onshape_robotics_toolkit.parse import (
-    MATE_JOINER,
-    RELATION_PARENT,
+    CAD,
+    CHILD,
+    PARENT,
 )
-from onshape_robotics_toolkit.urdf import get_joint_name, get_robot_joint, get_robot_link, get_topological_mates
-from onshape_robotics_toolkit.utilities.helpers import format_number
+from onshape_robotics_toolkit.utilities.helpers import format_number, get_sanitized_name
 
 DEFAULT_COMPILER_ATTRIBUTES = {
     "angle": "radian",
@@ -109,6 +121,327 @@ def set_joint_from_xml(element: ET._Element) -> BaseJoint | None:
     return None
 
 
+def get_robot_link(
+    name: str,
+    part: Part,
+    wid: str,
+    client: Client,
+    mate: Optional[Union[MateFeatureData, None]] = None,
+) -> tuple[Link, np.matrix, Asset]:
+    """
+    Generate a URDF link from an Onshape part.
+
+    Args:
+        name: The name of the link.
+        part: The Onshape part object.
+        wid: The unique identifier of the workspace.
+        client: The Onshape client object to use for sending API requests.
+        mate: MateFeatureData object to use for generating the transformation matrix.
+
+    Returns:
+        tuple[Link, np.matrix]: The generated link object
+            and the transformation matrix from the STL origin to the link origin.
+
+    Examples:
+        >>> get_robot_link("root", part, wid, client)
+        (
+            Link(name='root', visual=VisualLink(...), collision=CollisionLink(...), inertial=InertialLink(...)),
+            np.matrix([[1., 0., 0., 0.],
+                [0., 1., 0., 0.],
+                [0., 0., 1., 0.],
+                [0., 0., 0., 1.]])
+        )
+
+    """
+    _link_to_stl_tf = np.eye(4)
+
+    if mate is None:
+        try:
+            if part.MassProperty is not None:
+                pass
+            else:
+                LOGGER.warning(f"Part {part.partId} has no mass properties, using identity transform")
+        except AttributeError:
+            LOGGER.warning(f"Part {part.partId} has no mass properties, using identity transform")
+
+    else:
+        child_parent_cs = mate.matedEntities[CHILD].parentCS
+        child_mated_cs = mate.matedEntities[CHILD].matedCS
+        if child_parent_cs and child_mated_cs:
+            LOGGER.debug(f"DEBUG: Link {name} has parentCS, applying hierarchical transform")
+            _link_to_stl_tf = child_parent_cs.part_tf @ child_mated_cs.part_to_mate_tf
+        else:
+            LOGGER.debug(f"DEBUG: Link {name} using direct part_to_mate_tf")
+            if mate.matedEntities[CHILD].matedCS is not None:
+                _link_to_stl_tf = mate.matedEntities[CHILD].matedCS.part_to_mate_tf
+            else:
+                _link_to_stl_tf = np.eye(4)  # Default to identity matrix
+
+    _stl_to_link_tf = np.matrix(np.linalg.inv(_link_to_stl_tf))
+    _origin = Origin.zero_origin()
+    _principal_axes_rotation = (0.0, 0.0, 0.0)
+
+    # Check if part has mass properties
+    if part.MassProperty is None:
+        LOGGER.warning(f"Part {part.partId} has no mass properties, using default values")
+        _mass = 1.0  # Default mass
+        _com = (0.0, 0.0, 0.0)  # Default center of mass at origin
+        _inertia = np.eye(3)  # Default identity inertia matrix
+    else:
+        _mass = part.MassProperty.mass[0]
+        _com = tuple(part.MassProperty.center_of_mass_wrt(_stl_to_link_tf))
+        _inertia = part.MassProperty.inertia_wrt(np.matrix(_stl_to_link_tf[:3, :3]))
+
+    LOGGER.info(f"Creating robot link for {name}")
+
+    # Determine workspace type and ID for fetching the mesh
+    mvwid: str
+    if part.documentVersion:
+        # Part from a specific version
+        wtype = WorkspaceType.V.value
+        mvwid = part.documentVersion
+    elif part.isRigidAssembly:
+        # Rigid assembly - use workspace type with its workspace ID
+        # The assembly STL API requires workspace type and workspace ID
+        wtype = WorkspaceType.W.value
+        mvwid = part.rigidAssemblyWorkspaceId if part.rigidAssemblyWorkspaceId else wid
+    else:
+        # Regular part - use its documentMicroversion with microversion type
+        wtype = WorkspaceType.M.value
+        mvwid = part.documentMicroversion if part.documentMicroversion else wid
+
+    _asset = Asset(
+        did=part.documentId,
+        wtype=wtype,
+        wid=mvwid,
+        eid=part.elementId,
+        partID=part.partId,
+        client=client,
+        transform=_stl_to_link_tf,
+        is_rigid_assembly=part.isRigidAssembly,
+        file_name=f"{name}.stl",
+    )
+
+    _mesh_path = _asset.relative_path
+
+    _link = Link(
+        name=name,
+        visual=VisualLink(
+            name=f"{name}_visual",
+            origin=_origin,
+            geometry=MeshGeometry(_mesh_path),
+            material=Material.from_color(name=f"{name}-material", color=random.SystemRandom().choice(list(Colors))),
+        ),
+        inertial=InertialLink(
+            origin=Origin(
+                xyz=_com,
+                rpy=_principal_axes_rotation,
+            ),
+            mass=_mass,
+            inertia=Inertia(
+                ixx=_inertia[0, 0],
+                ixy=_inertia[0, 1],
+                ixz=_inertia[0, 2],
+                iyy=_inertia[1, 1],
+                iyz=_inertia[1, 2],
+                izz=_inertia[2, 2],
+            ),
+        ),
+        collision=CollisionLink(
+            name=f"{name}_collision",
+            origin=_origin,
+            geometry=MeshGeometry(_mesh_path),
+        ),
+    )
+
+    return _link, _stl_to_link_tf, _asset
+
+
+def get_robot_joint(
+    parent: str,
+    child: str,
+    mate: MateFeatureData,
+    stl_to_parent_tf: np.matrix,
+    mimic: Optional[JointMimic] = None,
+    is_rigid_assembly: bool = False,
+) -> tuple[list[BaseJoint], Optional[list[Link]]]:
+    """
+    Generate a URDF joint from an Onshape mate feature.
+
+    Args:
+        parent: The name of the parent link.
+        child: The name of the child link.
+        mate: The Onshape mate feature object.
+        stl_to_parent_tf: The transformation matrix from the STL origin to the parent link origin.
+        mimic: The mimic joint object.
+        is_rigid_assembly: Whether the assembly is a rigid assembly.
+
+    Returns:
+        tuple[list[BaseJoint], Optional[list[Link]]]: The generated joint object and the links.
+
+    Examples:
+        >>> get_robot_joint("root", "link1", mate, np.eye(4))
+        (
+            [
+                RevoluteJoint(
+                    name='base_link_to_link1',
+                    parent='root',
+                    child='link1',
+                    origin=Origin(...),
+                    limits=JointLimits(...),
+                    axis=Axis(...),
+                    dynamics=JointDynamics(...)
+                )
+            ],
+            None
+        )
+
+    """
+    links: list[Link] = []
+    if isinstance(mate, MateFeatureData):
+        # Check if we have a parentCS (hierarchical transform) regardless of rigid assembly status
+        # This handles the case where flexible assemblies contain parts from collapsed rigid subassemblies
+        parent_cs = mate.matedEntities[PARENT].parentCS
+        mated_cs = mate.matedEntities[PARENT].matedCS
+        if parent_cs is not None and mated_cs is not None:
+            LOGGER.debug(f"DEBUG: Using parentCS for joint {mate.name} from {parent} to {child}")
+            LOGGER.debug(f"DEBUG: parentCS.part_tf = {parent_cs.part_tf}")
+            LOGGER.debug(f"DEBUG: parent matedCS.part_to_mate_tf = {mated_cs.part_to_mate_tf}")
+            parent_to_mate_tf = parent_cs.part_tf @ mated_cs.part_to_mate_tf
+            LOGGER.debug(f"DEBUG: combined parent_to_mate_tf = {parent_to_mate_tf}")
+        else:
+            LOGGER.debug(f"DEBUG: No parentCS for joint {mate.name} from {parent} to {child}, using direct transform")
+            # No hierarchical transform needed, use direct part-to-mate transformation
+            if mate.matedEntities[PARENT].matedCS is not None:
+                parent_to_mate_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
+            else:
+                parent_to_mate_tf = np.eye(4)  # Default to identity matrix
+            LOGGER.debug(f"DEBUG: direct parent_to_mate_tf = {parent_to_mate_tf}")
+
+    LOGGER.debug(f"DEBUG: stl_to_parent_tf = {stl_to_parent_tf}")
+    stl_to_mate_tf = stl_to_parent_tf @ parent_to_mate_tf
+    LOGGER.debug(f"DEBUG: final stl_to_mate_tf = {stl_to_mate_tf}")
+    origin = Origin.from_matrix(stl_to_mate_tf)
+    LOGGER.debug(f"DEBUG: final origin = {origin.xyz} rpy={origin.rpy}")
+    sanitized_name = get_sanitized_name(mate.name)
+
+    LOGGER.info(f"Creating robot joint from {parent} to {child}")
+
+    if mate.mateType == MateType.REVOLUTE:
+        return [
+            RevoluteJoint(
+                name=sanitized_name,
+                parent=parent,
+                child=child,
+                origin=origin,
+                limits=JointLimits(
+                    effort=1.0,
+                    velocity=1.0,
+                    # TODO: add support for joint limits from Onshape
+                    lower=-2 * np.pi,
+                    upper=2 * np.pi,
+                ),
+                axis=Axis((0.0, 0.0, -1.0)),
+                # dynamics=JointDynamics(damping=0.1, friction=0.1),
+                mimic=mimic,
+            )
+        ], links
+
+    elif mate.mateType == MateType.FASTENED:
+        return [FixedJoint(name=sanitized_name, parent=parent, child=child, origin=origin)], links
+
+    elif mate.mateType == MateType.SLIDER or mate.mateType == MateType.CYLINDRICAL:
+        return [
+            PrismaticJoint(
+                name=sanitized_name,
+                parent=parent,
+                child=child,
+                origin=origin,
+                limits=JointLimits(
+                    effort=1.0,
+                    velocity=1.0,
+                    lower=-0.1,
+                    upper=0.1,
+                ),
+                axis=Axis((0.0, 0.0, -1.0)),
+                # dynamics=JointDynamics(damping=0.1, friction=0.1),
+                mimic=mimic,
+            )
+        ], links
+
+    elif mate.mateType == MateType.BALL:
+        dummy_x = Link(
+            name=f"{parent}_{get_sanitized_name(mate.name)}_x",
+            inertial=InertialLink(
+                mass=0.0,
+                inertia=Inertia.zero_inertia(),
+                origin=Origin.zero_origin(),
+            ),
+        )
+        dummy_y = Link(
+            name=f"{parent}_{get_sanitized_name(mate.name)}_y",
+            inertial=InertialLink(
+                mass=0.0,
+                inertia=Inertia.zero_inertia(),
+                origin=Origin.zero_origin(),
+            ),
+        )
+
+        links = [dummy_x, dummy_y]
+
+        return [
+            RevoluteJoint(
+                name=sanitized_name + "_x",
+                parent=parent,
+                child=dummy_x.name,
+                origin=origin,
+                limits=JointLimits(
+                    effort=1.0,
+                    velocity=1.0,
+                    lower=-2 * np.pi,
+                    upper=2 * np.pi,
+                ),
+                axis=Axis((1.0, 0.0, 0.0)),
+                # dynamics=JointDynamics(damping=0.1, friction=0.1),
+                mimic=mimic,
+            ),
+            RevoluteJoint(
+                name=sanitized_name + "_y",
+                parent=dummy_x.name,
+                child=dummy_y.name,
+                origin=Origin.zero_origin(),
+                limits=JointLimits(
+                    effort=1.0,
+                    velocity=1.0,
+                    lower=-2 * np.pi,
+                    upper=2 * np.pi,
+                ),
+                axis=Axis((0.0, 1.0, 0.0)),
+                # dynamics=JointDynamics(damping=0.1, friction=0.1),
+                mimic=mimic,
+            ),
+            RevoluteJoint(
+                name=sanitized_name + "_z",
+                parent=dummy_y.name,
+                child=child,
+                origin=Origin.zero_origin(),
+                limits=JointLimits(
+                    effort=1.0,
+                    velocity=1.0,
+                    lower=-2 * np.pi,
+                    upper=2 * np.pi,
+                ),
+                axis=Axis((0.0, 0.0, -1.0)),
+                # dynamics=JointDynamics(damping=0.1, friction=0.1),
+                mimic=mimic,
+            ),
+        ], links
+
+    else:
+        LOGGER.warning(f"Unsupported joint type: {mate.mateType}")
+        return [DummyJoint(name=sanitized_name, parent=parent, child=child, origin=origin)], links
+
+
 class Robot:
     """
     Represents a robot model with a graph structure for links and joints.
@@ -162,27 +495,14 @@ class Robot:
         >>> robot.save("robot.urdf", download_assets=True)
     """
 
-    def __init__(self, name: str, assets: Optional[dict[str, Asset]] = None, robot_type: RobotType = RobotType.URDF):
+    def __init__(self, kinematic_graph: KinematicGraph, cad: CAD, name: str, robot_type: RobotType = RobotType.URDF):
+        self.graph: KinematicGraph = kinematic_graph
+        self.cad: CAD = cad
         self.name: str = name
-        self.graph: nx.DiGraph = nx.DiGraph()  # Graph to hold links and joints
-
-        self.assets: dict[str, Asset] = assets or {}
-
         self.type: RobotType = robot_type
 
-        # DEPRECATED: Legacy Onshape assembly attributes
-        # These are kept for backward compatibility but are no longer used
-        # in the new CAD → KinematicGraph → Robot pipeline.
-        # Use Robot.from_graph() or Robot.from_url() instead of directly accessing these.
-        self.parts: dict[str, Part] = {}  # DEPRECATED: Use CAD.parts with PathKeys
-        self.mates: dict[str, MateFeatureData] = {}  # DEPRECATED: Use CAD.mates with PathKeys
-        self.relations: dict[str, MateRelationFeatureData] = {}  # DEPRECATED: Use CAD relations
-
-        self.flexible_assembly_data: dict[str, SubAssembly] = {}  # DEPRECATED
-        self.rigid_assembly_data: dict[str, RootAssembly] = {}  # DEPRECATED
-
-        self.assembly: Optional[Assembly] = None  # DEPRECATED: Stored for backward compatibility only
-        self.model: Optional[ET._Element] = None  # DEPRECATED
+        self.assets: dict[PathKey, Asset] = {}
+        self._stl_to_link_tf: dict[PathKey, np.ndarray] = {}
 
         # MuJoCo attributes
         self.lights: dict[str, Any] = {}
@@ -196,6 +516,144 @@ class Robot:
         self.ground_position: tuple[float, float, float] = (0, 0, 0)
         self.compiler_attributes: dict[str, str] = DEFAULT_COMPILER_ATTRIBUTES
         self.option_attributes: dict[str, str] = DEFAULT_OPTION_ATTRIBUTES
+
+    @classmethod
+    def from_graph(
+        cls,
+        kinematic_graph: "KinematicGraph",
+        cad: "CAD",
+        client: Client,
+        name: str,
+        robot_type: RobotType = RobotType.URDF,
+    ) -> "Robot":
+        """
+        Create a Robot from pre-built CAD and KinematicGraph objects.
+
+        This is the recommended method for creating robots when you already have
+        CAD and KinematicGraph instances. It handles mass property fetching
+        and robot generation in an efficient, streamlined way.
+
+        Args:
+            cad: CAD document with PathKey-based registries
+            kinematic_graph: Kinematic graph with parts and mates
+            client: Onshape client for downloading assets and fetching mass properties
+            name: The name of the robot
+            robot_type: The type of the robot (URDF or MJCF)
+            include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies
+
+        Returns:
+            Robot: The generated robot model
+
+        Example:
+            >>> from onshape_robotics_toolkit.parse import CAD
+            >>> from onshape_robotics_toolkit.graph import KinematicGraph
+            >>> cad = CAD.from_assembly(assembly, max_depth=1)
+            >>> graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+            >>> robot = Robot.from_graph(cad, graph, client, "my_robot")
+            >>> robot.save("robot.urdf", download_assets=True)
+        """
+        # Generate robot structure from kinematic graph
+        robot = cls(
+            kinematic_graph=kinematic_graph,
+            cad=cad,
+            name=name,
+            robot_type=robot_type,
+        )
+
+        # Get root node from kinematic graph
+        if kinematic_graph.root is None:
+            raise ValueError("Kinematic graph has no root node")
+
+        root_key = kinematic_graph.root
+        LOGGER.info(f"Processing root node: {root_key}")
+
+        root_part = cad.parts[root_key]
+        # NOTE: make sure Pathkey.__str__ produces names without
+        # special characters that are invalid in URDF/MJCF
+        root_name = str(root_key)
+
+        # Create root link
+        root_link, stl_to_root_tf, root_asset = get_robot_link(
+            name=root_name,
+            part=root_part,
+            wid=cad.workspace_id,
+            client=client,
+            mate=None,
+        )
+        robot.add_link(root_link)
+        robot.assets[root_key] = root_asset
+        robot._stl_to_link_tf[root_key] = stl_to_root_tf
+
+        LOGGER.info(f"Processing {len(kinematic_graph.edges)} edges in the kinematic graph.")
+
+        # Process edges in topological order
+        for parent_key, child_key in kinematic_graph.edges:
+            LOGGER.info(f"Processing edge: {parent_key} -> {child_key}")
+
+            # Get parent transform
+            parent_tf = robot._stl_to_link_tf[parent_key]
+
+            # Get parts
+            if parent_key not in cad.parts or child_key not in cad.parts:
+                LOGGER.warning(f"Part {parent_key} or {child_key} not found in parts registry. Skipping.")
+                continue
+
+            parent_part = cad.parts[parent_key]
+            child_part = cad.parts[child_key]
+
+            # Get mate data from graph edge
+            mate_data = kinematic_graph.get_edge_data(parent_key, child_key)
+            if mate_data is None:
+                LOGGER.warning(f"No mate data found for edge {parent_key} -> {child_key}. Skipping.")
+                continue
+
+            parent_name = str(parent_key)
+            child_name = str(child_key)
+
+            # Check for mate relations (mimic joints)
+            joint_mimic = None
+            # TODO: Implement mate relation support with PathKey system
+            # This will require updating the relation processing to use PathKeys
+
+            # Create joint(s) and dummy links
+            joint_list, link_list = get_robot_joint(
+                parent=parent_name,
+                child=child_name,
+                mate=mate_data,
+                stl_to_parent_tf=np.matrix(parent_tf),
+                mimic=joint_mimic,
+                is_rigid_assembly=parent_part.isRigidAssembly,
+            )
+
+            # Create child link
+            link, stl_to_link_tf, asset = get_robot_link(
+                name=child_name,
+                part=child_part,
+                wid=cad.workspace_id,
+                client=client,
+                mate=mate_data,
+            )
+            robot._stl_to_link_tf[child_key] = stl_to_link_tf
+            robot.assets[child_name] = asset
+
+            # Add child link if not already in graph
+            if child_key not in robot.graph:
+                robot.add_link(link)
+            else:
+                LOGGER.warning(f"Link {child_name} already exists in the robot graph. Skipping.")
+
+            # Add dummy links (for ball joints, etc.)
+            for link_item in link_list or []:
+                if link_item.name not in robot.graph:
+                    robot.add_link(link_item)
+                else:
+                    LOGGER.warning(f"Link {link_item.name} already exists in the robot graph. Skipping.")
+
+            # Add joints
+            for joint in joint_list:
+                robot.add_joint(joint)
+
+        return robot
 
     def add_link(self, link: Link) -> None:
         """
@@ -741,92 +1199,6 @@ class Robot:
 
         return ET.tostring(model, pretty_print=True, encoding="unicode")
 
-    def save(self, file_path: Optional[str] = None, download_assets: bool = True) -> None:
-        """Save the robot model to a URDF file.
-
-        Args:
-            file_path: The path to the file to save the robot model.
-            download_assets: Whether to download the assets.
-        """
-        if download_assets and self.assets:
-            asyncio.run(self._download_assets())
-
-        if not file_path:
-            LOGGER.warning("No file path provided. Saving to current directory.")
-            LOGGER.warning("Please keep in mind that the path to the assets will not be updated")
-            file_path = f"{self.name}.{self.type}"
-
-        xml_declaration = '<?xml version="1.0" ?>\n'
-
-        if self.type == RobotType.URDF:
-            urdf_str = xml_declaration + self.to_urdf()
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(urdf_str)
-
-        elif self.type == RobotType.MJCF:
-            mjcf_str = xml_declaration + self.to_mjcf()
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(mjcf_str)
-
-        LOGGER.info(f"Robot model saved to {os.path.abspath(file_path)}")
-
-    def show_tree(self) -> None:
-        """Display the robot's graph as a tree structure."""
-
-        def print_tree(node: str, depth: int = 0) -> None:
-            prefix = "    " * depth
-            print(f"{prefix}{node}")
-            for child in self.graph.successors(node):
-                print_tree(child, depth + 1)
-
-        root_nodes = [n for n in self.graph.nodes if self.graph.in_degree(n) == 0]
-        for root in root_nodes:
-            print_tree(root)
-
-    def show_graph(self, file_name: Optional[str] = None) -> None:
-        """
-        Display the robot's graph as a directed graph.
-
-        Args:
-            file_name: The path to the file to save the graph.
-        """
-        plot_graph(self.graph, file_name=file_name)
-
-    async def _download_assets(self) -> None:
-        """Asynchronously download the assets."""
-        if not self.assets:
-            LOGGER.warning("No assets found for the robot model.")
-            return
-
-        tasks = [asset.download() for asset in self.assets.values() if not asset.is_from_file]
-        try:
-            await asyncio.gather(*tasks)
-            LOGGER.info("All assets downloaded successfully.")
-        except Exception as e:
-            LOGGER.error(f"Error downloading assets: {e}")
-
-    def add_custom_element(self, parent_name: str, element: ET._Element) -> None:
-        """Add a custom XML element to the robot model.
-
-        Args:
-            parent_name: The name of the parent element.
-            element: The custom XML element to add.
-        """
-        if self.model is None:
-            raise RuntimeError("Robot model not initialized")
-
-        if parent_name == "root":
-            self.model.insert(0, element)
-        else:
-            parent = self.model.find(f".//*[@name='{parent_name}']")
-            if parent is None:
-                raise ValueError(f"Parent with name '{parent_name}' not found in the robot model.")
-
-            # Add the custom element under the parent
-            parent.append(element)
-
-        LOGGER.info(f"Custom element added to parent '{parent_name}'.")
-
     @classmethod
     def from_urdf(cls, file_name: str, robot_type: RobotType) -> "Robot":
         """Load a robot model from a URDF file.
@@ -880,132 +1252,82 @@ class Robot:
 
         return robot
 
-    @classmethod
-    def from_graph(
-        cls,
-        cad: "CAD",
-        kinematic_graph: "KinematicGraph",
-        client: Client,
-        name: str,
-        robot_type: RobotType = RobotType.URDF,
-        include_rigid_subassembly_parts: bool = False,
-    ) -> "Robot":
-        """
-        Create a Robot from pre-built CAD and KinematicGraph objects.
-
-        This is the recommended method for creating robots when you already have
-        CAD and KinematicGraph instances. It handles mass property fetching
-        and robot generation in an efficient, streamlined way.
+    def save(self, file_path: Optional[str] = None, download_assets: bool = True) -> None:
+        """Save the robot model to a URDF file.
 
         Args:
-            cad: CAD document with PathKey-based registries
-            kinematic_graph: Kinematic graph with parts and mates
-            client: Onshape client for downloading assets and fetching mass properties
-            name: The name of the robot
-            robot_type: The type of the robot (URDF or MJCF)
-            include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies
-
-        Returns:
-            Robot: The generated robot model
-
-        Example:
-            >>> from onshape_robotics_toolkit.parse import CAD
-            >>> from onshape_robotics_toolkit.graph import KinematicGraph
-            >>> cad = CAD.from_assembly(assembly, max_depth=1)
-            >>> graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
-            >>> robot = Robot.from_graph(cad, graph, client, "my_robot")
-            >>> robot.save("robot.urdf", download_assets=True)
+            file_path: The path to the file to save the robot model.
+            download_assets: Whether to download the assets.
         """
-        # Generate robot structure from kinematic graph
-        robot = get_robot_from_kinematic_graph(
-            cad=cad,
-            kinematic_graph=kinematic_graph,
-            client=client,
-            robot_name=name,
-        )
+        if download_assets and self.assets:
+            asyncio.run(self._download_assets())
 
-        robot.type = robot_type
+        if not file_path:
+            LOGGER.warning("No file path provided. Saving to current directory.")
+            LOGGER.warning("Please keep in mind that the path to the assets will not be updated")
+            file_path = f"{self.name}.{self.type}"
 
-        return robot
+        xml_declaration = '<?xml version="1.0" ?>\n'
 
-    @classmethod
-    def from_url(
-        cls,
-        name: str,
-        url: str,
-        client: Client,
-        max_depth: int = 0,
-        use_user_defined_root: bool = False,
-        robot_type: RobotType = RobotType.URDF,
-        log_assembly: bool = False,
-        include_rigid_subassembly_parts: bool = False,
-    ) -> "Robot":
-        """
-        Load a robot model from an Onshape CAD assembly URL.
+        if self.type == RobotType.URDF:
+            urdf_str = xml_declaration + self.to_urdf()
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(urdf_str)
 
-        This method fetches the assembly from Onshape, builds the CAD structure
-        and kinematic graph, then delegates to Robot.from_graph() for robot creation.
+        elif self.type == RobotType.MJCF:
+            mjcf_str = xml_declaration + self.to_mjcf()
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(mjcf_str)
+
+        LOGGER.info(f"Robot model saved to {os.path.abspath(file_path)}")
+
+    def show_tree(self) -> None:
+        """Display the robot's graph as a tree structure."""
+
+        def print_tree(node: str, depth: int = 0) -> None:
+            prefix = "    " * depth
+            print(f"{prefix}{node}")
+            for child in self.graph.successors(node):
+                print_tree(child, depth + 1)
+
+        root_nodes = [n for n in self.graph.nodes if self.graph.in_degree(n) == 0]
+        for root in root_nodes:
+            print_tree(root)
+
+    async def _download_assets(self) -> None:
+        """Asynchronously download the assets."""
+        if not self.assets:
+            LOGGER.warning("No assets found for the robot model.")
+            return
+
+        tasks = [asset.download() for asset in self.assets.values() if not asset.is_from_file]
+        try:
+            await asyncio.gather(*tasks)
+            LOGGER.info("All assets downloaded successfully.")
+        except Exception as e:
+            LOGGER.error(f"Error downloading assets: {e}")
+
+    def add_custom_element(self, parent_name: str, element: ET._Element) -> None:
+        """Add a custom XML element to the robot model.
 
         Args:
-            name: The name of the robot
-            url: The URL of the Onshape CAD assembly
-            client: The Onshape client object
-            max_depth: The maximum depth to process the assembly (controls rigid vs flexible)
-            use_user_defined_root: Whether to use the user-defined root
-            robot_type: The type of the robot (URDF or MJCF)
-            log_assembly: Whether to log the assembly response
-            include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies
-
-        Returns:
-            Robot: The generated robot model
-
-        Example:
-            >>> from onshape_robotics_toolkit.connect import Client
-            >>> client = Client()
-            >>> robot = Robot.from_url(
-            ...     name="my_robot",
-            ...     url="https://cad.onshape.com/documents/...",
-            ...     client=client,
-            ...     max_depth=1
-            ... )
-            >>> robot.save("robot.urdf", download_assets=True)
+            parent_name: The name of the parent element.
+            element: The custom XML element to add.
         """
-        from onshape_robotics_toolkit.graph import KinematicGraph
-        from onshape_robotics_toolkit.parse import CAD
+        if self.model is None:
+            raise RuntimeError("Robot model not initialized")
 
-        # Fetch assembly from Onshape
-        document = Document.from_url(url=url)
-        client.set_base_url(document.base_url)
+        if parent_name == "root":
+            self.model.insert(0, element)
+        else:
+            parent = self.model.find(f".//*[@name='{parent_name}']")
+            if parent is None:
+                raise ValueError(f"Parent with name '{parent_name}' not found in the robot model.")
 
-        assembly = client.get_assembly(
-            did=document.did,
-            wtype=document.wtype,
-            wid=document.wid,
-            eid=document.eid,
-            log_response=log_assembly,
-            with_meta_data=True,
-        )
+            # Add the custom element under the parent
+            parent.append(element)
 
-        # Create CAD structure with PathKey-based system
-        cad = CAD.from_assembly(assembly=assembly, max_depth=max_depth)
-
-        # Build kinematic graph from CAD structure
-        kinematic_graph = KinematicGraph.from_cad(cad=cad, use_user_defined_root=use_user_defined_root)
-
-        # Delegate to from_graph for robot creation
-        robot = cls.from_graph(
-            cad=cad,
-            kinematic_graph=kinematic_graph,
-            client=client,
-            name=name,
-            robot_type=robot_type,
-            include_rigid_subassembly_parts=include_rigid_subassembly_parts,
-        )
-
-        # Store assembly reference for backward compatibility
-        robot.assembly = assembly
-
-        return robot
+        LOGGER.info(f"Custom element added to parent '{parent_name}'.")
 
 
 def load_element(file_name: str) -> ET._Element:
@@ -1054,8 +1376,6 @@ def get_robot_from_kinematic_graph(
     Raises:
         ValueError: If kinematic graph has no root node or parts are missing
     """
-    from onshape_robotics_toolkit.parse import PathKey
-
     robot = Robot(name=robot_name)
     assets_map: dict[str, Asset] = {}
     stl_to_link_tf_map: dict[PathKey, np.ndarray] = {}
@@ -1067,16 +1387,9 @@ def get_robot_from_kinematic_graph(
     root_key = kinematic_graph.root_node
     LOGGER.info(f"Processing root node: {root_key}")
 
-    # Get root part
-    if root_key not in cad.parts:
-        raise ValueError(f"Root node {root_key} not found in parts registry")
-
     root_part = cad.parts[root_key]
-
-    # Get sanitized name for root link
-    root_instance = cad.instances.get(root_key)
-    if root_instance is None:
-        raise ValueError(f"Root instance {root_key} not found")
+    # NOTE: make sure Pathkey.__str__ produces names without
+    # special characters that are invalid in URDF/MJCF
     root_name = str(root_key)
 
     # Create root link
@@ -1169,136 +1482,3 @@ def get_robot_from_kinematic_graph(
 
     robot.assets = assets_map
     return robot
-
-
-def get_robot(
-    assembly: Assembly,
-    graph: nx.DiGraph,
-    root_node: Optional[str],
-    parts: dict[str, Part],
-    mates: dict[str, MateFeatureData],
-    relations: dict[str, MateRelationFeatureData],
-    client: Client,
-    robot_name: str,
-) -> Robot:
-    """
-    Generate a Robot instance from an Onshape assembly.
-
-    Args:
-        assembly: The Onshape assembly object.
-        graph: The graph representation of the assembly.
-        root_node: The root node of the graph.
-        parts: The dictionary of parts in the assembly.
-        mates: The dictionary of mates in the assembly.
-        relations: The dictionary of mate relations in the assembly.
-        client: The Onshape client object.
-        robot_name: Name of the robot.
-
-    Returns:
-        Robot: The generated Robot instance.
-    """
-    robot = Robot(name=robot_name)
-
-    assets_map: dict[str, Asset] = {}
-    stl_to_link_tf_map = {}
-    topological_mates, topological_relations = get_topological_mates(graph, mates, relations)
-
-    LOGGER.info(f"Processing root node: {root_node}")
-
-    if assembly.document is None:
-        raise ValueError("Assembly document is None")
-
-    if root_node is None:
-        raise ValueError("Root node is None")
-
-    root_link, stl_to_root_tf, root_asset = get_robot_link(
-        name=root_node, part=parts[root_node], wid=assembly.document.wid, client=client, mate=None
-    )
-    robot.add_link(root_link)
-    assets_map[root_node] = root_asset
-    stl_to_link_tf_map[root_node] = stl_to_root_tf
-
-    LOGGER.info(f"Processing {len(graph.edges)} edges in the graph.")
-
-    for parent, child in graph.edges:
-        mate_key = f"{parent}{MATE_JOINER}{child}"
-        LOGGER.info(f"Processing edge: {parent} -> {child}")
-        parent_tf = stl_to_link_tf_map[parent]
-
-        if parent not in parts or child not in parts:
-            LOGGER.warning(f"Part {parent} or {child} not found in parts dictionary. Skipping.")
-            continue
-
-        joint_mimic = None
-        relation = topological_relations.get(topological_mates[mate_key].id)
-        if relation:
-            multiplier_value = (
-                relation.relationLength
-                if relation.relationType == RelationType.RACK_AND_PINION
-                else relation.relationRatio
-            )
-            if multiplier_value is None:
-                raise ValueError("Relation multiplier is None")
-            multiplier = multiplier_value
-            joint_name = get_joint_name(relation.mates[RELATION_PARENT].featureId, mates)
-            if joint_name is None:
-                raise ValueError("Joint name is None")
-            joint_mimic = JointMimic(
-                joint=joint_name,
-                multiplier=multiplier,
-                offset=0.0,
-            )
-
-        joint_list, link_list = get_robot_joint(
-            parent,
-            child,
-            topological_mates[mate_key],
-            parent_tf,
-            joint_mimic,
-            is_rigid_assembly=parts[parent].isRigidAssembly,
-        )
-
-        if assembly.document is None:
-            raise ValueError("Assembly document is None")
-
-        link, stl_to_link_tf, asset = get_robot_link(
-            child, parts[child], assembly.document.wid, client, topological_mates[mate_key]
-        )
-        stl_to_link_tf_map[child] = stl_to_link_tf
-        assets_map[child] = asset
-
-        if child not in robot.graph:
-            robot.add_link(link)
-        else:
-            LOGGER.warning(f"Link {child} already exists in the robot graph. Skipping.")
-
-        for link_item in link_list or []:
-            if link_item.name not in robot.graph:
-                robot.add_link(link_item)
-            else:
-                LOGGER.warning(f"Link {link_item.name} already exists in the robot graph. Skipping.")
-
-        for joint in joint_list:
-            robot.add_joint(joint)
-
-    robot.assets = assets_map
-    return robot
-
-
-if __name__ == "__main__":
-    LOGGER.set_file_name("test.log")
-
-    robot = Robot.from_urdf(file_name="E:/onshape-robotics-toolkit/playground/ballbot.urdf", robot_type=RobotType.MJCF)
-    robot.set_robot_position((0, 0, 0.6))
-    robot.show_tree()
-    robot.save(file_path="E:/onshape-robotics-toolkit/playground/ballbot.xml")
-
-    # import mujoco
-    # model = mujoco.MjModel.from_xml_path(file_name="E:/onshape-robotics-toolkit/playground/ballbot.urdf")
-    # mujoco.mj_saveLastXML("ballbot-raw-ref.xml", model)
-
-    # simulate_robot("test.xml")
-
-    # robot = Robot.from_urdf("E:/onshape-robotics-toolkit/playground/20240920_umv_mini/"
-    #                        "20240920_umv_mini/20240920_umv_mini.urdf")
-    # robot.save(file_path="E:/onshape-robotics-toolkit/playground/test.urdf", download_assets=False)
