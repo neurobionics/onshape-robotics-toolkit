@@ -78,6 +78,5 @@ if __name__ == "__main__":
     cad = fetch_cad_object(rootassembly, max_depth=MAX_DEPTH, cache_file=f"cad_{MAX_DEPTH}.pkl")
 
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
-
     # robot = Robot.from_graph(cad=cad, kinematic_graph=graph, client=client, name="rootassembly")
     # robot.save()

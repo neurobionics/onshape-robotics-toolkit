@@ -69,12 +69,15 @@ class KinematicGraph:
             >>> graph = KinematicGraph(cad, use_user_defined_root=True)
         """
         self.cad = cad
-        self.graph: nx.DiGraph = nx.DiGraph()
+        self.use_user_defined_root = use_user_defined_root
+        self.user_defined_root: Union[PathKey, None] = None
+
+        self.graph: Union[nx.Graph, nx.DiGraph] = nx.Graph()
         self.root_node: Optional[PathKey] = None
         self.topological_order: Optional[tuple[PathKey, ...]] = None
 
         # Build the kinematic graph
-        self._build_graph(use_user_defined_root)
+        self._build_graph()
 
     @classmethod
     def from_cad(cls, cad: CAD, use_user_defined_root: bool = True) -> "KinematicGraph":
@@ -98,9 +101,12 @@ class KinematicGraph:
             >>> print(f"Root: {graph.root_node}")
             >>> print(f"Nodes: {len(graph.graph.nodes)}")
         """
-        return cls(cad, use_user_defined_root=use_user_defined_root)
+        kinematic_graph = cls(cad, use_user_defined_root=use_user_defined_root)
+        kinematic_graph._process_graph()
 
-    def _build_graph(self, use_user_defined_root: bool) -> None:
+        return kinematic_graph
+
+    def _build_graph(self) -> None:
         """
         Build kinematic graph from CAD assembly data.
 
@@ -110,9 +116,6 @@ class KinematicGraph:
         3. Get parts involved in valid mates
         4. Add nodes for involved parts (with metadata)
         5. Add edges from mate relationships
-        6. Remove disconnected subgraphs
-        7. Convert to directed graph with root detection
-        8. Calculate topological order
 
         Args:
             use_user_defined_root: Whether to use user-defined fixed part as root
@@ -125,10 +128,10 @@ class KinematicGraph:
         LOGGER.debug(f"Parts involved in mates: {len(involved_parts)}")
 
         # Find user-defined root if requested
-        user_defined_root = self._find_user_defined_root(involved_parts) if use_user_defined_root else None
+        self.user_defined_root = self._find_user_defined_root(involved_parts) if self.use_user_defined_root else None
 
         # Add nodes for parts involved in mates
-        self._add_nodes(involved_parts, user_defined_root)
+        self._add_nodes(involved_parts)
 
         # Add edges from mates
         self._add_edges(remapped_mates)
@@ -138,30 +141,36 @@ class KinematicGraph:
             LOGGER.warning("KinematicGraph is empty - no valid parts found in mates")
             return
 
+        LOGGER.debug(f"KinematicGraph created: {len(self.graph.nodes)} nodes, " f"{len(self.graph.edges)} edges")
+
+    def _process_graph(self) -> None:
+        """
+        Process the graph:
+            1. Remove disconnected subgraphs
+            2. Convert to directed graph with root detection
+            3. Calculate topological order
+        """
+
         # Remove disconnected subgraphs
-        undirected_graph = self.graph.to_undirected()
-        main_graph = remove_unconnected_subgraphs(undirected_graph)
+        main_graph = remove_disconnected_subgraphs(self.graph)
 
         # Check if user_defined_root is still in graph after filtering
-        if user_defined_root and user_defined_root not in main_graph.nodes:
+        if self.user_defined_root and self.user_defined_root not in main_graph.nodes:
             LOGGER.warning(
-                f"User-defined root {user_defined_root} not in main graph after filtering. "
+                f"User-defined root {self.user_defined_root} not in main graph after filtering. "
                 f"Will use centrality-based root detection."
             )
-            user_defined_root = None
+            self.user_defined_root = None
 
         # Convert to directed graph with root node
-        self.graph, self.root_node = convert_to_digraph(main_graph, user_defined_root)
-
-        # Align mate entity ordering with the directed edge orientation
-        self._align_mated_entities_with_edges()
+        self.graph, self.root_node = convert_to_digraph(main_graph, self.user_defined_root)
 
         # Calculate topological order
         self.topological_order = get_topological_order(self.graph)
 
         LOGGER.info(
-            f"KinematicGraph created: {len(self.graph.nodes)} nodes, "
-            f"{len(self.graph.edges)} edges, root={self.root_node}"
+            f"KinematicGraph processed: {len(self.graph.nodes)} nodes, "
+            f"{len(self.graph.edges)} edges with root node: {self.root_node}"
         )
 
     def _remap_mates(self, cad: CAD) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
@@ -218,77 +227,6 @@ class KinematicGraph:
             remapped_mates[remapped_mate_key] = _mate_data
         return remapped_mates
 
-    def _align_mated_entities_with_edges(self) -> None:
-        """
-        Align mate entity ordering to match the directed graph edge orientation.
-
-        During graph construction, edges may be reoriented when converting from the undirected
-        representation to a directed tree rooted at the chosen base link. The MateFeatureData
-        attached to each edge retains its original matedEntities ordering, which can result in
-        swapped parent/child indices. Because downstream URDF generation relies on the global
-        CHILD/PARENT constants, we realign the list so that:
-
-            mate.matedEntities[CHILD]  -> child node of the directed edge
-            mate.matedEntities[PARENT] -> parent node of the directed edge
-        """
-
-        for parent_key, child_key, data in self.graph.edges(data=True):
-            mate = data["mate_data"]
-            if not isinstance(mate, MateFeatureData):
-                continue
-
-            expected_parent_path = parent_key.path
-            expected_child_path = child_key.path
-
-            def entity_path(index: int, mate: MateFeatureData = mate) -> tuple[str, ...]:
-                try:
-                    return tuple(mate.matedEntities[index].matedOccurrence)
-                except (AttributeError, IndexError):
-                    return ()
-
-            current_child_path = entity_path(CHILD)
-            current_parent_path = entity_path(PARENT)
-
-            if current_child_path == expected_child_path and current_parent_path == expected_parent_path:
-                continue
-
-            parent_idx = child_idx = None
-            for idx, entity in enumerate(mate.matedEntities):
-                occurrence_path = tuple(getattr(entity, "matedOccurrence", ()))
-                if occurrence_path == expected_parent_path:
-                    parent_idx = idx
-                if occurrence_path == expected_child_path:
-                    child_idx = idx
-
-            if parent_idx is None or child_idx is None:
-                LOGGER.warning(
-                    "Mate '%s' entities do not match edge %s -> %s (parent_idx=%s, child_idx=%s).",
-                    getattr(mate, "name", "<unnamed mate>"),
-                    parent_key,
-                    child_key,
-                    parent_idx,
-                    child_idx,
-                )
-                continue
-
-            if parent_idx == PARENT and child_idx == CHILD:
-                # Order already matches constants; nothing to do.
-                continue
-
-            ordered_entities = list(mate.matedEntities)
-            ordered_entities[CHILD] = mate.matedEntities[child_idx]
-            ordered_entities[PARENT] = mate.matedEntities[parent_idx]
-            mate.matedEntities = ordered_entities
-
-            LOGGER.debug(
-                "Aligned mate '%s' entity order for edge %s -> %s (parent_idx=%s, child_idx=%s).",
-                getattr(mate, "name", "<unnamed mate>"),
-                parent_key,
-                child_key,
-                parent_idx,
-                child_idx,
-            )
-
     def _get_parts_involved_in_mates(self, mates: dict[tuple[PathKey, PathKey], MateFeatureData]) -> set[PathKey]:
         """
         Extract all part PathKeys that are involved in mates.
@@ -324,7 +262,7 @@ class KinematicGraph:
                 return part_key
         return None
 
-    def _add_nodes(self, involved_parts: set[PathKey], user_defined_root: Optional[PathKey]) -> None:
+    def _add_nodes(self, involved_parts: set[PathKey]) -> None:
         """
         Add nodes to graph for parts involved in mates.
 
@@ -355,7 +293,7 @@ class KinematicGraph:
             self.graph.add_node(
                 part_key,
                 **part.model_dump(mode="python", exclude_unset=False),
-                is_root=(part_key == user_defined_root),
+                is_root=(part_key == self.user_defined_root),
             )
             nodes_added += 1
 
@@ -369,7 +307,6 @@ class KinematicGraph:
             mates: Dictionary of mate relationships
         """
         edges_added = 0
-        skipped_edges = []
         for (parent_key, child_key), mate in mates.items():
             # Only add edge if both nodes exist in graph
             if parent_key in self.graph.nodes and child_key in self.graph.nodes:
@@ -382,18 +319,10 @@ class KinematicGraph:
                 LOGGER.debug(f"Added edge: {parent_key} -> {child_key}")
             else:
                 LOGGER.debug(f"Skipping edge {parent_key} -> {child_key} (nodes not in graph)")
-                skipped_edges.append((parent_key, child_key, mate.name))
-
-        if skipped_edges:
-            LOGGER.warning(f"Skipped {len(skipped_edges)} edges (nodes not in graph):")
-            for p, c, name in skipped_edges:
-                in_nodes_p = p in self.graph.nodes
-                in_nodes_c = c in self.graph.nodes
-                LOGGER.warning(f"  {name}: {p} (in_graph:{in_nodes_p}) <-> {c} (in_graph:{in_nodes_c})")
 
         LOGGER.debug(f"Added {edges_added} edges to graph")
 
-    def show(self, file_name: Optional[str] = None) -> None:
+    def show(self, file_name: Optional[str] = "robot") -> None:
         """
         Visualize the kinematic graph with part names as labels instead of PathKey IDs.
 
@@ -453,41 +382,6 @@ class KinematicGraph:
             return self.graph.edges[parent_key, child_key].get("mate_data")
         return None
 
-    def get_children(self, node_key: PathKey) -> list[PathKey]:
-        """
-        Get all children of a node in the kinematic graph.
-
-        Args:
-            node_key: PathKey of parent node
-
-        Returns:
-            List of child PathKeys
-
-        Examples:
-            >>> children = tree.get_children(root_key)
-            >>> for child in children:
-            >>>     print(f"Child: {child}")
-        """
-        return list(self.graph.successors(node_key))
-
-    def get_parent(self, node_key: PathKey) -> Optional[PathKey]:
-        """
-        Get parent of a node in the kinematic graph.
-
-        Args:
-            node_key: PathKey of child node
-
-        Returns:
-            Parent PathKey, or None if node is root
-
-        Examples:
-            >>> parent = tree.get_parent(some_part_key)
-            >>> if parent:
-            >>>     print(f"Parent: {parent}")
-        """
-        predecessors = list(self.graph.predecessors(node_key))
-        return predecessors[0] if predecessors else None
-
     def __repr__(self) -> str:
         """String representation of the kinematic graph."""
         return (
@@ -510,7 +404,7 @@ def plot_graph(graph: Union[nx.Graph, nx.DiGraph], file_name: Optional[str] = "r
     """
     colors = [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(len(graph.nodes))]  # noqa: S311
     plt.figure(figsize=(8, 8))
-    pos = nx.shell_layout(graph)
+    pos = nx.planar_layout(graph)
 
     nx.draw(
         graph,
@@ -572,6 +466,10 @@ def convert_to_digraph(graph: nx.Graph, user_defined_root: Any = None) -> tuple[
             di_graph[u][v].update(graph[u][v])
         elif graph.has_edge(v, u):
             # Edge might be reversed in undirected graph
+            # TODO: if there are scenarios where converting the graph to a digraph,
+            # alters the direction of the mates, we should reorient the mate data too
+            # this will then become a method tied to the class as it would then operate
+            # on mate data and requires some knowledge of the CAD structure
             di_graph[u][v].update(graph[v][u])
 
     # Add back any edges not in BFS tree (loops, etc.)
@@ -635,12 +533,12 @@ def _print_graph_tree(graph: nx.Graph) -> None:
             print()
 
 
-def remove_unconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
+def remove_disconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
     """
-    Remove unconnected subgraphs from the graph.
+    Remove disconnected subgraphs from the graph.
 
     Args:
-        graph: The graph to remove unconnected subgraphs from.
+        graph: The graph to remove disconnected subgraphs from.
 
     Returns:
         The main connected subgraph of the graph, which is the largest connected subgraph.
