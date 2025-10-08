@@ -119,12 +119,10 @@ class KinematicGraph:
         """
         # remap the mates to switch out any parts that belong to rigid subassemblies
         remapped_mates = self._remap_mates(self.cad)
-        for (parent_key, child_key), mate in remapped_mates.items():
-            print(parent_key, child_key, mate.name)
 
         # Get all parts involved in valid mates
         involved_parts = self._get_parts_involved_in_mates(remapped_mates)
-        LOGGER.info(f"Parts involved in mates: {len(involved_parts)}")
+        LOGGER.debug(f"Parts involved in mates: {len(involved_parts)}")
 
         # Find user-defined root if requested
         user_defined_root = self._find_user_defined_root(involved_parts) if use_user_defined_root else None
@@ -178,37 +176,46 @@ class KinematicGraph:
             (w/o assembly keys) to their remapped counterparts
         """
 
-        def remap_key(key: PathKey) -> PathKey:
+        def remap_mate(key: PathKey, index: int, mate: MateFeatureData) -> PathKey:
             """
             Return the rigid assembly root key if the part is inside a rigid assembly,
             otherwise return the original key.
             """
             # TODO: Currently we only remap the keys of the mates
             # the MatedCS should also be modified to include the rigid assembly TF
-            part = cad.parts.get(key)
-            if part is None:
-                LOGGER.warning("Part key %s referenced by a mate but not found in cad.parts", key)
-                return key
-            return part.rigidAssemblyKey or key
+            r_key: PathKey = key
+            part = cad.parts[key]
+            if part.rigidAssemblyKey is not None:
+                r_key = part.rigidAssemblyKey
+                # NOTE: this is where we remap the matedOccurrence as well
+                mate.matedEntities[index].matedOccurrence = list(r_key.path)
+            return r_key
 
         remapped_mates: dict[tuple[PathKey, PathKey], MateFeatureData] = {}
         # CAD's mates are already filtered and validated, they only include mates that
         # need to be processed for robot generation
-        for (_, parent_key, child_key), mate in cad.mates.items():
-            remapped_parent_key = remap_key(parent_key)
-            remapped_child_key = remap_key(child_key)
-            remapped_mate_key = (remapped_parent_key, remapped_child_key)
+        for (_, *entities), mate in cad.mates.items():
+            _mate_data = copy.deepcopy(mate)
+            remapped_keys = []
+
+            for i, key in enumerate(entities):
+                # NOTE: mate data's matedEntities have matedOccurrences that need to
+                # be remapped as well in addition to the keys
+                remapped_key = remap_mate(key, i, _mate_data)
+                remapped_keys.append(remapped_key)
+
+            remapped_mate_key: tuple[PathKey, PathKey] = tuple(remapped_keys)  # type: ignore[assignment]
             if remapped_mate_key in remapped_mates:
                 LOGGER.warning(
                     "Duplicate mate detected after remapping: %s -> %s. "
                     "This can happen if multiple parts in a rigid assembly are mated to the same part. "
                     "Only the first mate will be kept.",
-                    remapped_parent_key,
-                    remapped_child_key,
+                    remapped_mate_key[PARENT],
+                    remapped_mate_key[CHILD],
                 )
                 continue
 
-            remapped_mates[remapped_mate_key] = copy.deepcopy(mate)
+            remapped_mates[remapped_mate_key] = _mate_data
         return remapped_mates
 
     def _align_mated_entities_with_edges(self) -> None:
@@ -333,15 +340,13 @@ class KinematicGraph:
 
         LOGGER.debug(f"Processing {len(involved_parts)} involved parts")
         for part_key in involved_parts:
-            # With eager parts population, part MUST exist if it passed validation
-            if part_key not in self.cad.parts:
-                LOGGER.warning(f"Part {part_key} not in parts registry despite passing validation")
-                continue
-
-            # Check if occurrence is hidden
-            occurrence = self.cad.occurrences.get(part_key)
-            if occurrence and occurrence.hidden:
-                LOGGER.debug(f"Skipping hidden part: {part_key}")
+            # Check if instance is suppressed
+            instance = self.cad.instances.get(part_key)
+            if instance and instance.suppressed:
+                # TODO: Should this happen here or within the CAD class?
+                # Skipping parts here is problematic since the mate registry still
+                # refers to them, leading to dangling edges.
+                LOGGER.debug(f"Skipping suppressed part: {part_key}")
                 skipped_hidden += 1
                 continue
 

@@ -835,7 +835,7 @@ class CAD:
                 # TODO: add support for mate groups and connectors
                 return
 
-            mate_data: MateFeatureData = feature.featureData
+            mate_data: MateFeatureData = copy.deepcopy(feature.featureData)
 
             # TODO: Onshape mate feature data always has two entities (parent/child). If origin mates ever
             # appear differently, this is the place to update handling.
@@ -855,6 +855,15 @@ class CAD:
 
             parent_key = self.keys_by_id.get(parent_path)
             child_key = self.keys_by_id.get(child_path)
+
+            # NOTE: reorient the mated entities to match this parent, child order
+            # TODO: add tests to make sure this convention is preserved
+            # We create indices for parent and child, get the occurrences,
+            # remap the mate data to always be parent -> child
+            mate_data.matedEntities = [
+                mate_data.matedEntities[PARENT],
+                mate_data.matedEntities[CHILD],
+            ]
 
             if parent_key and child_key:
                 self.mates[(assembly_key, parent_key, child_key)] = mate_data
@@ -910,7 +919,6 @@ class CAD:
                 self.parts[pathkey] = copy.deepcopy(part)  # Avoid mutating original data
                 if pathkey.depth > self.max_depth:
                     rigid_root = self.get_rigid_assembly_root(pathkey)
-                    print(f"Part {pathkey} has a rigid root {rigid_root}")
                     # get the global occurrence transform of this rigid root
                     # TODO: right now we retrieve and assign the global occurrence TF of the rigid assembly
                     # Maybe this should be rigid assembly's local occurrence TF of the part?

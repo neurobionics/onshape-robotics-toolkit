@@ -17,7 +17,6 @@ from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models import Assembly
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.parse import CAD
-from onshape_robotics_toolkit.robot import Robot
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 
 # Configuration
@@ -80,5 +79,5 @@ if __name__ == "__main__":
 
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
 
-    robot = Robot.from_graph(cad=cad, kinematic_graph=graph, client=client, name="rootassembly")
-    robot.save()
+    # robot = Robot.from_graph(cad=cad, kinematic_graph=graph, client=client, name="rootassembly")
+    # robot.save()
