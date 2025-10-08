@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Optional, Union
 if TYPE_CHECKING:
     pass
 
+import copy
+
 import numpy as np
 
 from onshape_robotics_toolkit.connect import Client
@@ -703,7 +705,7 @@ class CAD:
                     LOGGER.warning(f"No PathKey for {scope} instance {instance.id} ({instance.name})")
                     continue
 
-                self.instances[key] = instance
+                self.instances[key] = copy.deepcopy(instance)
 
                 if isinstance(instance, AssemblyInstance):
                     subassembly = subassembly_lookup.get(instance.uid)
@@ -769,7 +771,7 @@ class CAD:
                         inst.isRigid = True
                         rigid_marked += 1
 
-                self.subassemblies[pathkey] = subassembly
+                self.subassemblies[pathkey] = copy.deepcopy(subassembly)
                 total_occurrences += 1
 
         LOGGER.info(
@@ -905,9 +907,10 @@ class CAD:
                 continue
 
             for pathkey in pathkeys:
-                self.parts[pathkey] = part
+                self.parts[pathkey] = copy.deepcopy(part)  # Avoid mutating original data
                 if pathkey.depth > self.max_depth:
                     rigid_root = self.get_rigid_assembly_root(pathkey)
+                    print(f"Part {pathkey} has a rigid root {rigid_root}")
                     # get the global occurrence transform of this rigid root
                     # TODO: right now we retrieve and assign the global occurrence TF of the rigid assembly
                     # Maybe this should be rigid assembly's local occurrence TF of the part?
@@ -916,6 +919,7 @@ class CAD:
                         continue
 
                     rigid_root_tf = self.occurrences[rigid_root].tf
+                    self.parts[pathkey].rigidAssemblyKey = rigid_root
                     self.parts[pathkey].rigidAssemblyToPartTF = MatedCS.from_tf(tf=rigid_root_tf)
                     self.parts[pathkey].rigidAssemblyWorkspaceId = self.workspace_id
                     LOGGER.debug(f"Set rigidAssemblyToPartTF for {pathkey}, with rigid assembly {rigid_root}")
@@ -936,6 +940,7 @@ class CAD:
                     fullConfiguration=subassembly_instance.fullConfiguration,
                     documentVersion=subassembly_instance.documentVersion,
                     isRigidAssembly=True,
+                    rigidAssemblyKey=None,  # Not applicable for rigid assembly itself
                     rigidAssemblyWorkspaceId=self.workspace_id,
                     rigidAssemblyToPartTF=None,
                     MassProperty=None,  # Populated later via mass property fetch

@@ -9,18 +9,22 @@ This script:
 """
 
 import os
+import pickle
 
 from onshape_robotics_toolkit.connect import Client
+from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models import Assembly
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.parse import CAD
+from onshape_robotics_toolkit.robot import Robot
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 
 # Configuration
-USE_CACHED = False
+USE_CACHED = True
+USE_PICKLE = True
 LOG_ASSEMBLY = False
-MAX_DEPTH = 1
+MAX_DEPTH = 0
 
 # Root assembly URL
 ROOT_URL = (
@@ -47,6 +51,21 @@ def fetch_assembly_json(client: Client, doc: Document, cache_file: str) -> Assem
     return assembly
 
 
+def fetch_cad_object(assembly: Assembly, max_depth: int, cache_file: str) -> CAD:
+    """Fetch CAD object from assembly."""
+    if USE_PICKLE and os.path.exists(cache_file):
+        with open(cache_file, "rb") as f:
+            cad = pickle.load(f)  # noqa: S301
+        print(f"Loaded cached CAD from {cache_file}")
+    else:
+        cad = CAD.from_assembly(assembly, max_depth=max_depth)
+        with open(cache_file, "wb") as f:
+            pickle.dump(cad, f)
+        print("Created CAD object from assembly")
+        print(f"Cached CAD object to {cache_file}")
+    return cad
+
+
 if __name__ == "__main__":
     LOGGER.set_file_name("occurrence_test.log")
     LOGGER.set_stream_level(LogLevel.INFO)
@@ -56,10 +75,10 @@ if __name__ == "__main__":
     root_doc = Document.from_url(url=ROOT_URL)
     client.set_base_url(root_doc.base_url)
 
-    rootassembly = fetch_assembly_json(client, root_doc, "rootassembly.json")
+    rootassembly = fetch_assembly_json(client, root_doc, f"assembly_{MAX_DEPTH}.json")
+    cad = fetch_cad_object(rootassembly, max_depth=MAX_DEPTH, cache_file=f"cad_{MAX_DEPTH}.pkl")
 
-    cad = CAD.from_assembly(rootassembly, max_depth=MAX_DEPTH)
-    # graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+    graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
 
-    # robot = Robot.from_graph(cad=cad, kinematic_graph=graph, client=client, name="rootassembly")
-    # robot.save()
+    robot = Robot.from_graph(cad=cad, kinematic_graph=graph, client=client, name="rootassembly")
+    robot.save()

@@ -16,6 +16,7 @@ Functions:
     remove_unconnected_subgraphs: Remove disconnected components from graph
 """
 
+import copy
 import random
 from typing import Any, Optional, Union
 
@@ -116,14 +117,13 @@ class KinematicGraph:
         Args:
             use_user_defined_root: Whether to use user-defined fixed part as root
         """
-        # Collect all mates from root assembly and subassemblies
-        all_mates = self._collect_all_mates()
-
-        # Validate and filter mates to remove invalid PathKeys
-        valid_mates = self._validate_mates(all_mates)
+        # remap the mates to switch out any parts that belong to rigid subassemblies
+        remapped_mates = self._remap_mates(self.cad)
+        for (parent_key, child_key), mate in remapped_mates.items():
+            print(parent_key, child_key, mate.name)
 
         # Get all parts involved in valid mates
-        involved_parts = self._get_parts_involved_in_mates(valid_mates)
+        involved_parts = self._get_parts_involved_in_mates(remapped_mates)
         LOGGER.info(f"Parts involved in mates: {len(involved_parts)}")
 
         # Find user-defined root if requested
@@ -133,7 +133,7 @@ class KinematicGraph:
         self._add_nodes(involved_parts, user_defined_root)
 
         # Add edges from mates
-        self._add_edges(valid_mates)
+        self._add_edges(remapped_mates)
 
         # Check if graph is empty
         if len(self.graph.nodes) == 0:
@@ -166,50 +166,50 @@ class KinematicGraph:
             f"{len(self.graph.edges)} edges, root={self.root_node}"
         )
 
-    def _validate_mates(
-        self, mates: dict[tuple[PathKey, PathKey], MateFeatureData]
-    ) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
+    def _remap_mates(self, cad: CAD) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
         """
-        Validate mates and filter out invalid PathKeys.
-
-        A mate is valid if both PathKeys correspond to either:
-        - Parts in the parts registry
-        - Part instances in the instances registry
-        - Rigid assembly instances in the instances registry
+        Remap mates to replace parts that belong to rigid subassemblies with the rigid assembly part
 
         Args:
-            mates: Dictionary of all mates to validate
+            cad (CAD): The CAD assembly generated from Onshape data
 
         Returns:
-            Dictionary of valid mates only
+            dict[tuple[PathKey, PathKey], MateFeatureData]: A mapping of original mate paths
+            (w/o assembly keys) to their remapped counterparts
         """
-        valid_mates: dict[tuple[PathKey, PathKey], MateFeatureData] = {}
-        invalid_count = 0
 
-        for (parent_key, child_key), mate_data in mates.items():
-            # Check if both keys are valid
-            parent_valid = self._is_valid_mate_target(parent_key)
-            child_valid = self._is_valid_mate_target(child_key)
+        def remap_key(key: PathKey) -> PathKey:
+            """
+            Return the rigid assembly root key if the part is inside a rigid assembly,
+            otherwise return the original key.
+            """
+            # TODO: Currently we only remap the keys of the mates
+            # the MatedCS should also be modified to include the rigid assembly TF
+            part = cad.parts.get(key)
+            if part is None:
+                LOGGER.warning("Part key %s referenced by a mate but not found in cad.parts", key)
+                return key
+            return part.rigidAssemblyKey or key
 
-            if parent_valid and child_valid:
-                valid_mates[(parent_key, child_key)] = mate_data
-            else:
-                invalid_keys = []
-                if not parent_valid:
-                    invalid_keys.append(f"parent={parent_key} (not in parts)")
-                if not child_valid:
-                    invalid_keys.append(f"child={child_key} (not in parts)")
-                LOGGER.debug(f"Filtering mate '{mate_data.name}': {', '.join(invalid_keys)}")
-                invalid_count += 1
+        remapped_mates: dict[tuple[PathKey, PathKey], MateFeatureData] = {}
+        # CAD's mates are already filtered and validated, they only include mates that
+        # need to be processed for robot generation
+        for (_, parent_key, child_key), mate in cad.mates.items():
+            remapped_parent_key = remap_key(parent_key)
+            remapped_child_key = remap_key(child_key)
+            remapped_mate_key = (remapped_parent_key, remapped_child_key)
+            if remapped_mate_key in remapped_mates:
+                LOGGER.warning(
+                    "Duplicate mate detected after remapping: %s -> %s. "
+                    "This can happen if multiple parts in a rigid assembly are mated to the same part. "
+                    "Only the first mate will be kept.",
+                    remapped_parent_key,
+                    remapped_child_key,
+                )
+                continue
 
-        if invalid_count > 0:
-            LOGGER.warning(
-                f"Filtered out {invalid_count} mates with invalid PathKeys "
-                f"({len(valid_mates)}/{len(mates)} mates remain)"
-            )
-
-        LOGGER.debug(f"Valid mates: {len(valid_mates)}")
-        return valid_mates
+            remapped_mates[remapped_mate_key] = copy.deepcopy(mate)
+        return remapped_mates
 
     def _align_mated_entities_with_edges(self) -> None:
         """
@@ -281,42 +281,6 @@ class KinematicGraph:
                 parent_idx,
                 child_idx,
             )
-
-    def _is_valid_mate_target(self, key: PathKey) -> bool:
-        """
-        Check if a PathKey is a valid target for a mate relationship.
-
-        Valid targets exist in the parts registry. With eager parts population,
-        this includes all PartInstances and rigid AssemblyInstances.
-
-        However, mates from flexible subassemblies may reference parts that
-        aren't in the root parts registry yet (they're in fetched_subassemblies).
-        We still validate primarily against parts registry for consistency.
-
-        Args:
-            key: PathKey to validate
-
-        Returns:
-            True if key is valid mate target (exists in parts registry)
-        """
-        # Primary check: parts registry (all PartInstances + rigid assemblies)
-        return key in self.cad.parts
-
-    def _collect_all_mates(self) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
-        """
-        Collect all mates from CAD (already flattened with absolute PathKeys).
-
-        The CAD class now stores all mates flattened from root + subassemblies.
-        We just need to get them without assembly provenance for graph construction.
-
-        Returns:
-            Dictionary mapping (parent_key, child_key) to MateFeatureData with absolute PathKeys
-        """
-        # Get all mates flattened (removes assembly provenance from keys)
-        all_mates = self.cad.get_all_mates_flattened()
-
-        LOGGER.debug(f"Collected {len(all_mates)} total mates from CAD")
-        return all_mates
 
     def _get_parts_involved_in_mates(self, mates: dict[tuple[PathKey, PathKey], MateFeatureData]) -> set[PathKey]:
         """
@@ -424,19 +388,6 @@ class KinematicGraph:
 
         LOGGER.debug(f"Added {edges_added} edges to graph")
 
-    def plot(self, file_name: Optional[str] = None) -> None:
-        """
-        Visualize the kinematic graph.
-
-        Args:
-            file_name: Optional filename to save visualization. If None, displays interactively.
-
-        Examples:
-            >>> tree.plot()  # Display interactively
-            >>> tree.plot("kinematic_tree.png")  # Save to file
-        """
-        plot_graph(self.graph, file_name)
-
     def show(self, file_name: Optional[str] = None) -> None:
         """
         Visualize the kinematic graph with part names as labels instead of PathKey IDs.
@@ -461,7 +412,7 @@ class KinematicGraph:
         # Plot the labeled graph
         plot_graph(labeled_graph, file_name)
 
-    def get_node_metadata(self, node_key: PathKey) -> dict[str, Any]:
+    def get_node_data(self, node_key: PathKey) -> dict[str, Any]:
         """
         Get metadata for a specific node.
 
@@ -472,7 +423,7 @@ class KinematicGraph:
             Dictionary of node attributes
 
         Examples:
-            >>> metadata = tree.get_node_metadata(some_part_key)
+            >>> metadata = tree.get_node_data(some_part_key)
             >>> print(metadata['name'])
         """
         return dict(self.graph.nodes[node_key])

@@ -1121,8 +1121,8 @@ def get_robot_from_kinematic_graph(
             LOGGER.warning(f"Instance not found for {parent_key} or {child_key}. Skipping.")
             continue
 
-        parent_name = parent_key.hierarchical_name(separator="-")
-        child_name = child_key.hierarchical_name(separator="-")
+        parent_name = "_".join(str(parent_key).split(" > "))
+        child_name = "_".join(str(child_key).split(" > "))
 
         # Check for mate relations (mimic joints)
         joint_mimic = None
