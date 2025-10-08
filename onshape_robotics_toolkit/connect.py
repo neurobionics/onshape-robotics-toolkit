@@ -787,7 +787,7 @@ class Client:
             url = generate_url(
                 base_url=self._url,
                 did=did,
-                wtype="w",
+                wtype=wtype,
                 wid=wid,
                 eid=eid,
             )

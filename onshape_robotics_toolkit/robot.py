@@ -622,7 +622,7 @@ class Robot:
                             element.set("pos", " ".join(format_number(float(v)) for v in new_pos))
                             element.set("euler", " ".join(format_number(float(v)) for v in new_euler))
 
-                        parent_body.append(element)
+                        parent_body.append(element)  # type: ignore[arg-type]
 
                     root_body.remove(child_body)
                     body_elements[child_name] = parent_body
@@ -648,7 +648,7 @@ class Robot:
             new_inertial.set("euler", " ".join(format_number(v) for v in combined_euler))
             new_inertial.set("diaginertia", " ".join(format_number(v) for v in combined_diaginertia))
             if parent_body is not None:
-                parent_body.append(new_inertial)
+                parent_body.append(new_inertial)  # type: ignore[arg-type]
 
         # Then process revolute joints
         joint_data_raw2: Optional[BaseJoint]
@@ -916,16 +916,6 @@ class Robot:
             >>> robot = Robot.from_graph(cad, graph, client, "my_robot")
             >>> robot.save("robot.urdf", download_assets=True)
         """
-        from onshape_robotics_toolkit.parse import fetch_mass_properties_for_kinematic_parts
-
-        # Fetch mass properties for parts in kinematic chain
-        fetch_mass_properties_for_kinematic_parts(
-            cad=cad,
-            kinematic_graph=kinematic_graph,
-            client=client,
-            include_rigid_subassembly_parts=include_rigid_subassembly_parts,
-        )
-
         # Generate robot structure from kinematic graph
         robot = get_robot_from_kinematic_graph(
             cad=cad,
@@ -1087,7 +1077,7 @@ def get_robot_from_kinematic_graph(
     root_instance = cad.instances.get(root_key)
     if root_instance is None:
         raise ValueError(f"Root instance {root_key} not found")
-    root_name = root_key.hierarchical_name(separator="-")
+    root_name = str(root_key)
 
     # Create root link
     root_link, stl_to_root_tf, root_asset = get_robot_link(

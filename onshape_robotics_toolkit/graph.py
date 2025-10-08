@@ -226,7 +226,7 @@ class KinematicGraph:
         """
 
         for parent_key, child_key, data in self.graph.edges(data=True):
-            mate = data.get("mate_data")
+            mate = data["mate_data"]
             if not isinstance(mate, MateFeatureData):
                 continue
 
@@ -300,11 +300,7 @@ class KinematicGraph:
             True if key is valid mate target (exists in parts registry)
         """
         # Primary check: parts registry (all PartInstances + rigid assemblies)
-        if key in self.cad.parts:
-            return True
-
-        # Fallback: check fetched subassemblies for nested parts
-        return any(key in fetched_cad.parts for fetched_cad in self.cad.fetched_subassemblies.values())
+        return key in self.cad.parts
 
     def _collect_all_mates(self) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
         """
@@ -318,11 +314,6 @@ class KinematicGraph:
         """
         # Get all mates flattened (removes assembly provenance from keys)
         all_mates = self.cad.get_all_mates_flattened()
-
-        # Add mates from fetched flexible subassemblies (if any)
-        for fetched_cad in self.cad.fetched_subassemblies.values():
-            fetched_mates = fetched_cad.get_all_mates_flattened()
-            all_mates.update(fetched_mates)
 
         LOGGER.debug(f"Collected {len(all_mates)} total mates from CAD")
         return all_mates

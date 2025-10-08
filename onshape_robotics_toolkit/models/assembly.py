@@ -1261,7 +1261,7 @@ class SubAssembly(IDBase):
 
     isRigid: bool = Field(False, description="Indicates if the sub-assembly is a rigid assembly")
 
-    RootOccurrences: Union[list[Occurrence], None] = Field(
+    RootOccurrences: Union[dict[Any, Occurrence], None] = Field(
         None, description="A list of occurrences from the subassembly frame, this is retrieved via a separate API call"
     )
 

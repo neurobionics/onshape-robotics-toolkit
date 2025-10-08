@@ -8,10 +8,10 @@ import asyncio
 import uuid
 from collections import deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, Union
 
 if TYPE_CHECKING:
-    from onshape_robotics_toolkit.graph import KinematicGraph
+    pass
 
 import numpy as np
 
@@ -19,6 +19,7 @@ from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.models.assembly import (
     Assembly,
+    AssemblyFeature,
     AssemblyFeatureType,
     AssemblyInstance,
     MatedCS,
@@ -27,10 +28,10 @@ from onshape_robotics_toolkit.models.assembly import (
     Part,
     PartInstance,
     Pattern,
+    RootAssembly,
     SubAssembly,
 )
 from onshape_robotics_toolkit.models.document import WorkspaceType
-from onshape_robotics_toolkit.models.mass import MassProperties
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
 SUBASSEMBLY_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
@@ -127,26 +128,9 @@ class PathKey:
         return self._path[0] if self._path else None
 
     @property
-    def root_name(self) -> Optional[str]:
-        """Get the root name (first element in name path)."""
-        return self._name_path[0] if self._name_path else None
-
-    @property
     def depth(self) -> int:
         """Get depth in hierarchy (0 = root level)."""
         return len(self._path) - 1
-
-    def hierarchical_name(self, separator: str = "-") -> str:
-        """
-        Get hierarchical name representation.
-
-        Args:
-            separator: String to join names (default "-")
-
-        Returns:
-            Hierarchical name like "assembly_1-subassembly_2-part_3"
-        """
-        return separator.join(self._name_path)
 
     def __repr__(self) -> str:
         return f"PathKey({self._path})"
@@ -219,8 +203,6 @@ class PathKey:
         """
         # Single instance ID -> single-element tuple, otherwise convert list to tuple
         id_tuple = (path,) if isinstance(path, str) else tuple(path)
-
-        # Build name tuple from IDs
         name_tuple = tuple(id_to_name.get(instance_id, instance_id) for instance_id in id_tuple)
 
         return cls(id_tuple, name_tuple)
@@ -253,7 +235,7 @@ class CAD:
         workspace_id: Onshape workspace ID
         document_microversion: Onshape document microversion
         max_depth: Maximum depth for flexible assemblies (0 = all rigid)
-        keys: Canonical PathKey index by ID (ID path tuple → PathKey)
+        keys_by_id: Canonical PathKey index by ID (ID path tuple → PathKey)
         keys_by_name: Reverse PathKey index by name (name path tuple → PathKey)
         instances: All instances (parts AND assemblies) from root + subassemblies
         occurrences: All occurrence transforms from root + subassemblies
@@ -272,11 +254,11 @@ class CAD:
     wtype: str
     workspace_id: str
     document_microversion: str
-    name: str
+    name: Optional[str]
     max_depth: int
 
     # Core data (flat dicts with absolute PathKeys)
-    keys: dict[tuple[str, ...], PathKey]  # ID path tuple -> PathKey (canonical index)
+    keys_by_id: dict[tuple[str, ...], PathKey]  # ID path tuple -> PathKey (canonical index)
     keys_by_name: dict[tuple[str, ...], PathKey]  # Name path tuple -> PathKey (reverse index)
     instances: dict[PathKey, Union[PartInstance, AssemblyInstance]]
     occurrences: dict[PathKey, Occurrence]
@@ -285,8 +267,6 @@ class CAD:
     patterns: dict[str, Pattern]
     parts: dict[PathKey, Part]  # Populated eagerly from assembly.parts
 
-    rigid_part_transforms: dict[PathKey, MatedCS]  # Cache of rigid part transforms
-
     def __init__(
         self,
         document_id: str,
@@ -294,7 +274,7 @@ class CAD:
         wtype: str,
         workspace_id: str,
         document_microversion: str,
-        name: str,
+        name: Optional[str] = "cad",
         max_depth: int = 0,
     ):
         """
@@ -303,8 +283,10 @@ class CAD:
         Args:
             document_id: Onshape document ID
             element_id: Onshape element (assembly) ID
+            wtype: Workspace type of the document
             workspace_id: Onshape workspace ID
             document_microversion: Onshape document microversion
+            name: name of the Onshape document (not element)
             max_depth: Maximum depth for flexible assemblies
         """
         self.document_id = document_id
@@ -324,12 +306,6 @@ class CAD:
         self.patterns = {}
         self.parts = {}
         self.subassemblies = {}
-
-        self.rigid_part_transforms = {}
-
-    # ============================================================================
-    # HELPER METHODS
-    # ============================================================================
 
     def get_path_key(self, path: Union[str, list[str], tuple[str, ...]]) -> Optional[PathKey]:
         """
@@ -456,48 +432,6 @@ class CAD:
 
         return rigid_root
 
-    def compute_relative_mate_transform(
-        self, part_key: PathKey, rigid_root_key: PathKey, part_to_mate_tf: np.ndarray
-    ) -> np.ndarray:
-        """
-        Compute mate transform relative to rigid assembly root.
-
-        Given a part buried inside a rigid assembly and its part_to_mate transform,
-        this computes the equivalent transform from the rigid assembly root to the mate.
-
-        Math:
-            T_rigid_mate = inv(T_world_rigid) @ T_world_part @ T_part_mate
-
-        Args:
-            part_key: PathKey of the buried part
-            rigid_root_key: PathKey of the rigid assembly root
-            part_to_mate_tf: Original part_to_mate transform (4x4 matrix)
-
-        Returns:
-            4x4 transform matrix from rigid root to mate coordinate system
-
-        Examples:
-            >>> rigid_key = PathKey(("asm1", "sub1"), ("Assembly_1", "Sub_1"))
-            >>> part_key = PathKey(("asm1", "sub1", "part1"), ("Assembly_1", "Sub_1", "Part_1"))
-            >>> original_tf = mate.matedEntities[PARENT].matedCS.part_to_mate_tf
-            >>> new_tf = cad.compute_relative_mate_transform(part_key, rigid_key, original_tf)
-        """
-        # Get global transforms
-        rigid_tf = self.get_transform(rigid_root_key)
-        part_tf = self.get_transform(part_key)
-
-        if rigid_tf is None or part_tf is None:
-            raise ValueError(f"Missing transforms: rigid_tf={rigid_tf is not None}, part_tf={part_tf is not None}")
-
-        # Compute relative transform: T_rigid_mate = inv(T_world_rigid) @ T_world_part @ T_part_mate
-        rigid_to_mate_tf: np.ndarray = np.linalg.inv(rigid_tf) @ part_tf @ part_to_mate_tf
-
-        return rigid_to_mate_tf
-
-    # ============================================================================
-    # MATE QUERY METHODS
-    # ============================================================================
-
     def get_mates_from_root(self) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
         """
         Get only root-level mates (no assembly provenance).
@@ -547,15 +481,12 @@ class CAD:
             MateFeatureData if found, None otherwise
         """
         if assembly is not None:
-            # Specific assembly lookup
             return self.mates.get((assembly, parent, child))
         else:
-            # Search across all assemblies (try root first)
             mate = self.mates.get((None, parent, child))
             if mate:
                 return mate
 
-            # Search subassemblies
             for (_asm, p, c), mate in self.mates.items():
                 if p == parent and c == child:
                     return mate
@@ -577,11 +508,8 @@ class CAD:
                 return asm  # Returns None for root, PathKey for subassembly
         return None
 
-    def __len__(self) -> int:
-        """Total number of instances."""
-        return len(self.instances)
-
     def __repr__(self) -> str:
+        # TODO: would be nice to have the CAD tree print here
         part_count = sum(1 for inst in self.instances.values() if isinstance(inst, PartInstance))
         asm_count = sum(1 for inst in self.instances.values() if isinstance(inst, AssemblyInstance))
         return (
@@ -594,10 +522,6 @@ class CAD:
             f"patterns={len(self.patterns)}, "
             f"parts={len(self.parts)})"
         )
-
-    # ============================================================================
-    # CONSTRUCTION METHODS
-    # ============================================================================
 
     @classmethod
     def from_assembly(
@@ -629,17 +553,15 @@ class CAD:
             max_depth=max_depth,
         )
 
-        # Build id_to_name mapping FIRST (needed for PathKey creation)
+        # Build id_to_name mapping (needed for PathKey creation)
         id_to_name = cls._build_id_to_name_map(assembly)
 
-        # Build ALL PathKeys upfront from occurrences (single source of truth)
-        # Store them on the CAD instance for O(1) lookup throughout lifecycle
+        # Build PathKeys from occurrences (single source of truth)
         cad.keys_by_id, cad.keys_by_name = cls._build_path_keys_from_occurrences(
             assembly.rootAssembly.occurrences, id_to_name
         )
 
         # Populate all data using the pre-built PathKeys
-        # This includes marking rigid assemblies BEFORE populating mates
         cad._populate_from_assembly(assembly)
 
         LOGGER.info(f"Created {cad}")
@@ -838,12 +760,11 @@ class CAD:
                 )
                 continue
 
-            # One JSON definition can correspond to multiple occurrences (patterned / reused)
             for pathkey in pathkeys:
                 # Mark rigidity for this occurrence if depth logic requires it.
                 if pathkey.depth >= self.max_depth:
                     subassembly.isRigid = True
-                    inst = self.instances.get(pathkey)
+                    inst = self.instances[pathkey]
                     if isinstance(inst, AssemblyInstance):
                         inst.isRigid = True
                         rigid_marked += 1
@@ -881,80 +802,6 @@ class CAD:
 
         LOGGER.debug(f"Populated {len(self.patterns)} patterns")
 
-    def _remap_mate_for_rigid_assemblies(
-        self, parent_key: PathKey, child_key: PathKey, mate_data: MateFeatureData
-    ) -> tuple[PathKey, PathKey, MateFeatureData]:
-        """
-        Remap mate if either entity is inside a rigid assembly.
-
-        If a mated entity is buried inside a rigid assembly:
-        1. Find the rigid assembly root
-        2. Update PathKey to point to rigid assembly
-        3. Update matedCS transform to be relative to rigid assembly
-        4. Update matedOccurrence to match new PathKey
-
-        Args:
-            parent_key: Original parent PathKey
-            child_key: Original child PathKey
-            mate_data: Original mate data
-
-        Returns:
-            Tuple of (new_parent_key, new_child_key, updated_mate_data)
-        """
-        # Make a copy to avoid mutating the original
-        import copy
-
-        mate_data = copy.deepcopy(mate_data)
-
-        LOGGER.debug(f"Checking mate '{mate_data.name}' for remapping: {parent_key} <-> {child_key}")
-
-        # Check parent
-        parent_rigid_root = self.get_rigid_assembly_root(parent_key)
-        if parent_rigid_root and parent_rigid_root != parent_key:
-            # Parent is inside a rigid assembly, remap it
-            LOGGER.debug(f"Remapping parent from {parent_key} to rigid root {parent_rigid_root}")
-
-            # Get original part_to_mate transform, rigid assembly to part transform, and mate's part_to_mate transform
-            og_part_tf = np.array(self.occurrences.get(parent_key).tf).reshape(4, 4)
-            og_part_to_mate_tf = np.array(mate_data.matedEntities[PARENT].matedCS.part_to_mate_tf).reshape(4, 4)
-            rigid_sub_to_part_tf = np.array(self.parts.get(parent_key).rigidAssemblyToPartTF.part_to_mate_tf).reshape(
-                4, 4
-            )
-
-            # Compute new transform relative to rigid assembly
-            new_tf = rigid_sub_to_part_tf @ og_part_tf @ og_part_to_mate_tf
-            # Update mate data with new MatedCS from transform
-            mate_data.matedEntities[PARENT].matedCS = MatedCS.from_tf(new_tf)
-            mate_data.matedEntities[PARENT].matedOccurrence = list(parent_rigid_root.path)
-
-            # Update PathKey
-            parent_key = parent_rigid_root
-
-        # Check child
-        child_rigid_root = self.get_rigid_assembly_root(child_key)
-        if child_rigid_root and child_rigid_root != child_key:
-            # Child is inside a rigid assembly, remap it
-            LOGGER.debug(f"Remapping child from {child_key} to rigid root {child_rigid_root}")
-
-            # Get original part_to_mate transform, rigid assembly to part transform, and mate's part_to_mate transform
-            og_part_tf = np.array(self.occurrences.get(child_key).tf).reshape(4, 4)
-            og_part_to_mate_tf = np.array(mate_data.matedEntities[CHILD].matedCS.part_to_mate_tf).reshape(4, 4)
-            rigid_sub_to_part_tf = np.array(self.parts.get(child_key).rigidAssemblyToPartTF.part_to_mate_tf).reshape(
-                4, 4
-            )
-
-            # Compute new transform relative to rigid assembly
-            new_tf = rigid_sub_to_part_tf @ og_part_tf @ og_part_to_mate_tf
-
-            # Update mate data with new MatedCS from transform
-            mate_data.matedEntities[CHILD].matedCS = MatedCS.from_tf(new_tf)
-            mate_data.matedEntities[CHILD].matedOccurrence = list(child_rigid_root.path)
-
-            # Update PathKey
-            child_key = child_rigid_root
-
-        return parent_key, child_key, mate_data
-
     def _populate_mates(self, assembly: Assembly) -> None:
         """
         Populate mates from root and all subassemblies with assembly provenance.
@@ -969,97 +816,69 @@ class CAD:
         Args:
             assembly: Assembly from Onshape API
         """
-        # Process root assembly mates
+
+        def _process_feature(
+            feature: AssemblyFeature,
+            assembly_key: Optional[PathKey],
+            path_prefix: Optional[tuple[str, ...]],
+        ) -> None:
+            """Internal helper to process a single mate feature.
+
+            Args:
+                feature: Feature object which may contain MateFeatureData
+                assembly_key: None for root, or PathKey of subassembly provenance
+                path_prefix: Tuple prefix to prepend for relative subassembly paths
+            """
+            if feature.featureType != AssemblyFeatureType.MATE or not isinstance(feature.featureData, MateFeatureData):
+                # TODO: add support for mate groups and connectors
+                return
+
+            mate_data: MateFeatureData = feature.featureData
+
+            # TODO: Onshape mate feature data always has two entities (parent/child). If origin mates ever
+            # appear differently, this is the place to update handling.
+            try:
+                parent_occ = mate_data.matedEntities[PARENT].matedOccurrence
+                child_occ = mate_data.matedEntities[CHILD].matedOccurrence
+            except Exception:
+                LOGGER.warning(f"Malformed mate feature {mate_data.name}")
+                return
+
+            parent_path = tuple(parent_occ)
+            child_path = tuple(child_occ)
+
+            if path_prefix:
+                parent_path = path_prefix + parent_path
+                child_path = path_prefix + child_path
+
+            parent_key = self.keys_by_id.get(parent_path)
+            child_key = self.keys_by_id.get(child_path)
+
+            if parent_key and child_key:
+                self.mates[(assembly_key, parent_key, child_key)] = mate_data
+            else:
+                scope = "root" if assembly_key is None else f"subassembly {assembly_key}"
+                LOGGER.warning(
+                    "Missing PathKey for %s mate: %s (parent_found=%s, child_found=%s)",
+                    scope,
+                    mate_data.name,
+                    bool(parent_key),
+                    bool(child_key),
+                )
+
+        # Process root assembly features (absolute paths)
         for feature in assembly.rootAssembly.features:
-            if feature.featureType == AssemblyFeatureType.MATE and isinstance(feature.featureData, MateFeatureData):
-                mate_data = feature.featureData
-                if len(mate_data.matedEntities) >= 2:
-                    parent_path = tuple(mate_data.matedEntities[PARENT].matedOccurrence)
-                    child_path = tuple(mate_data.matedEntities[CHILD].matedOccurrence)
+            _process_feature(feature, None, None)
 
-                    parent_key = self.keys_by_id.get(parent_path)
-                    child_key = self.keys_by_id.get(child_path)
-
-                    if parent_key and child_key:
-                        # Remap if inside rigid assembly
-                        parent_key, child_key, mate_data = self._remap_mate_for_rigid_assemblies(
-                            parent_key, child_key, mate_data
-                        )
-
-                        # Filter out internal mates (both entities in same rigid assembly)
-                        if parent_key == child_key:
-                            LOGGER.debug(
-                                f"Filtering internal mate '{mate_data.name}' within rigid assembly {parent_key}"
-                            )
-                            continue
-
-                        # Store with None as assembly key (root)
-                        self.mates[(None, parent_key, child_key)] = mate_data
-                    else:
-                        LOGGER.warning("Missing PathKey for root mate")
-
-        # Process subassembly mates
-        for subassembly in assembly.subAssemblies:
-            # Find the AssemblyInstance(s) that correspond to this subassembly
-            # Look in the flat instances registry (includes all nested instances)
-            matching_keys = [
-                key
-                for key, inst in self.instances.items()
-                if isinstance(inst, AssemblyInstance) and inst.uid == subassembly.uid
-            ]
-
-            if not matching_keys:
-                LOGGER.warning(f"Could not find instance for subassembly {subassembly.uid}")
+        # Process subassembly features (relative paths)
+        for sub_key, subassembly in self.subassemblies.items():
+            if subassembly.isRigid:
                 continue
 
-            # Process mates for each instance of this subassembly
-            for sub_key in matching_keys:
-                # Skip mates from rigid subassemblies (depth > max_depth)
-                # Rigid subassemblies are treated as single bodies, so their internal mates are not relevant
-                if self.max_depth == 0 or sub_key.depth > self.max_depth:
-                    LOGGER.debug(
-                        f"Skipping mates from rigid subassembly {sub_key} at depth "
-                        f"{sub_key.depth} (max_depth={self.max_depth})"
-                    )
-                    continue
+            for feature in subassembly.features:
+                _process_feature(feature=feature, assembly_key=sub_key, path_prefix=sub_key.path)
 
-                # Process mates from this subassembly
-                for feature in subassembly.features:
-                    if feature.featureType == AssemblyFeatureType.MATE and isinstance(
-                        feature.featureData, MateFeatureData
-                    ):
-                        mate_data = feature.featureData
-                        if len(mate_data.matedEntities) >= 2:
-                            # Relative paths from subassembly JSON
-                            parent_rel_path = tuple(mate_data.matedEntities[PARENT].matedOccurrence)
-                            child_rel_path = tuple(mate_data.matedEntities[CHILD].matedOccurrence)
-
-                            # Convert to absolute by prepending subassembly path
-                            parent_abs_path = sub_key.path + parent_rel_path
-                            child_abs_path = sub_key.path + child_rel_path
-
-                            parent_key = self.keys_by_id.get(parent_abs_path)
-                            child_key = self.keys_by_id.get(child_abs_path)
-
-                            if parent_key and child_key:
-                                # Remap if inside rigid assembly
-                                parent_key, child_key, mate_data = self._remap_mate_for_rigid_assemblies(
-                                    parent_key, child_key, mate_data
-                                )
-
-                                # Filter out internal mates (both entities in same rigid assembly)
-                                if parent_key == child_key:
-                                    LOGGER.debug(
-                                        f"Filtering internal mate '{mate_data.name}' within rigid assembly {parent_key}"
-                                    )
-                                    continue
-
-                                # Store with subassembly key
-                                self.mates[(sub_key, parent_key, child_key)] = mate_data
-                            else:
-                                LOGGER.warning(f"Missing PathKey for subassembly {sub_key} mate")
-
-        LOGGER.debug(f"Populated {len(self.mates)} mates")
+        LOGGER.debug(f"Populated {len(self.mates)} mates (root + flexible subassemblies)")
 
     def _populate_parts(self, assembly: Assembly) -> None:
         """
@@ -1086,15 +905,25 @@ class CAD:
                 continue
 
             for pathkey in pathkeys:
-                # TODO: find if this part is within a rigid assembly
-                # and set its rigidAssemblyWorkspaceId and rigidAssemblyToPartTF
-                # For now, just store the Part as-is
                 self.parts[pathkey] = part
+                if pathkey.depth > self.max_depth:
+                    rigid_root = self.get_rigid_assembly_root(pathkey)
+                    # get the global occurrence transform of this rigid root
+                    # TODO: right now we retrieve and assign the global occurrence TF of the rigid assembly
+                    # Maybe this should be rigid assembly's local occurrence TF of the part?
+                    if not rigid_root:
+                        LOGGER.warning(f"Part {pathkey} exceeds max_depth but has no rigid assembly root")
+                        continue
+
+                    rigid_root_tf = self.occurrences[rigid_root].tf
+                    self.parts[pathkey].rigidAssemblyToPartTF = MatedCS.from_tf(tf=rigid_root_tf)
+                    self.parts[pathkey].rigidAssemblyWorkspaceId = self.workspace_id
+                    LOGGER.debug(f"Set rigidAssemblyToPartTF for {pathkey}, with rigid assembly {rigid_root}")
 
         # Create synthetic Part objects for rigid assemblies
         for key, subassembly in self.subassemblies.items():
             if subassembly.isRigid:
-                subassembly_instance = self.instances.get(key)
+                subassembly_instance = self.instances[key]
                 # Rigid assembly: create synthetic Part object
                 self.parts[key] = Part(
                     isStandardContent=False,
@@ -1114,176 +943,81 @@ class CAD:
 
         LOGGER.info(f"Populated {len(self.parts)} parts from assembly")
 
-    def _compute_rigid_part_transforms(self) -> None:
-        """
-        Cache transforms from rigid assemblies to their descendant parts.
+    async def fetch_mass_properties_for_parts(self, client: Client) -> None:
+        async def _fetch_mass_properties(key: PathKey, part: Part, client: Client) -> None:
+            try:
+                if part.isRigidAssembly:
+                    LOGGER.debug(f"Fetching mass properties for rigid assembly: {key}")
+                    part.MassProperty = await asyncio.to_thread(
+                        client.get_assembly_mass_properties,
+                        did=part.documentId,
+                        wtype=WorkspaceType.W.value,
+                        wid=part.rigidAssemblyWorkspaceId,  # type: ignore[arg-type]
+                        eid=part.elementId,
+                    )
+                else:
+                    LOGGER.debug(f"Fetching mass properties for part: {key}")
+                    part.MassProperty = await asyncio.to_thread(
+                        client.get_mass_property,
+                        did=part.documentId,
+                        wtype=WorkspaceType.M.value,
+                        wid=part.documentMicroversion if part.documentMicroversion else self.document_microversion,
+                        eid=part.elementId,
+                        partID=part.partId,
+                    )
+            except Exception as e:
+                LOGGER.error(f"Failed to fetch mass properties for part {key}: {e}")
 
-        For each part instance that lives inside a rigid assembly, compute the transform
-        that maps from the rigid assembly frame to the part frame. This mapping is stored
-        for later use when populating Part models.
-        """
-        computed = 0
-
-        for key, instance in self.instances.items():
-            if not isinstance(instance, PartInstance):
+        tasks = []
+        for key, part in self.parts.items():
+            if part.MassProperty is not None:
+                LOGGER.debug(f"Part {key} already has mass properties, skipping")
                 continue
 
-            rigid_root = self.get_rigid_assembly_root(key)
-            if not rigid_root:
+            if part.rigidAssemblyToPartTF is not None:
+                # this part belongs to a rigid subassembly, skip fetching mass properties
                 continue
 
-            rigid_tf = self.get_transform(rigid_root)
-            part_tf = self.get_transform(key)
+            tasks.append(_fetch_mass_properties(key, part, client))
 
-            if rigid_tf is None or part_tf is None:
-                LOGGER.warning(
-                    "Cannot compute rigid assembly transform for part %s: rigid_tf=%s, part_tf=%s",
-                    key,
-                    rigid_tf is not None,
-                    part_tf is not None,
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def fetch_occurrences_for_subassemblies(self, client: Client) -> None:
+        async def _fetch_rootassembly(key: PathKey, subassembly: SubAssembly, client: Client) -> None:
+            try:
+                LOGGER.debug(f"Fetching root assembly for subassembly: {key}")
+                _subassembly_data: RootAssembly = await asyncio.to_thread(
+                    client.get_root_assembly,
+                    did=subassembly.documentId,
+                    wtype=WorkspaceType.M.value,
+                    wid=subassembly.documentMicroversion,
+                    eid=subassembly.elementId,
+                    with_mass_properties=True,
+                    log_response=False,
                 )
+                _subassembly_occurrences = _subassembly_data.occurrences
+                for occurrence in _subassembly_occurrences:
+                    # NOTE: add sub-assembly key as prefix to get absolute path
+                    path_tuple = tuple(key.path) + tuple(occurrence.path)
+                    occ_key = self.keys_by_id.get(path_tuple)
+                    if occ_key:
+                        if subassembly.RootOccurrences is None:
+                            subassembly.RootOccurrences = {}
+                        subassembly.RootOccurrences[occ_key] = occurrence
+                    else:
+                        LOGGER.warning(f"No PathKey for subassembly occurrence {occurrence.path} in {key}")
+
+            except Exception as e:
+                LOGGER.error(f"Failed to fetch root assembly for subassembly {key}: {e}")
+
+        tasks = []
+        for key, subassembly in self.subassemblies.items():
+            if subassembly.RootOccurrences is not None:
+                LOGGER.debug(f"Subassembly {key} already has RootOccurrences, skipping")
                 continue
 
-            # Transform taking the rigid assembly frame to the part frame
-            rigid_to_part_tf = np.linalg.inv(rigid_tf) @ part_tf
-            self.rigid_part_transforms[key] = MatedCS.from_tf(rigid_to_part_tf)
+            tasks.append(_fetch_rootassembly(key, subassembly, client))
 
-            computed += 1
-
-        if computed:
-            LOGGER.info("Computed rigid assembly transforms for %d parts", computed)
-
-    def _attach_rigid_transform_to_part(self, key: PathKey) -> None:
-        """Apply cached rigid assembly transforms to the Part model."""
-        part_model = self.parts.get(key)
-        if not part_model:
-            return
-
-        rigid_to_part_tf = self.rigid_part_transforms.get(key)
-
-        if rigid_to_part_tf is not None:
-            part_model.rigidAssemblyToPartTF = rigid_to_part_tf
-        elif key.depth > self.max_depth:
-            LOGGER.warning(f"No rigid assembly transform found for part {key}")
-            exit(1)
-
-
-# ============================================================================
-# HELPER FUNCTIONS FOR PathKey-based Robot Construction
-# ============================================================================
-
-
-def fetch_mass_properties_for_kinematic_parts(
-    cad: CAD,
-    kinematic_graph: "KinematicGraph",
-    client: Client,
-    include_rigid_subassembly_parts: bool = False,
-) -> None:
-    """
-    Fetch mass properties for parts involved in the kinematic graph.
-
-    This function populates the MassProperty field for Part objects that are
-    nodes in the kinematic graph. It uses async batch fetching for efficiency.
-
-    Args:
-        cad: CAD document with parts registry
-        kinematic_graph: Kinematic graph containing parts that need mass properties
-        client: Onshape client for API requests
-        include_rigid_subassembly_parts: Whether to include rigid subassembly parts
-    """
-
-    # Get list of PathKeys that need mass properties (graph nodes)
-    part_keys_needing_mass = list(kinematic_graph.graph.nodes)
-
-    LOGGER.info(f"Fetching mass properties for {len(part_keys_needing_mass)} parts in kinematic chain")
-
-    # Batch fetch mass properties
-    asyncio.run(
-        _fetch_mass_properties_for_pathkeys_async(
-            cad=cad,
-            part_keys=part_keys_needing_mass,
-            client=client,
-            include_rigid_subassembly_parts=include_rigid_subassembly_parts,
-        )
-    )
-
-
-async def _fetch_mass_properties_for_pathkeys_async(
-    cad: CAD,
-    part_keys: list[PathKey],
-    client: Client,
-    include_rigid_subassembly_parts: bool,
-) -> None:
-    """
-    Async helper to fetch mass properties for specific PathKeys.
-
-    Args:
-        cad: CAD document with parts registry
-        part_keys: List of PathKeys for parts that need mass properties
-        client: Onshape client for API requests
-        include_rigid_subassembly_parts: Whether to include rigid subassembly parts
-    """
-    tasks = []
-
-    for key in part_keys:
-        # Get part from registry
-        part = cad.parts.get(key)
-        if part is None:
-            LOGGER.warning(f"Part {key} not found in parts registry")
-            continue
-
-        # Skip if already has mass properties
-        if part.MassProperty is not None:
-            LOGGER.debug(f"Part {key} already has mass properties, skipping")
-            continue
-
-        # Check if this is a rigid assembly
-        if part.isRigidAssembly and not include_rigid_subassembly_parts:
-            LOGGER.debug(f"Skipping rigid assembly {key} (include_rigid_subassembly_parts=False)")
-            continue
-
-        # Create async task to fetch mass property
-        LOGGER.debug(f"Fetching mass properties for {key}: {part.partId}")
-        task = asyncio.to_thread(
-            client.get_mass_property,
-            did=part.documentId,
-            wtype=WorkspaceType.M.value,
-            wid=part.documentMicroversion if part.documentMicroversion else cad.document_microversion,
-            eid=part.elementId,
-            partID=part.partId,
-        )
-        tasks.append((key, task))
-
-    # Execute all tasks concurrently
-    if tasks:
-        LOGGER.info(f"Fetching mass properties for {len(tasks)} parts concurrently...")
-        results = await asyncio.gather(*[task for _, task in tasks], return_exceptions=True)
-
-        # Update parts with fetched mass properties
-        for (key, _), result in zip(tasks, results):
-            if isinstance(result, Exception):
-                LOGGER.error(f"Failed to fetch mass properties for {key}: {result}")
-                continue
-
-            # Update the part in the registry
-            part = cad.parts[key]
-            if hasattr(result, "mass"):  # Verify it's a MassProperties object
-                part.MassProperty = cast(MassProperties, result)
-                LOGGER.debug(f"Updated mass properties for {key}")
-            else:
-                LOGGER.error(f"Invalid mass properties result for {key}: {result}")
-
-    LOGGER.info("Mass properties fetching complete")
-
-
-async def _fetch_rigid_subassemblies_async(cad: CAD, client: Client, assembly: Assembly):
-    """
-    Fetch and populate all subassembly occurrences
-
-    Args:
-        cad (CAD): _description_
-        client (Client): _description_
-    """
-    _subassemblies = {}
-
-    # subassemblies can only be found by comparing UID with instances??
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
