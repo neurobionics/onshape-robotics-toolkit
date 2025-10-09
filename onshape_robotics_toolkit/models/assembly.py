@@ -422,6 +422,9 @@ class Part(IDBase):
     rigidAssemblyWorkspaceId: Union[str, None] = Field(
         None, description="The workspace ID of the rigid assembly, if it is a sub-assembly."
     )
+    worldToPartTF: Union["MatedCS", None] = Field(
+        None, description="The transformation matrix representing the part wrt world coordinates"
+    )
 
     @property
     def uid(self) -> str:
@@ -641,7 +644,7 @@ class MatedCS(BaseModel):
     zAxis: list[float] = Field(..., description="The z-axis vector of the coordinate system.")
     origin: list[float] = Field(..., description="The origin point of the coordinate system.")
 
-    part_tf: Union[np.ndarray, None] = Field(
+    tf: Union[np.ndarray, None] = Field(
         None, description="The 4x4 transformation matrix from the part coordinate system to the mate coordinate system."
     )
 
@@ -665,15 +668,15 @@ class MatedCS(BaseModel):
         return v
 
     @property
-    def part_to_mate_tf(self) -> np.ndarray:
+    def to_tf(self) -> np.ndarray:
         """
         Generates a transformation matrix from the part coordinate system to the mate coordinate system.
 
         Returns:
             np.ndarray: The 4x4 transformation matrix.
         """
-        if self.part_tf is not None:
-            return self.part_tf
+        if self.tf is not None:
+            return self.tf
 
         rotation_matrix = np.array([self.xAxis, self.yAxis, self.zAxis]).T
         translation_vector = np.array(self.origin)
@@ -700,7 +703,7 @@ class MatedCS(BaseModel):
             yAxis=tf_array[:3, 1].flatten().tolist(),
             zAxis=tf_array[:3, 2].flatten().tolist(),
             origin=tf_array[:3, 3].flatten().tolist(),
-            part_tf=tf_array,
+            tf=tf_array,
         )
 
 
@@ -748,10 +751,6 @@ class MatedEntity(BaseModel):
 
     matedOccurrence: list[str] = Field(..., description="A list of identifiers for the occurrences that are mated.")
     matedCS: MatedCS = Field(..., description="The coordinate system used for mating the parts.")
-
-    parentCS: Union[MatedCS, None] = Field(
-        None, description="The 4x4 transformation matrix for the mate feature, used for custom transformations."
-    )
 
 
 class MateRelationMate(BaseModel):
@@ -1428,7 +1427,7 @@ if __name__ == "__main__":
         yAxis=[4.0, 5.0, 6.0],
         zAxis=[7.0, 8.0, 9.0],
         origin=[10.0, 11.0, 12.0],
-        part_tf=None,
+        tf=None,
     )
 
     print(mated_cs.xAxis, mated_cs.yAxis, mated_cs.zAxis, mated_cs.origin)

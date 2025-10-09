@@ -917,6 +917,7 @@ class CAD:
 
             for pathkey in pathkeys:
                 self.parts[pathkey] = copy.deepcopy(part)  # Avoid mutating original data
+                self.parts[pathkey].worldToPartTF = MatedCS.from_tf(self.occurrences[pathkey].tf)
                 if pathkey.depth > self.max_depth:
                     rigid_root = self.get_rigid_assembly_root(pathkey)
                     # get the global occurrence transform of this rigid root
@@ -926,9 +927,10 @@ class CAD:
                         LOGGER.warning(f"Part {pathkey} exceeds max_depth but has no rigid assembly root")
                         continue
 
-                    rigid_root_tf = self.occurrences[rigid_root].tf
+                    world_to_rigid_root = self.occurrences[rigid_root].tf
+                    rigid_root_to_part = np.linalg.inv(world_to_rigid_root) @ self.occurrences[pathkey].tf
                     self.parts[pathkey].rigidAssemblyKey = rigid_root
-                    self.parts[pathkey].rigidAssemblyToPartTF = MatedCS.from_tf(tf=rigid_root_tf)
+                    self.parts[pathkey].rigidAssemblyToPartTF = MatedCS.from_tf(tf=rigid_root_to_part)
                     self.parts[pathkey].rigidAssemblyWorkspaceId = self.workspace_id
                     LOGGER.debug(f"Set rigidAssemblyToPartTF for {pathkey}, with rigid assembly {rigid_root}")
 
@@ -951,6 +953,7 @@ class CAD:
                     rigidAssemblyKey=None,  # Not applicable for rigid assembly itself
                     rigidAssemblyWorkspaceId=self.workspace_id,
                     rigidAssemblyToPartTF=None,
+                    worldToPartTF=MatedCS.from_tf(self.occurrences[key].tf),
                     MassProperty=None,  # Populated later via mass property fetch
                 )
 
