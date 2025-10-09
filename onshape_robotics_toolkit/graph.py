@@ -18,18 +18,18 @@ Functions:
 
 import copy
 import random
-from typing import Optional, Union
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import networkx as nx
 
 from onshape_robotics_toolkit.log import LOGGER
-from onshape_robotics_toolkit.models.assembly import MateFeatureData, Part
+from onshape_robotics_toolkit.models.assembly import MateFeatureData
 from onshape_robotics_toolkit.parse import CAD, CHILD, PARENT, PathKey
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
 
-def convert_to_digraph(graph: nx.Graph, user_defined_root: PathKey = None) -> tuple[nx.DiGraph, PathKey]:
+def convert_to_digraph(graph: nx.Graph, user_defined_root: Optional[PathKey] = None) -> tuple[nx.DiGraph, PathKey]:
     """
     Convert a graph to a directed graph and calculate the root node using closeness centrality.
 
@@ -76,10 +76,9 @@ def convert_to_digraph(graph: nx.Graph, user_defined_root: PathKey = None) -> tu
 
 def create_graph(
     part_keys: set[PathKey],
-    parts: dict[PathKey, Part],
     mates: dict[tuple[PathKey, PathKey], MateFeatureData],
 ) -> nx.Graph:
-    def _add_nodes(part_keys: set[PathKey], parts: dict[PathKey, Part], graph: nx.Graph) -> None:
+    def _add_nodes(part_keys: set[PathKey], graph: nx.Graph) -> None:
         """
         Add nodes to graph for parts involved in mates.
 
@@ -102,11 +101,8 @@ def create_graph(
             #     LOGGER.debug(f"Skipping suppressed part: {part_key}")
             #     skipped_hidden += 1
             #     continue
-
-            part = parts[part_key]
             graph.add_node(
                 part_key,
-                **part.model_dump(mode="python", exclude_unset=False),
             )
 
         LOGGER.debug(f"Added {len(graph.nodes)} nodes to graph")
@@ -119,12 +115,11 @@ def create_graph(
             mates: Dictionary of mate relationships
             graph: The graph to add edges to
         """
-        for (parent_key, child_key), mate in mates.items():
+        for (parent_key, child_key), _ in mates.items():
             if parent_key in graph.nodes and child_key in graph.nodes:
                 graph.add_edge(
                     parent_key,
                     child_key,
-                    mate_data=mate,
                 )
                 LOGGER.debug(f"Added edge: {parent_key} -> {child_key}")
             else:
@@ -132,8 +127,8 @@ def create_graph(
 
         LOGGER.debug(f"Added {len(graph.edges)} edges to graph")
 
-    graph = nx.Graph()
-    _add_nodes(part_keys, parts, graph)
+    graph: nx.Graph = nx.Graph()
+    _add_nodes(part_keys, graph)
     _add_edges(mates, graph)
 
     return graph
@@ -155,7 +150,7 @@ def _print_graph_tree(graph: nx.Graph) -> None:
             neighbor_info = f" -> {len(neighbors)} connections" if neighbors else ""
             LOGGER.info(f"{prefix}{node}{neighbor_info}")
         if i < len(components) - 1:
-            LOGGER.info()
+            LOGGER.info("")
 
 
 def remove_disconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
@@ -281,7 +276,6 @@ class KinematicGraph(nx.DiGraph):
 
         raw_graph = create_graph(
             part_keys=involved_parts,
-            parts=self.cad.parts,
             mates=remapped_mates,
         )
 
@@ -322,50 +316,44 @@ class KinematicGraph(nx.DiGraph):
             use_user_defined_root=use_user_defined_root,
         )
 
-        # Create BFS tree from root (this loses edge data!)
         bfs_graph = nx.bfs_tree(graph, self.root)
-
         # NOTE: add all nodes in the BFS order
         for node in bfs_graph.nodes:
             part = self.cad.parts[node]
             self.add_node(
                 node,
-                **part.model_dump(mode="python", exclude_unset=False),
+                data=part,
             )
 
-        # Restore edge data for BFS tree edges from original graph
         for u, v in list(bfs_graph.edges()):
             if graph.has_edge(u, v):
-                # the mate data has not flipped
+                # the mate parent->child order is the same as original
                 mate = mates[(u, v)]
                 self.add_edge(
                     u,
                     v,
-                    **mate.model_dump(mode="python", exclude_unset=False),
+                    data=mate,
                 )
             elif graph.has_edge(v, u):
-                # Edge is reversed and the mate data has flipped
+                # the mate parent->child order has flipped
                 mate = mates[(v, u)]
-                mate.matedEntities = mate.matedEntities.reverse()
+                mate.matedEntities.reverse()
                 self.add_edge(
                     v,
                     u,
-                    **mate.model_dump(mode="python", exclude_unset=False),
+                    data=mate,
                 )
 
         # Add back any edges not in BFS tree (loops, etc.)
         for u, v in graph.edges():
             if not bfs_graph.has_edge(u, v) and not bfs_graph.has_edge(v, u):
                 mate = mates[(u, v)]
-                # Preserve the original mate direction
+                # preserve the original parent->child order
                 self.add_edge(
                     u,
                     v,
-                    **mate.model_dump(mode="python", exclude_unset=False),
+                    data=mate,
                 )
-
-        for u, v in self.edges():
-            print(self.get_edge_data(u, v))
 
     def _remap_mates(self, cad: CAD) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
         """
@@ -471,7 +459,7 @@ class KinematicGraph(nx.DiGraph):
             else:
                 LOGGER.warning("Could not determine root node via topological sort")
 
-    def show(self, graph: Union[nx.Graph, nx.DiGraph], file_name: Optional[str] = None) -> None:
+    def show(self, file_name: Optional[str] = None) -> None:
         """
         Visualize the kinematic graph with part names as labels instead of PathKey IDs.
 
@@ -488,12 +476,12 @@ class KinematicGraph(nx.DiGraph):
         if file_name is None:
             file_name = get_sanitized_name(self.cad.name if self.cad.name else "kinematic_graph")
 
-        colors = [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(len(graph.nodes))]  # noqa: S311
+        colors = [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(len(self.nodes))]  # noqa: S311
         plt.figure(figsize=(8, 8))
-        pos = nx.planar_layout(graph)
+        pos = nx.planar_layout(self)
 
         nx.draw(
-            graph,
+            self,
             pos,
             with_labels=True,
             node_color=colors,

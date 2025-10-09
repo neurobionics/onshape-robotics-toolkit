@@ -11,13 +11,12 @@ This script:
 import os
 import pickle
 
-from local.main_parse import CHILD
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models import Assembly
 from onshape_robotics_toolkit.models.document import Document
-from onshape_robotics_toolkit.parse import CAD, PARENT
+from onshape_robotics_toolkit.parse import CAD
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 
 # Configuration
@@ -79,11 +78,5 @@ if __name__ == "__main__":
     cad = fetch_cad_object(rootassembly, max_depth=MAX_DEPTH, cache_file=f"cad_{MAX_DEPTH}.pkl")
 
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
-    for node in graph.nodes:
-        print(node)
-
-    print("Mates:")
-    for edge in graph.edges:
-        print(edge[PARENT], "->", edge[CHILD])
     # robot = Robot.from_graph(kinematic_graph=graph, cad=cad, client=client, name="assembly_{MAX_DEPTH}")
     # robot.save()
