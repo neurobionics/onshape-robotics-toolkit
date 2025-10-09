@@ -21,14 +21,15 @@ from onshape_robotics_toolkit.robot import Robot
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 
 # Configuration
-USE_CACHED = True
+USE_CACHED = False
 USE_PICKLE = False
 LOG_ASSEMBLY = False
-MAX_DEPTH = 0
+MAX_DEPTH = 2
 
 # Root assembly URL
 ROOT_URL = (
-    "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/46679c6ab890a1b7a6d11a88"
+    # "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/46679c6ab890a1b7a6d11a88"
+    "https://cad.onshape.com/documents/8c7a1c45e27a40a5b6e44d92/w/9c50078d1ac7106985359fe8/e/8c0e0762c95eb6e8b2f4b1f1"
 )
 
 

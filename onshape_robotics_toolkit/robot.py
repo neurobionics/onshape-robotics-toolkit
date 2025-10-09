@@ -62,7 +62,7 @@ from onshape_robotics_toolkit.models.mjcf import Actuator, Encoder, ForceSensor,
 from onshape_robotics_toolkit.parse import (
     PathKey,
 )
-from onshape_robotics_toolkit.utilities.helpers import format_number, get_sanitized_name
+from onshape_robotics_toolkit.utilities.helpers import format_number, get_sanitized_name, make_unique_name
 
 DEFAULT_COMPILER_ATTRIBUTES = {
     "angle": "radian",
@@ -76,6 +76,8 @@ URDF_EULER_SEQ = "xyz"  # URDF uses XYZ fixed angles
 MJCF_EULER_SEQ = "XYZ"  # MuJoCo uses XYZ extrinsic rotations, capitalization matters
 
 ACTUATOR_SUFFIX = "-actuator"
+
+# TODO: Add custom path for meshes and robot description file
 
 
 class RobotType(str, Enum):
@@ -258,6 +260,7 @@ def get_robot_joint(
     child_key: PathKey,
     mate: MateFeatureData,
     world_to_parent_tf: np.matrix,
+    used_joint_names: set,
     mimic: Optional[JointMimic] = None,
 ) -> tuple[dict[tuple[PathKey, PathKey], BaseJoint], Optional[dict[PathKey, Link]]]:
     """
@@ -303,13 +306,15 @@ def get_robot_joint(
     world_to_joint_tf = world_to_parent_tf @ parent_part_to_mate.to_tf
 
     origin = Origin.from_matrix(world_to_joint_tf)
-    sanitized_name = get_sanitized_name(mate.name)
+    base_name = get_sanitized_name(mate.name)
+    joint_name = make_unique_name(base_name, used_joint_names)
+    used_joint_names.add(joint_name)
 
     LOGGER.info(f"Creating robot joint from {parent_key} to {child_key}")
 
     if mate.mateType == MateType.REVOLUTE:
         joints[(parent_key, child_key)] = RevoluteJoint(
-            name=sanitized_name,
+            name=joint_name,
             parent=str(parent_key),
             child=str(child_key),
             origin=origin,
@@ -327,12 +332,12 @@ def get_robot_joint(
 
     elif mate.mateType == MateType.FASTENED:
         joints[(parent_key, child_key)] = FixedJoint(
-            name=sanitized_name, parent=str(parent_key), child=str(child_key), origin=origin
+            name=joint_name, parent=str(parent_key), child=str(child_key), origin=origin
         )
 
     elif mate.mateType == MateType.SLIDER or mate.mateType == MateType.CYLINDRICAL:
         joints[(parent_key, child_key)] = PrismaticJoint(
-            name=sanitized_name,
+            name=joint_name,
             parent=str(parent_key),
             child=str(child_key),
             origin=origin,
@@ -349,12 +354,12 @@ def get_robot_joint(
 
     elif mate.mateType == MateType.BALL:
         dummy_x_key = PathKey(
-            path=(*parent_key.path, sanitized_name, "x"),
-            name_path=(*parent_key.name_path, sanitized_name, "x"),
+            path=(*parent_key.path, joint_name, "x"),
+            name_path=(*parent_key.name_path, joint_name, "x"),
         )
         dummy_y_key = PathKey(
-            path=(*parent_key.path, sanitized_name, "y"),
-            name_path=(*parent_key.name_path, sanitized_name, "y"),
+            path=(*parent_key.path, joint_name, "y"),
+            name_path=(*parent_key.name_path, joint_name, "y"),
         )
 
         dummy_x_link = Link(
@@ -378,7 +383,7 @@ def get_robot_joint(
         links[dummy_y_key] = dummy_y_link
 
         joints[(parent_key, dummy_x_key)] = RevoluteJoint(
-            name=sanitized_name + "_x",
+            name=joint_name + "_x",
             parent=str(parent_key),
             child=str(dummy_x_key),
             origin=origin,
@@ -393,7 +398,7 @@ def get_robot_joint(
             mimic=mimic,
         )
         joints[(dummy_x_key, dummy_y_key)] = RevoluteJoint(
-            name=sanitized_name + "_y",
+            name=joint_name + "_y",
             parent=str(dummy_x_key),
             child=str(dummy_y_key),
             origin=Origin.zero_origin(),
@@ -408,7 +413,7 @@ def get_robot_joint(
             mimic=mimic,
         )
         joints[(dummy_y_key, child_key)] = RevoluteJoint(
-            name=sanitized_name + "_z",
+            name=joint_name + "_z",
             parent=str(dummy_y_key),
             child=str(child_key),
             origin=Origin.zero_origin(),
@@ -426,7 +431,7 @@ def get_robot_joint(
     else:
         LOGGER.warning(f"Unsupported joint type: {mate.mateType}")
         joints[(parent_key, child_key)] = DummyJoint(
-            name=sanitized_name, parent=str(parent_key), child=str(child_key), origin=origin
+            name=joint_name, parent=str(parent_key), child=str(child_key), origin=origin
         )
 
     return joints, links
@@ -573,6 +578,8 @@ class Robot(nx.DiGraph):
         robot.add_node(root_key, data=root_link, asset=root_asset, world_to_link_tf=world_to_root_link)
         LOGGER.info(f"Processing {len(kinematic_graph.edges)} edges in the kinematic graph.")
 
+        used_joint_names: set[str] = set()
+
         # Process edges in topological order
         for parent_key, child_key in robot.kinematic_graph.edges:
             LOGGER.info(f"Processing edge: {parent_key} -> {child_key}")
@@ -584,7 +591,7 @@ class Robot(nx.DiGraph):
             child_part: Part = robot.kinematic_graph.nodes[child_key]["data"]
 
             # Get mate data from graph edge
-            mate_data = robot.kinematic_graph.get_edge_data(parent_key, child_key)["data"]
+            mate_data: MateFeatureData = robot.kinematic_graph.get_edge_data(parent_key, child_key)["data"]
             if mate_data is None:
                 LOGGER.warning(f"No mate data found for edge {parent_key} -> {child_key}. Skipping.")
                 continue
@@ -596,12 +603,12 @@ class Robot(nx.DiGraph):
 
             # Create/get joint(s)
             # For spherical joints, dummy links and joints are created
-            # hence the two lists
             joints_dict, links_dict = get_robot_joint(
                 parent_key=parent_key,
                 child_key=child_key,
                 mate=mate_data,
                 world_to_parent_tf=world_to_parent_tf,
+                used_joint_names=used_joint_names,
                 mimic=joint_mimic,
             )
 
