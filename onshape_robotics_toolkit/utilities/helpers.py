@@ -344,6 +344,34 @@ def print_dict(d: dict, indent: int = 0) -> None:
             print("\t" * (indent + 1) + str(value))
 
 
+def print_tf(tf: np.ndarray) -> None:
+    """
+    Print a 4x4 transformation matrix in a readable format
+
+    Args:
+        tf (np.ndarray): 4x4 transformation matrix
+
+    Returns:
+        None
+
+    Examples:
+        >>> import numpy as np
+        >>> tf = np.array([[1, 0, 0, 1],
+        ...                [0, 1, 0, 2],
+        ...                [0, 0, 1, 3],
+        ...                [0, 0, 0, 1]])
+        >>> print_tf(tf)
+        [[1.         0.         0.         1.        ]
+         [0.         1.         0.         2.        ]
+         [0.         0.         1.         3.        ]
+         [0.         0.         0.         1.        ]]
+    """
+    if tf.shape != (4, 4):
+        raise ValueError("Input must be a 4x4 matrix")
+    with np.printoptions(precision=8, suppress=True):
+        print(tf)
+
+
 def get_random_files(directory: str, file_extension: str, count: int) -> tuple[list[str], list[str]]:
     """
     Get random files from a directory with a specific file extension and count

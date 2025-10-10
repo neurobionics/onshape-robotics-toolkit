@@ -21,14 +21,14 @@ from onshape_robotics_toolkit.robot import Robot
 from onshape_robotics_toolkit.utilities import load_model_from_json, save_model_as_json
 
 # Configuration
-USE_CACHED = True
-USE_PICKLE = True
+USE_CACHED = False
+USE_PICKLE = False
 LOG_ASSEMBLY = False
-MAX_DEPTH = 2
+MAX_DEPTH = 0
 
 # Root assembly URL
 ROOT_URL = (
-    "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/46679c6ab890a1b7a6d11a88"
+    "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/c8c4abdcd4eb290424b6aed7"
 )
 
 
@@ -51,14 +51,14 @@ def fetch_assembly_json(client: Client, doc: Document, cache_file: str) -> Assem
     return assembly
 
 
-def fetch_cad_object(assembly: Assembly, max_depth: int, cache_file: str) -> CAD:
+def fetch_cad_object(assembly: Assembly, client: Client, max_depth: int, cache_file: str) -> CAD:
     """Fetch CAD object from assembly."""
     if USE_PICKLE and os.path.exists(cache_file):
         with open(cache_file, "rb") as f:
             cad = pickle.load(f)  # noqa: S301
         # print(f"Loaded cached CAD from {cache_file}")
     else:
-        cad = CAD.from_assembly(assembly, max_depth=max_depth)
+        cad = CAD.from_assembly(assembly, max_depth=max_depth, client=client)
         with open(cache_file, "wb") as f:
             pickle.dump(cad, f)
         # print("Created CAD object from assembly")
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     client.set_base_url(root_doc.base_url)
 
     rootassembly = fetch_assembly_json(client, root_doc, f"assembly_{MAX_DEPTH}.json")
-    cad = fetch_cad_object(rootassembly, max_depth=MAX_DEPTH, cache_file=f"cad_{MAX_DEPTH}.pkl")
+    cad = fetch_cad_object(rootassembly, client, max_depth=MAX_DEPTH, cache_file=f"cad_{MAX_DEPTH}.pkl")
 
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
     robot = Robot.from_graph(kinematic_graph=graph, client=client, name=f"assembly_{MAX_DEPTH}")

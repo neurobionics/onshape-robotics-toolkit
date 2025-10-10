@@ -278,6 +278,7 @@ class CAD:
         document_microversion: str,
         name: Optional[str] = "cad",
         max_depth: int = 0,
+        client: Optional[Client] = None,
     ):
         """
         Initialize an empty CAD document.
@@ -308,6 +309,8 @@ class CAD:
         self.patterns = {}
         self.parts = {}
         self.subassemblies = {}
+
+        self._client = client
 
     def get_path_key(self, path: Union[str, list[str], tuple[str, ...]]) -> Optional[PathKey]:
         """
@@ -530,6 +533,7 @@ class CAD:
         cls,
         assembly: Assembly,
         max_depth: int = 0,
+        client: Optional[Client] = None,
     ) -> "CAD":
         """
         Create a CAD from an Onshape Assembly.
@@ -553,6 +557,7 @@ class CAD:
             document_microversion=assembly.rootAssembly.documentMicroversion,
             name=assembly.document.name,  # TODO: this is different from assembly.name
             max_depth=max_depth,
+            client=client,
         )
 
         # Build id_to_name mapping (needed for PathKey creation)
@@ -920,18 +925,37 @@ class CAD:
                 self.parts[pathkey].worldToPartTF = MatedCS.from_tf(self.occurrences[pathkey].tf)
                 if pathkey.depth > self.max_depth:
                     rigid_root = self.get_rigid_assembly_root(pathkey)
-                    # get the global occurrence transform of this rigid root
-                    # TODO: right now we retrieve and assign the global occurrence TF of the rigid assembly
-                    # Maybe this should be rigid assembly's local occurrence TF of the part?
                     if not rigid_root:
                         LOGGER.warning(f"Part {pathkey} exceeds max_depth but has no rigid assembly root")
                         continue
 
-                    world_to_rigid_root = self.occurrences[rigid_root].tf
-                    rigid_root_to_part = np.linalg.inv(world_to_rigid_root) @ self.occurrences[pathkey].tf
                     self.parts[pathkey].rigidAssemblyKey = rigid_root
-                    self.parts[pathkey].rigidAssemblyToPartTF = MatedCS.from_tf(tf=rigid_root_to_part)
                     self.parts[pathkey].rigidAssemblyWorkspaceId = self.workspace_id
+
+                    # NOTE: Using the root occurrences of the rigid assembly directly from Onshape API
+                    # instead of computing it from the root assembly's global occurrences because
+                    # Onshape's occurrence TF for subassemblies are not what we expect it to be, the occurrence TF
+                    # does not reflect the pose of the subassembly in world frame, will Onshape potentially fix this?
+                    if self.subassemblies[rigid_root].RootOccurrences is None:
+                        if self._client is None:
+                            LOGGER.warning(
+                                f"At max_depth of {self.max_depth}, we require Client to "
+                                "fetch all root occurrences of a subassembly."
+                            )
+                            LOGGER.warning("These root occurrences are used to remap parts inside rigid assemblies.")
+                            LOGGER.warning(
+                                f"Skipping setting rigidAssemblyToPartTF for part {pathkey} "
+                                f"inside rigid assembly {rigid_root}."
+                            )
+                            LOGGER.warning(
+                                "This will result in malformed joints that have refer to parts within rigid assemblies."
+                            )
+                            continue
+
+                        asyncio.run(self.fetch_occurrences_for_subassemblies(self._client))
+                        part_pose_wrt_rigid_root = self.subassemblies[rigid_root].RootOccurrences[pathkey]  # type: ignore[index]
+                        self.parts[pathkey].rigidAssemblyToPartTF = MatedCS.from_tf(tf=part_pose_wrt_rigid_root.tf)
+
                     LOGGER.debug(f"Set rigidAssemblyToPartTF for {pathkey}, with rigid assembly {rigid_root}")
 
         # Create synthetic Part objects for rigid assemblies
@@ -1031,6 +1055,10 @@ class CAD:
         for key, subassembly in self.subassemblies.items():
             if subassembly.RootOccurrences is not None:
                 LOGGER.debug(f"Subassembly {key} already has RootOccurrences, skipping")
+                continue
+
+            if not subassembly.isRigid:
+                # dont fetch root occurrences for flexible subassemblies
                 continue
 
             tasks.append(_fetch_rootassembly(key, subassembly, client))

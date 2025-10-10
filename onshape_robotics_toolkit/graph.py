@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 from onshape_robotics_toolkit.log import LOGGER
-from onshape_robotics_toolkit.models.assembly import MateFeatureData
+from onshape_robotics_toolkit.models.assembly import MatedCS, MateFeatureData
 from onshape_robotics_toolkit.parse import CAD, CHILD, PARENT, PathKey
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
@@ -209,6 +209,9 @@ class KinematicGraph(nx.DiGraph):
         topological_order: Ordered sequence of nodes from root to leaves
     """
 
+    # TODO: make sure we are not mutating classes and instead creating copies
+    # refactor any method that mutates data in place and creates a destructive change
+
     def __init__(self, cad: CAD):
         """
         Initialize and build kinematic graph from CAD data.
@@ -380,14 +383,28 @@ class KinematicGraph(nx.DiGraph):
             Return the rigid assembly root key if the part is inside a rigid assembly,
             otherwise return the original key.
             """
-            # TODO: Currently we only remap the keys of the mates
-            # the MatedCS should also be modified to include the rigid assembly TF
             r_key: PathKey = key
             part = cad.parts[key]
             if part.rigidAssemblyKey is not None:
                 r_key = part.rigidAssemblyKey
                 # NOTE: this is where we remap the matedOccurrence as well
-                mate.matedEntities[index].matedOccurrence = list(r_key.path)
+                mated_part_entity = mate.matedEntities[index]
+                mated_part_entity.matedOccurrence = list(r_key.path)
+
+                if part.rigidAssemblyToPartTF is None:
+                    LOGGER.warning(
+                        f"Part {key} belongs to rigid assembly {r_key} but has no rigidAssemblyToPartTF set."
+                    )
+                    LOGGER.warning(
+                        "This will result in malformed joints that have refer to parts within rigid assemblies."
+                    )
+                    return r_key
+
+                # MatedCS remapping from part->mate to rigid_root->mate
+                mated_part_entity.matedCS = MatedCS.from_tf(
+                    part.rigidAssemblyToPartTF.to_tf @ mated_part_entity.matedCS.to_tf
+                )
+
             return r_key
 
         remapped_mates: dict[tuple[PathKey, PathKey], MateFeatureData] = {}
