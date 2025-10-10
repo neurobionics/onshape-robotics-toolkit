@@ -953,8 +953,9 @@ class CAD:
                             continue
 
                         asyncio.run(self.fetch_occurrences_for_subassemblies(self._client))
-                        part_pose_wrt_rigid_root = self.subassemblies[rigid_root].RootOccurrences[pathkey]  # type: ignore[index]
-                        self.parts[pathkey].rigidAssemblyToPartTF = MatedCS.from_tf(tf=part_pose_wrt_rigid_root.tf)
+
+                    part_pose_wrt_rigid_root = self.subassemblies[rigid_root].RootOccurrences[pathkey]  # type: ignore[index]
+                    self.parts[pathkey].rigidAssemblyToPartTF = MatedCS.from_tf(tf=part_pose_wrt_rigid_root.tf)
 
                     LOGGER.debug(f"Set rigidAssemblyToPartTF for {pathkey}, with rigid assembly {rigid_root}")
 

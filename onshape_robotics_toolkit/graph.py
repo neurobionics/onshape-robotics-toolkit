@@ -393,9 +393,7 @@ class KinematicGraph(nx.DiGraph):
 
                 if part.rigidAssemblyToPartTF is None:
                     LOGGER.warning(
-                        f"Part {key} belongs to rigid assembly {r_key} but has no rigidAssemblyToPartTF set."
-                    )
-                    LOGGER.warning(
+                        f"Part {key} belongs to rigid assembly {r_key} but has no rigidAssemblyToPartTF set. \n"
                         "This will result in malformed joints that have refer to parts within rigid assemblies."
                     )
                     return r_key
