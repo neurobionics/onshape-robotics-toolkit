@@ -18,7 +18,7 @@ Functions:
 
 import copy
 import random
-from typing import Optional
+from typing import Optional, Union
 
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -115,6 +115,10 @@ def create_graph(
             mates: Dictionary of mate relationships
             graph: The graph to add edges to
         """
+        # NOTE: since we are adding edges to an undirected graph,
+        # the order of the parent-child keys are not preserved within
+        # the graph structure, i.e. an edge (u, v) could become (v, u)
+        # after the fact since the graph is undirected.
         for (parent_key, child_key), _ in mates.items():
             if parent_key in graph.nodes and child_key in graph.nodes:
                 graph.add_edge(
@@ -326,33 +330,37 @@ class KinematicGraph(nx.DiGraph):
             )
 
         for u, v in list(bfs_graph.edges()):
-            if graph.has_edge(u, v):
-                # the mate parent->child order is the same as original
-                mate = mates[(u, v)]
+            # NOTE: if raw graph has edge u->v, then mates also has (u,v) key, right?
+            # NOOOO, since the graph is undirected, the edge could be (v,u) instead
+            # even though we added the edge as (u,v), hence we use the mates dict
+            # instead to check the original parent->child order
+            if (u, v) in mates:
+                mate = copy.deepcopy(mates[(u, v)])
                 self.add_edge(
                     u,
                     v,
                     data=mate,
                 )
-            elif graph.has_edge(v, u):
+            elif (v, u) in mates:
                 # the mate parent->child order has flipped
-                mate = mates[(v, u)]
+                mate = copy.deepcopy(mates[(v, u)])
                 mate.matedEntities.reverse()
+                # NOTE: we are mutating the mate data here, but
+                # preserving the BFS tree parent->child order
                 self.add_edge(
-                    v,
                     u,
+                    v,
                     data=mate,
                 )
 
         # Add back any edges not in BFS tree (loops, etc.)
-        for u, v in graph.edges():
+        for u, v in mates:
             if not bfs_graph.has_edge(u, v) and not bfs_graph.has_edge(v, u):
-                mate = mates[(u, v)]
                 # preserve the original parent->child order
                 self.add_edge(
                     u,
                     v,
-                    data=mate,
+                    data=mates[(u, v)],
                 )
 
     def _remap_mates(self, cad: CAD) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
@@ -459,7 +467,7 @@ class KinematicGraph(nx.DiGraph):
             else:
                 LOGGER.warning("Could not determine root node via topological sort")
 
-    def show(self, file_name: Optional[str] = None) -> None:
+    def show(self, file_name: Optional[str] = None, graph: Optional[Union[nx.Graph, nx.DiGraph]] = None) -> None:
         """
         Visualize the kinematic graph with part names as labels instead of PathKey IDs.
 
@@ -468,6 +476,7 @@ class KinematicGraph(nx.DiGraph):
 
         Args:
             file_name: Optional filename to save visualization. If None, displays interactively.
+            graph: Optional graph to visualize. If None, uses the current graph.
 
         Examples:
             >>> tree.show()  # Display interactively with names
@@ -476,12 +485,15 @@ class KinematicGraph(nx.DiGraph):
         if file_name is None:
             file_name = get_sanitized_name(self.cad.name if self.cad.name else "kinematic_graph")
 
-        colors = [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(len(self.nodes))]  # noqa: S311
+        if graph is None:
+            graph = self
+
+        colors = [f"#{random.randint(0, 0xFFFFFF):06x}" for _ in range(len(graph.nodes))]  # noqa: S311
         plt.figure(figsize=(8, 8))
-        pos = nx.planar_layout(self)
+        pos = nx.planar_layout(graph)
 
         nx.draw(
-            self,
+            graph,
             pos,
             with_labels=True,
             node_color=colors,
