@@ -624,6 +624,7 @@ class Robot(nx.DiGraph):
             if child_key not in robot.nodes:
                 robot.add_node(child_key, data=link, asset=asset, world_to_link_tf=world_to_link_tf)
             else:
+                # NOTE: possible cause for this: the kinematic graph has a loop
                 LOGGER.warning(f"Link {child_key} already exists in the robot graph. Skipping.")
 
             if links_dict is not None:

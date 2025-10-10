@@ -5,7 +5,6 @@ subassemblies, instances, and mates, and generate a hierarchical representation 
 """
 
 import asyncio
-import uuid
 from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union
@@ -35,11 +34,6 @@ from onshape_robotics_toolkit.models.assembly import (
 )
 from onshape_robotics_toolkit.models.document import WorkspaceType
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
-
-SUBASSEMBLY_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
-MATE_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
-
-LOGGER.debug(f"Generated joiners - SUBASSEMBLY: {SUBASSEMBLY_JOINER}, MATE: {MATE_JOINER}")
 
 # Path and entity constants
 ROOT_PATH_NAME = "root"
@@ -671,15 +665,14 @@ class CAD:
         # Step 3: Populate subassemblies and check/mark if they are rigid
         self._populate_subassemblies(assembly)
 
-        # Step 4: Populate patterns (root + subassemblies)
-        self._populate_patterns(assembly)
-
-        # Step 6: Populate parts from assembly.parts (mass properties still None)
+        # Step 4: Populate parts from assembly.parts (mass properties still None)
         self._populate_parts(assembly)
 
-        # Step 5: Populate mates with assembly provenance
-        # Mates will be remapped if they reference parts inside rigid assemblies
+        # Step 6: Populate mates with assembly provenance
         self._populate_mates(assembly)
+
+        # Step 5: Populate patterns (root + subassemblies)
+        self._populate_patterns(assembly)
 
         LOGGER.debug(
             f"Populated CAD: {len(self.instances)} instances, "
@@ -787,28 +780,6 @@ class CAD:
             self.max_depth,
         )
 
-    def _populate_patterns(self, assembly: Assembly) -> None:
-        """
-        Populate patterns from root assembly and all subassemblies.
-
-        Args:
-            assembly: Assembly from Onshape API
-        """
-        # Root patterns
-        for pattern in assembly.rootAssembly.patterns:
-            if not pattern.suppressed:
-                self.patterns[pattern.id] = pattern
-
-        # Subassembly patterns (only from flexible subassemblies)
-        for subassembly in self.subassemblies.values():
-            if subassembly.isRigid:
-                continue
-            for pattern in subassembly.patterns:
-                if not pattern.suppressed:
-                    self.patterns[pattern.id] = pattern
-
-        LOGGER.debug(f"Populated {len(self.patterns)} patterns")
-
     def _populate_mates(self, assembly: Assembly) -> None:
         """
         Populate mates from root and all subassemblies with assembly provenance.
@@ -895,6 +866,112 @@ class CAD:
                 _process_feature(feature=feature, assembly_key=sub_key, path_prefix=sub_key.path)
 
         LOGGER.debug(f"Populated {len(self.mates)} mates (root + flexible subassemblies)")
+
+    def _populate_patterns(self, assembly: Assembly) -> None:
+        """
+        Populate patterns from root assembly and all subassemblies.
+
+        Args:
+            assembly: Assembly from Onshape API
+        """
+        # Root patterns
+        for pattern in assembly.rootAssembly.patterns:
+            if not pattern.suppressed:
+                self.patterns[pattern.id] = pattern
+
+        # Subassembly patterns (only from flexible subassemblies)
+        for subassembly in self.subassemblies.values():
+            if subassembly.isRigid:
+                continue
+            for pattern in subassembly.patterns:
+                if not pattern.suppressed:
+                    self.patterns[pattern.id] = pattern
+
+        self._flatten_patterns()
+
+        LOGGER.debug(f"Populated {len(self.patterns)} patterns")
+
+    def _flatten_patterns(
+        self,
+    ) -> None:
+        def _add_mate(
+            seed_mate: MateFeatureData,
+            seed_key: PathKey,
+            instance_key: PathKey,
+            other_entity_key: PathKey,
+            mate_key: tuple[Optional[PathKey], PathKey, PathKey],
+            is_seed_parent: bool = True,
+        ) -> None:
+            new_mate = copy.deepcopy(seed_mate)
+            # seed index needs to be replaced by the instance
+            seed_index = PARENT if is_seed_parent else CHILD
+            oe_mated_cs = new_mate.matedEntities[1 - seed_index].matedCS
+
+            # NOTE: compute new matedCS for the other entity, this is crucial because
+            # this governs where this new instance will be placed in the robot structure
+            seed_pose_wrt_world = self.occurrences[seed_key].tf
+            instance_pose_wrt_world = self.occurrences[instance_key].tf
+            oe_pose_wrt_world = self.occurrences[other_entity_key].tf
+
+            # compute relative pose of instance wrt seed
+            instance_pose_wrt_seed = instance_pose_wrt_world @ np.linalg.inv(seed_pose_wrt_world)
+
+            oe_matedcs_wrt_world = oe_pose_wrt_world @ oe_mated_cs.to_tf
+            instance_matedcs_wrt_world = instance_pose_wrt_seed @ oe_matedcs_wrt_world
+            oe_matedcs_tf = np.linalg.inv(oe_matedcs_wrt_world) @ instance_matedcs_wrt_world
+
+            oe_mutated_mated_cs = MatedCS.from_tf(oe_matedcs_tf)
+            new_mate.matedEntities[1 - seed_index].matedCS = oe_mutated_mated_cs
+
+            self.mates[mate_key] = new_mate
+
+        seed_instance_to_pattern_instances: dict[tuple[str, PathKey], list[PathKey]] = {}
+
+        for pattern_id, pattern in self.patterns.items():
+            if pattern.suppressed:
+                continue
+
+            for seed_id, instance_ids in pattern.seedToPatternInstances.items():
+                seed_path_key = PathKey((seed_id,), (self.keys_by_id[(seed_id,)].name,))
+                key = (pattern_id, seed_path_key)
+
+                if key not in seed_instance_to_pattern_instances:
+                    seed_instance_to_pattern_instances[key] = []
+
+                seed_instance_to_pattern_instances[key].extend([
+                    self.keys_by_id[(iid,)] for iid in instance_ids if (iid,) in self.keys_by_id
+                ])
+
+        # find all mates referencing this part
+        original_mates = copy.deepcopy(self.mates)
+        for (assembly_key, parent_key, child_key), mate in original_mates.items():
+            for (_, seed_key), instance_keys in seed_instance_to_pattern_instances.items():
+                if parent_key == seed_key:
+                    for instance_key in instance_keys:
+                        _add_mate(
+                            seed_mate=mate,
+                            seed_key=parent_key,
+                            instance_key=instance_key,
+                            other_entity_key=child_key,
+                            mate_key=(assembly_key, instance_key, child_key),
+                            is_seed_parent=True,
+                        )
+                if child_key == seed_key:
+                    for instance_key in instance_keys:
+                        _add_mate(
+                            seed_mate=mate,
+                            seed_key=child_key,
+                            instance_key=instance_key,
+                            other_entity_key=parent_key,
+                            mate_key=(assembly_key, parent_key, instance_key),
+                            is_seed_parent=False,
+                        )
+
+        # print("="*100)
+        # for (_, parent_key, child_key), mate in self.mates.items():
+        #     print(f"Mate from {parent_key} -> {child_key}, name: {mate.name}")
+
+        # # exit()
 
     def _populate_parts(self, assembly: Assembly) -> None:
         """
