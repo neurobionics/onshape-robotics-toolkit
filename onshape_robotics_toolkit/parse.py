@@ -863,25 +863,31 @@ class CAD:
             if pattern.suppressed:
                 return
 
-            mutated_seed_pattern_instances: dict[tuple[str, ...], list[str]] = {}
+            mutated_seed_pattern_instances: dict[tuple[str, ...], list[tuple[str, ...]]] = {}
             for seed_id, instance_ids in pattern.seedToPatternInstances.items():
                 # since seed_id can be both a single string or a tuple of strings,
                 # we need to make it a tuple for consistent keying
-                if isinstance(seed_id, str):
-                    seed_id = (seed_id,)
+                seed_id_tuple: tuple[str, ...] = (seed_id,) if isinstance(seed_id, str) else seed_id
 
-                mutated_id = seed_id if path_prefix is None else (*path_prefix, *seed_id)
+                mutated_id = seed_id_tuple if path_prefix is None else (*path_prefix, *seed_id_tuple)
 
                 for instance_id in instance_ids:
                     # since instance_id can be both a single string or a tuple of strings,
                     # we need to make it a tuple for consistent keying
+                    instance_id_tuple: tuple[str, ...]
                     if isinstance(instance_id, str):
-                        instance_id = (instance_id,)
+                        instance_id_tuple = (instance_id,)
+                    elif isinstance(instance_id, list):
+                        instance_id_tuple = tuple(instance_id)
+                    else:
+                        instance_id_tuple = instance_id
 
-                    mutated_instance_id = instance_id if path_prefix is None else (*path_prefix, *instance_id)
+                    mutated_instance_id = (
+                        instance_id_tuple if path_prefix is None else (*path_prefix, *instance_id_tuple)
+                    )
                     mutated_seed_pattern_instances.setdefault(mutated_id, []).append(mutated_instance_id)
 
-            pattern.seedToPatternInstances = mutated_seed_pattern_instances
+            pattern.seedToPatternInstances = mutated_seed_pattern_instances  # type: ignore[assignment]
             self.patterns[pattern.id] = pattern
 
         # Root patterns
@@ -943,7 +949,9 @@ class CAD:
                 continue
 
             for seed_id, instance_ids in pattern.seedToPatternInstances.items():
-                seed_path_key = self.keys_by_id[seed_id]
+                # Ensure seed_id is a tuple for dictionary lookup
+                seed_id_tuple = seed_id if isinstance(seed_id, tuple) else (seed_id,)
+                seed_path_key = self.keys_by_id[seed_id_tuple]
                 key = (pattern_id, seed_path_key)
 
                 if key not in seed_instance_to_pattern_instances:
