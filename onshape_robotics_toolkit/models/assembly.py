@@ -1185,7 +1185,7 @@ class Pattern(BaseModel):
         type (PatternType): The type of the pattern (e.g., CIRCULAR, LINEAR).
     """
 
-    seedToPatternInstances: dict[str, list[str]] = Field(
+    seedToPatternInstances: dict[Union[tuple[str, ...], str], Union[list[list[str]], list[str]]] = Field(
         ..., description="A mapping of seed instance IDs to their corresponding pattern instance IDs."
     )
     name: str = Field(..., description="The name of the pattern feature.")

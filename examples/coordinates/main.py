@@ -28,7 +28,7 @@ MAX_DEPTH = 1
 
 # Root assembly URL
 ROOT_URL = (
-    "https://cad.onshape.com/documents/1291b9c12b545eeed2d7b739/w/97037c8205b8249da5568aaf/e/9ba9186fc14f9c065161678e"
+    "https://cad.onshape.com/documents/8cf89c7fb04f06a2a1a9339c/w/469fb5dc035724877067135b/e/e63ee1f9bd0bd7e034ac2595"
 )
 
 
@@ -79,6 +79,5 @@ if __name__ == "__main__":
     cad = fetch_cad_object(rootassembly, client, max_depth=MAX_DEPTH, cache_file=f"cad_{MAX_DEPTH}.pkl")
 
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
-    graph.show()
     robot = Robot.from_graph(kinematic_graph=graph, client=client, name=f"assembly_{MAX_DEPTH}")
     robot.save()

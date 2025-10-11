@@ -50,11 +50,6 @@ RELATION_CHILD = 1
 RELATION_PARENT = 0
 
 
-# ============================================================================
-# PATH-TUPLE BASED KEY SYSTEM (New Simplified Approach)
-# ============================================================================
-
-
 @dataclass(frozen=True, slots=True)
 class PathKey:
     """
@@ -199,7 +194,10 @@ class PathKey:
         """
         # Single instance ID -> single-element tuple, otherwise convert list to tuple
         id_tuple = (path,) if isinstance(path, str) else tuple(path)
-        name_tuple = tuple(id_to_name.get(instance_id, instance_id) for instance_id in id_tuple)
+        try:
+            name_tuple = tuple(id_to_name[instance_id] for instance_id in id_tuple)
+        except KeyError as e:
+            raise KeyError(f"Instance ID {e} not found in id_to_name mapping") from e
 
         return cls(id_tuple, name_tuple)
 
@@ -379,20 +377,6 @@ class CAD:
             else:
                 return occ.tf
         return None
-
-    def get_pattern_for_seed(self, seed_id: str) -> Optional[Pattern]:
-        """Get pattern containing a seed instance."""
-        for pattern in self.patterns.values():
-            if seed_id in pattern.seedToPatternInstances:
-                return pattern
-        return None
-
-    def get_patterned_instances(self, seed_id: str) -> list[str]:
-        """Get list of patterned instance IDs for a seed."""
-        pattern = self.get_pattern_for_seed(seed_id)
-        if pattern and seed_id in pattern.seedToPatternInstances:
-            return pattern.seedToPatternInstances[seed_id]
-        return []
 
     def get_rigid_assembly_root(self, key: PathKey) -> Optional[PathKey]:
         """
@@ -874,18 +858,43 @@ class CAD:
         Args:
             assembly: Assembly from Onshape API
         """
+
+        def _add_pattern(pattern: Pattern, path_prefix: Optional[tuple[str, ...]]) -> None:
+            if pattern.suppressed:
+                return
+
+            mutated_seed_pattern_instances: dict[tuple[str, ...], list[str]] = {}
+            for seed_id, instance_ids in pattern.seedToPatternInstances.items():
+                # since seed_id can be both a single string or a tuple of strings,
+                # we need to make it a tuple for consistent keying
+                if isinstance(seed_id, str):
+                    seed_id = (seed_id,)
+
+                mutated_id = seed_id if path_prefix is None else (*path_prefix, *seed_id)
+
+                for instance_id in instance_ids:
+                    # since instance_id can be both a single string or a tuple of strings,
+                    # we need to make it a tuple for consistent keying
+                    if isinstance(instance_id, str):
+                        instance_id = (instance_id,)
+
+                    mutated_instance_id = instance_id if path_prefix is None else (*path_prefix, *instance_id)
+                    mutated_seed_pattern_instances.setdefault(mutated_id, []).append(mutated_instance_id)
+
+            pattern.seedToPatternInstances = mutated_seed_pattern_instances
+            self.patterns[pattern.id] = pattern
+
         # Root patterns
         for pattern in assembly.rootAssembly.patterns:
-            if not pattern.suppressed:
-                self.patterns[pattern.id] = pattern
+            _add_pattern(pattern, None)
 
         # Subassembly patterns (only from flexible subassemblies)
-        for subassembly in self.subassemblies.values():
+        for subassembly_key, subassembly in self.subassemblies.items():
             if subassembly.isRigid:
                 continue
+
             for pattern in subassembly.patterns:
-                if not pattern.suppressed:
-                    self.patterns[pattern.id] = pattern
+                _add_pattern(pattern, subassembly_key.path)
 
         self._flatten_patterns()
 
@@ -903,9 +912,11 @@ class CAD:
             is_seed_parent: bool = True,
         ) -> None:
             new_mate = copy.deepcopy(seed_mate)
-            # seed index needs to be replaced by the instance
-            seed_index = PARENT if is_seed_parent else CHILD
-            oe_mated_cs = new_mate.matedEntities[1 - seed_index].matedCS
+            # NOTE: seed index needs to be replaced by the instance
+            # since we reordered the populated mates to always have parent->child order,
+            # we should not use the global constants (PARENT, CHILD) here
+            oe_index = 1 if is_seed_parent else 0
+            oe_mated_cs = new_mate.matedEntities[oe_index].matedCS
 
             # NOTE: compute new matedCS for the other entity, this is crucial because
             # this governs where this new instance will be placed in the robot structure
@@ -913,16 +924,16 @@ class CAD:
             instance_pose_wrt_world = self.occurrences[instance_key].tf
             oe_pose_wrt_world = self.occurrences[other_entity_key].tf
 
-            # compute relative pose of instance wrt seed
-            instance_pose_wrt_seed = instance_pose_wrt_world @ np.linalg.inv(seed_pose_wrt_world)
+            # NOTE: find the other entity's mated CS wrt to the instance part
+            # First, find the other entity's mated CS wrt seed part, then transform it
+            # to the instance global coordinates, then find this wrt to the other entity
+            oe_mated_cs_wrt_world = oe_pose_wrt_world @ oe_mated_cs.to_tf
+            oe_mated_cs_wrt_seed = np.linalg.inv(seed_pose_wrt_world) @ oe_mated_cs_wrt_world
+            oe_mated_cs_for_instance = instance_pose_wrt_world @ oe_mated_cs_wrt_seed
+            oe_mated_cs_tf = np.linalg.inv(oe_pose_wrt_world) @ oe_mated_cs_for_instance
 
-            oe_matedcs_wrt_world = oe_pose_wrt_world @ oe_mated_cs.to_tf
-            instance_matedcs_wrt_world = instance_pose_wrt_seed @ oe_matedcs_wrt_world
-            oe_matedcs_tf = np.linalg.inv(oe_matedcs_wrt_world) @ instance_matedcs_wrt_world
-
-            oe_mutated_mated_cs = MatedCS.from_tf(oe_matedcs_tf)
-            new_mate.matedEntities[1 - seed_index].matedCS = oe_mutated_mated_cs
-
+            new_mate.matedEntities[oe_index].matedCS = MatedCS.from_tf(oe_mated_cs_tf)
+            new_mate.matedEntities[1 - oe_index].matedOccurrence = list(instance_key.path)
             self.mates[mate_key] = new_mate
 
         seed_instance_to_pattern_instances: dict[tuple[str, PathKey], list[PathKey]] = {}
@@ -932,15 +943,16 @@ class CAD:
                 continue
 
             for seed_id, instance_ids in pattern.seedToPatternInstances.items():
-                seed_path_key = PathKey((seed_id,), (self.keys_by_id[(seed_id,)].name,))
+                seed_path_key = self.keys_by_id[seed_id]
                 key = (pattern_id, seed_path_key)
 
                 if key not in seed_instance_to_pattern_instances:
                     seed_instance_to_pattern_instances[key] = []
 
-                seed_instance_to_pattern_instances[key].extend([
-                    self.keys_by_id[(iid,)] for iid in instance_ids if (iid,) in self.keys_by_id
-                ])
+                for instance_id in instance_ids:
+                    # NOTE: instance_id is a list of strings (path)
+                    instance_path_key = self.keys_by_id[tuple(instance_id)]
+                    seed_instance_to_pattern_instances[key].append(instance_path_key)
 
         # find all mates referencing this part
         original_mates = copy.deepcopy(self.mates)
@@ -966,12 +978,6 @@ class CAD:
                             mate_key=(assembly_key, parent_key, instance_key),
                             is_seed_parent=False,
                         )
-
-        # print("="*100)
-        # for (_, parent_key, child_key), mate in self.mates.items():
-        #     print(f"Mate from {parent_key} -> {child_key}, name: {mate.name}")
-
-        # # exit()
 
     def _populate_parts(self, assembly: Assembly) -> None:
         """
