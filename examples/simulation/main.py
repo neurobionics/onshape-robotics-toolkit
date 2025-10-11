@@ -15,9 +15,11 @@ from scipy.spatial.transform import Rotation
 from transformations import compute_motor_torques
 
 from onshape_robotics_toolkit.connect import Client
+from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models.document import Document
-from onshape_robotics_toolkit.robot import Robot, RobotType
+from onshape_robotics_toolkit.parse import CAD
+from onshape_robotics_toolkit.robot import Robot
 
 N_DESIGN_TRAILS = 100
 N_PID_TRAILS = 50
@@ -298,15 +300,21 @@ def find_best_design_variables(trial):
     variables["alpha"].expression = f"{alpha:.1f} deg"
     variables["spacer_height"].expression = f"{spacer_height:.1f} mm"
     variables["plate_thickness"].expression = f"{plate_thickness:.1f} mm"
-    client.set_variables(doc.did, doc.wid, elements["variables"].id, variables)
 
-    ballbot: Robot = Robot.from_url(
-        url=doc.url,
-        client=client,
-        max_depth=1,
-        name="ballbot",
-        robot_type=RobotType.MJCF,
-    )
+    variables_to_set = {
+        "wheel_diameter": variables["wheel_diameter"].expression,
+        "alpha": variables["alpha"].expression,
+        "spacer_height": variables["spacer_height"].expression,
+        "plate_thickness": variables["plate_thickness"].expression,
+    }
+
+    client.set_variables(doc.did, doc.wid, elements["variables"].id, variables_to_set)
+    assembly = client.get_assembly(doc.did, doc.wtype, doc.wid, doc.eid)
+
+    cad = CAD.from_assembly(assembly, max_depth=1, client=client)
+    graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+    ballbot = Robot.from_graph(kinematic_graph=graph, client=client, name="ballbot")
+
     ballbot.set_robot_position(pos=(0, 0, 0.35))
     ballbot = modify_ballbot(ballbot)
     ballbot.save("ballbot.xml")
