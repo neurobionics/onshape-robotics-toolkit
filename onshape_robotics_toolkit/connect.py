@@ -1115,6 +1115,7 @@ class Asset:
         is_rigid_assembly: bool = False,
         partID: Optional[str] = None,
         is_from_file: bool = False,
+        mesh_dir: Optional[str] = None,
     ) -> None:
         """
         Initialize the Asset object.
@@ -1130,6 +1131,7 @@ class Asset:
             is_rigid_assembly: Whether the element is a rigid assembly.
             partID: The unique identifier of the part.
             is_from_file: Whether the asset is from a file.
+            mesh_dir: Optional custom directory for mesh files. If None, uses CURRENT_DIR/MESHES_DIR.
         """
         self.did = did
         self.wtype = wtype
@@ -1141,6 +1143,8 @@ class Asset:
         self.is_rigid_assembly = is_rigid_assembly
         self.partID = partID
         self.is_from_file = is_from_file
+        self.mesh_dir = mesh_dir
+        self.robot_file_dir: Optional[str] = None  # Directory where robot file is saved, for relative path calculation
 
         self._file_path: Optional[str] = None
 
@@ -1157,11 +1161,14 @@ class Asset:
                 raise ValueError("File path is not set for file-based asset")
             return self._file_path
 
-        # if meshes directory does not exist, create it
-        if not os.path.exists(os.path.join(CURRENT_DIR, MESHES_DIR)):
-            os.makedirs(os.path.join(CURRENT_DIR, MESHES_DIR))
+        # Determine the mesh directory to use (custom or default for backwards compatibility)
+        mesh_directory = self.mesh_dir if self.mesh_dir is not None else os.path.join(CURRENT_DIR, MESHES_DIR)
 
-        return os.path.join(CURRENT_DIR, MESHES_DIR, self.file_name)
+        # Create the directory if it doesn't exist
+        if not os.path.exists(mesh_directory):
+            os.makedirs(mesh_directory)
+
+        return os.path.join(mesh_directory, self.file_name)
 
     @property
     def relative_path(self) -> str:
@@ -1171,8 +1178,11 @@ class Asset:
         Returns:
             The relative path of the mesh file with forward slashes (cross-platform compatible).
         """
+        # Calculate relative path from robot file directory if specified, otherwise from CURRENT_DIR
+        base_dir = self.robot_file_dir if self.robot_file_dir is not None else CURRENT_DIR
+
         # Use forward slashes for cross-platform compatibility in URDF/MJCF files
-        rel_path = os.path.relpath(self.absolute_path, CURRENT_DIR)
+        rel_path = os.path.relpath(self.absolute_path, base_dir)
         return rel_path.replace(os.sep, "/")
 
     async def download(self) -> None:
