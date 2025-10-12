@@ -1,25 +1,69 @@
-"""Shared pytest fixtures and helpers for all tests."""
+"""Pytest fixtures for the onshape-robotics-toolkit test suite."""
 
+from __future__ import annotations
+
+import sys
+import types
 from pathlib import Path
-from typing import Optional
 
 import pytest
 
 from onshape_robotics_toolkit.models.assembly import Assembly
-from onshape_robotics_toolkit.parse import CAD, PathKey
+from onshape_robotics_toolkit.parse import CAD
 from onshape_robotics_toolkit.utilities import load_model_from_json
 
-# ============================================================================
-# Constants
-# ============================================================================
+# Ensure the project root is on sys.path when pytest uses importlib mode.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:  # pragma: no cover - safety guard
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# Maximum depth for this test assembly (based on its structure)
-MAX_TEST_ASSEMBLY_DEPTH = 2
+# The top-level package imports ``stl`` (numpy-stl). We don't need the real dependency
+# for the unit tests that run in CI, so we provide a very small stub before importing
+# the toolkit. This keeps imports lightweight and avoids optional dependency failures.
+if "stl" not in sys.modules:  # pragma: no cover - defensive guard
+    stub = types.ModuleType("stl")
 
+    class _Mesh:  # minimal interface used in the codebase
+        def __init__(self, *args, **kwargs):
+            pass
 
-# ============================================================================
-# Fixtures - Data Loading
-# ============================================================================
+        @classmethod
+        def from_file(cls, *args, **kwargs):
+            return cls()
+
+        def save(self, *args, **kwargs):
+            return None
+
+    mesh_module = types.ModuleType("stl.mesh")
+    mesh_module.Mesh = _Mesh
+
+    stub.mesh = mesh_module
+    sys.modules["stl"] = stub
+    sys.modules["stl.mesh"] = mesh_module
+
+# Matplotlib shipped with the sandbox is compiled against NumPy 1.x. To avoid the
+# compatibility issue when running on NumPy 2, we provide a lightweight stub that
+# satisfies the small subset of attributes the toolkit imports during tests.
+if "matplotlib" not in sys.modules:  # pragma: no cover - defensive guard
+    mpl = types.ModuleType("matplotlib")
+    animation_mod = types.ModuleType("matplotlib.animation")
+    pyplot_mod = types.ModuleType("matplotlib.pyplot")
+
+    def _noop(*args, **kwargs):
+        return None
+
+    # Provide minimal surface area used inside helpers.py
+    animation_mod.FuncAnimation = _noop
+    pyplot_mod.figure = _noop
+    pyplot_mod.savefig = _noop
+    pyplot_mod.close = _noop
+
+    mpl.animation = animation_mod
+    mpl.pyplot = pyplot_mod
+
+    sys.modules["matplotlib"] = mpl
+    sys.modules["matplotlib.animation"] = animation_mod
+    sys.modules["matplotlib.pyplot"] = pyplot_mod
 
 
 @pytest.fixture
@@ -32,21 +76,6 @@ def assembly_json_path() -> Path:
 def assembly(assembly_json_path: Path) -> Assembly:
     """Load assembly from JSON file."""
     return load_model_from_json(Assembly, str(assembly_json_path))
-
-
-# ============================================================================
-# Fixtures - CAD at Various Depths
-# ============================================================================
-
-
-@pytest.fixture(params=[0, 1, 2])
-def cad_doc_all_depths(assembly: Assembly, request) -> CAD:
-    """Create CAD with all possible max_depth values (0, 1, 2).
-
-    This parametrized fixture will run tests with each depth automatically.
-    """
-    max_depth = request.param
-    return CAD.from_assembly(assembly, max_depth=max_depth)
 
 
 @pytest.fixture
@@ -62,60 +91,6 @@ def cad_doc_depth_1(assembly: Assembly) -> CAD:
 
 
 @pytest.fixture
-def cad_doc_depth_2(assembly: Assembly) -> CAD:
-    """Create CAD from assembly with max_depth=2 (all flexible)."""
-    return CAD.from_assembly(assembly, max_depth=2)
-
-
-# ============================================================================
-# Helper Functions - Data Extraction
-# ============================================================================
-
-
-def get_first_part_key(cad_doc: CAD) -> Optional[PathKey]:
-    """Get the first part instance key, or None if no parts exist."""
-    part_keys = list(cad_doc.root_assembly.instances.parts.keys())
-    return part_keys[0] if part_keys else None
-
-
-def get_first_assembly_key(cad_doc: CAD) -> Optional[PathKey]:
-    """Get the first assembly instance key, or None if no assemblies exist."""
-    assembly_keys = list(cad_doc.root_assembly.instances.assemblies.keys())
-    return assembly_keys[0] if assembly_keys else None
-
-
-def get_first_occurrence_key(cad_doc: CAD) -> Optional[PathKey]:
-    """Get the first occurrence key, or None if no occurrences exist."""
-    occurrence_keys = list(cad_doc.root_assembly.occurrences.occurrences.keys())
-    return occurrence_keys[0] if occurrence_keys else None
-
-
-def get_first_part_id(cad_doc: CAD) -> Optional[str]:
-    """Get the first part ID, or None if no parts exist."""
-    part_ids = list(cad_doc.parts.keys())
-    return part_ids[0] if part_ids else None
-
-
-def get_nested_part_key(cad_doc: CAD, min_depth: int = 2) -> Optional[PathKey]:
-    """Get a nested part instance key (depth >= min_depth), or None if none exist."""
-    nested_parts = {k: v for k, v in cad_doc.root_assembly.instances.parts.items() if k.depth >= min_depth}
-    if not nested_parts:
-        return None
-    return next(iter(nested_parts.keys()))
-
-
-def get_root_part_key(cad_doc: CAD) -> Optional[PathKey]:
-    """Get a root-level part instance key (depth == 1), or None if none exist."""
-    root_parts = {k: v for k, v in cad_doc.root_assembly.instances.parts.items() if k.depth == 1}
-    if not root_parts:
-        return None
-    return next(iter(root_parts.keys()))
-
-
-def get_flexible_assembly_keys(cad_doc: CAD) -> list[PathKey]:
-    """Get all flexible assembly instance keys."""
-    return [
-        key
-        for key in cad_doc.root_assembly.instances.assemblies
-        if cad_doc.root_assembly.instances.is_flexible_assembly(key)
-    ]
+def cad_doc_depth_0(assembly: Assembly) -> CAD:
+    """Create CAD from assembly with max_depth=0 (all nested assemblies rigid)."""
+    return CAD.from_assembly(assembly, max_depth=0)

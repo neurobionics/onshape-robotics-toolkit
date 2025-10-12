@@ -1,0 +1,726 @@
+{
+    "rootAssembly": {
+        "fullConfiguration": "default",
+        "configuration": "default",
+        "documentId": "1859bf4489c74b8d9d74e797",
+        "elementId": "46679c6ab890a1b7a6d11a88",
+        "documentMicroversion": "e4bc804c8c576f584572ec53",
+        "instances": [
+            {
+                "fullConfiguration": "default",
+                "configuration": "default",
+                "documentId": "1859bf4489c74b8d9d74e797",
+                "elementId": "2c9f8fbd558d77d25ff136d5",
+                "documentMicroversion": "e4bc804c8c576f584572ec53",
+                "isStandardContent": false,
+                "type": "Part",
+                "documentVersion": null,
+                "id": "M0cLO6yVimMv6KhRM",
+                "name": "Part 1 <1>",
+                "suppressed": false,
+                "partId": "JHD"
+            },
+            {
+                "fullConfiguration": "default",
+                "configuration": "default",
+                "documentId": "1859bf4489c74b8d9d74e797",
+                "elementId": "996c149cb195c9268ab062b4",
+                "documentMicroversion": "e4bc804c8c576f584572ec53",
+                "id": "McQ65EsxX+4zImFWp",
+                "type": "Assembly",
+                "name": "Assembly 2 <1>",
+                "suppressed": false,
+                "isRigid": false
+            },
+            {
+                "fullConfiguration": "default",
+                "configuration": "default",
+                "documentId": "1859bf4489c74b8d9d74e797",
+                "elementId": "2c9f8fbd558d77d25ff136d5",
+                "documentMicroversion": "e4bc804c8c576f584572ec53",
+                "isStandardContent": false,
+                "type": "Part",
+                "documentVersion": null,
+                "id": "MmDUN+J3Mz0yLeVGC",
+                "name": "Part 14 <1>",
+                "suppressed": false,
+                "partId": "JNP"
+            },
+            {
+                "fullConfiguration": "default",
+                "configuration": "default",
+                "documentId": "1859bf4489c74b8d9d74e797",
+                "elementId": "2c9f8fbd558d77d25ff136d5",
+                "documentMicroversion": "e4bc804c8c576f584572ec53",
+                "isStandardContent": false,
+                "type": "Part",
+                "documentVersion": null,
+                "id": "MU05t2Vu7AYVp8csX",
+                "name": "Part 15 <1>",
+                "suppressed": false,
+                "partId": "JNT"
+            }
+        ],
+        "patterns": [],
+        "features": [
+            {
+                "id": "MItLWawGQbZJyCfBz",
+                "suppressed": false,
+                "featureType": "mate",
+                "featureData": {
+                    "matedEntities": [
+                        {
+                            "matedOccurrence": [
+                                "McQ65EsxX+4zImFWp",
+                                "MUgiNm7M17UkTi3/g"
+                            ],
+                            "matedCS": {
+                                "xAxis": [1.0, 0.0, 0.0],
+                                "yAxis": [0.0, 0.0, -1.0],
+                                "zAxis": [0.0, 1.0, 0.0],
+                                "origin": [0.0, 0.025, 7.960204194457796e-19],
+                                "part_tf": null
+                            },
+                            "parentCS": null
+                        },
+                        {
+                            "matedOccurrence": ["M0cLO6yVimMv6KhRM"],
+                            "matedCS": {
+                                "xAxis": [-0.0, -0.0, -1.0],
+                                "yAxis": [0.0, -1.0, 0.0],
+                                "zAxis": [-1.0, -0.0, -0.0],
+                                "origin": [0.025, 0.0, 7.654042494670958e-19],
+                                "part_tf": null
+                            },
+                            "parentCS": null
+                        }
+                    ],
+                    "mateType": "REVOLUTE",
+                    "name": "Revolute 1",
+                    "id": "MItLWawGQbZJyCfBz"
+                }
+            },
+            {
+                "id": "MnZ6UVZeh8TffLE9Q",
+                "suppressed": false,
+                "featureType": "mate",
+                "featureData": {
+                    "matedEntities": [
+                        {
+                            "matedOccurrence": ["MmDUN+J3Mz0yLeVGC"],
+                            "matedCS": {
+                                "xAxis": [1.0, 0.0, 0.0],
+                                "yAxis": [0.0, -1.0, 0.0],
+                                "zAxis": [0.0, 0.0, -1.0],
+                                "origin": [0.075, 2.222614453595284e-18, 0.0],
+                                "part_tf": null
+                            },
+                            "parentCS": null
+                        },
+                        {
+                            "matedOccurrence": [
+                                "McQ65EsxX+4zImFWp",
+                                "M5RYnLYjqM96Gt3Xp",
+                                "Mab4chCi5qewaKIBP"
+                            ],
+                            "matedCS": {
+                                "xAxis": [-0.0, -0.0, 1.0],
+                                "yAxis": [1.0, -0.0, 0.0],
+                                "zAxis": [0.0, 1.0, 0.0],
+                                "origin": [
+                                    1.7780915628762273e-17, 0.0,
+                                    0.07999999999999999
+                                ],
+                                "part_tf": null
+                            },
+                            "parentCS": null
+                        }
+                    ],
+                    "mateType": "REVOLUTE",
+                    "name": "Revolute 2",
+                    "id": "MnZ6UVZeh8TffLE9Q"
+                }
+            },
+            {
+                "id": "MJwb9WX6vC4CCfrFR",
+                "suppressed": false,
+                "featureType": "mate",
+                "featureData": {
+                    "matedEntities": [
+                        {
+                            "matedOccurrence": ["MU05t2Vu7AYVp8csX"],
+                            "matedCS": {
+                                "xAxis": [1.0, 0.0, 0.0],
+                                "yAxis": [0.0, -1.0, 0.0],
+                                "zAxis": [0.0, 0.0, -1.0],
+                                "origin": [0.1, 9.184850993605152e-20, 0.0],
+                                "part_tf": null
+                            },
+                            "parentCS": null
+                        },
+                        {
+                            "matedOccurrence": [
+                                "McQ65EsxX+4zImFWp",
+                                "McfxrmklF4aj7y0QV",
+                                "Mab4chCi5qewaKIBP"
+                            ],
+                            "matedCS": {
+                                "xAxis": [-0.0, -0.0, 1.0],
+                                "yAxis": [1.0, -0.0, 0.0],
+                                "zAxis": [0.0, 1.0, 0.0],
+                                "origin": [
+                                    1.7780915628762273e-17, 0.0,
+                                    0.07999999999999999
+                                ],
+                                "part_tf": null
+                            },
+                            "parentCS": null
+                        }
+                    ],
+                    "mateType": "REVOLUTE",
+                    "name": "Revolute 3",
+                    "id": "MJwb9WX6vC4CCfrFR"
+                }
+            }
+        ],
+        "MassProperty": null,
+        "occurrences": [
+            {
+                "fixed": true,
+                "transform": [
+                    1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.05, 0.0, 0.0, 1.0, 0.0,
+                    0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": ["M0cLO6yVimMv6KhRM"]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    0.0, 0.0, -1.0, 0.05, -1.0, 0.0, 0.0, 0.15000000000000002,
+                    0.0, 1.0, 0.0, -0.050000000000000024, 0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": ["MU05t2Vu7AYVp8csX"]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    1.0, 0.0, 0.0, -0.05, 0.0, 1.0, 0.0, 0.023150699213147163,
+                    0.0, 0.0, 1.0, 0.030034348368644714, 0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": ["McQ65EsxX+4zImFWp"]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    0.0, 0.0, -1.0, 0.05, -1.0, 0.0, 0.0, 0.125, 0.0, 1.0, 0.0,
+                    0.04999999999999998, 0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": ["MmDUN+J3Mz0yLeVGC"]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    1.0, 0.0, 0.0, 0.017092113196849848, 0.0, 1.0, 0.0,
+                    0.05906158499419689, 0.0, 0.0, 1.0, 0.007989027351140973,
+                    0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": ["McQ65EsxX+4zImFWp", "M5RYnLYjqM96Gt3Xp"]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    0.0, -1.0, 0.0, 0.05, 0.0, 0.0, 1.0, 0.05, -1.0, 0.0, 0.0,
+                    7.654042494670958e-19, 0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": ["McQ65EsxX+4zImFWp", "MUgiNm7M17UkTi3/g"]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    1.0, 0.0, 0.0, 0.04719286113977435, 0.0, 1.0, 0.0,
+                    0.049386829137802124, 0.0, 0.0, 1.0, -0.029588297195732596,
+                    0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": ["McQ65EsxX+4zImFWp", "McfxrmklF4aj7y0QV"]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    1.0, 0.0, 0.0, 0.025, 0.0, 1.0, 0.0, 0.05, 0.0, 0.0, 1.0,
+                    0.0, 0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": ["McQ65EsxX+4zImFWp", "MemtmVozirMm3DOIv"]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    0.0, 1.0, 0.0, 0.05, 0.0, 0.0, -1.0, 0.13, -1.0, 0.0, 0.0,
+                    0.05, 0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": [
+                    "McQ65EsxX+4zImFWp",
+                    "M5RYnLYjqM96Gt3Xp",
+                    "Mab4chCi5qewaKIBP"
+                ]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    0.0, 1.0, 0.0, -0.024999999999999988, 0.0, 0.0, -1.0, 0.05,
+                    -1.0, 0.0, 0.0, 0.05, 0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": [
+                    "McQ65EsxX+4zImFWp",
+                    "M5RYnLYjqM96Gt3Xp",
+                    "MwuDXa8z8ZtC98px1"
+                ]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    0.0, 1.0, 0.0, 0.05, 0.0, 0.0, -1.0, 0.13, -1.0, 0.0, 0.0,
+                    -0.05, 0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": [
+                    "McQ65EsxX+4zImFWp",
+                    "McfxrmklF4aj7y0QV",
+                    "Mab4chCi5qewaKIBP"
+                ]
+            },
+            {
+                "fixed": false,
+                "transform": [
+                    0.0, 0.0, 1.0, 0.05, 0.0, 1.0, 0.0, -0.024999999999999994,
+                    -1.0, 0.0, 0.0, -0.05, 0.0, 0.0, 0.0, 1.0
+                ],
+                "hidden": false,
+                "path": [
+                    "McQ65EsxX+4zImFWp",
+                    "McfxrmklF4aj7y0QV",
+                    "MwuDXa8z8ZtC98px1"
+                ]
+            }
+        ],
+        "documentMetaData": null
+    },
+    "subAssemblies": [
+        {
+            "fullConfiguration": "default",
+            "configuration": "default",
+            "documentId": "1859bf4489c74b8d9d74e797",
+            "elementId": "996c149cb195c9268ab062b4",
+            "documentMicroversion": "e4bc804c8c576f584572ec53",
+            "instances": [
+                {
+                    "fullConfiguration": "default",
+                    "configuration": "default",
+                    "documentId": "1859bf4489c74b8d9d74e797",
+                    "elementId": "2c9f8fbd558d77d25ff136d5",
+                    "documentMicroversion": "e4bc804c8c576f584572ec53",
+                    "isStandardContent": false,
+                    "type": "Part",
+                    "documentVersion": null,
+                    "id": "MUgiNm7M17UkTi3/g",
+                    "name": "Part 6 <1>",
+                    "suppressed": false,
+                    "partId": "JKD"
+                },
+                {
+                    "fullConfiguration": "default",
+                    "configuration": "default",
+                    "documentId": "1859bf4489c74b8d9d74e797",
+                    "elementId": "2c9f8fbd558d77d25ff136d5",
+                    "documentMicroversion": "e4bc804c8c576f584572ec53",
+                    "isStandardContent": false,
+                    "type": "Part",
+                    "documentVersion": null,
+                    "id": "MemtmVozirMm3DOIv",
+                    "name": "Part 12 <1>",
+                    "suppressed": false,
+                    "partId": "JNH"
+                },
+                {
+                    "fullConfiguration": "default",
+                    "configuration": "default",
+                    "documentId": "1859bf4489c74b8d9d74e797",
+                    "elementId": "385e9f7e25af7f09ad89eaf6",
+                    "documentMicroversion": "e4bc804c8c576f584572ec53",
+                    "id": "McfxrmklF4aj7y0QV",
+                    "type": "Assembly",
+                    "name": "Assembly 1 <1>",
+                    "suppressed": false,
+                    "isRigid": false
+                },
+                {
+                    "fullConfiguration": "default",
+                    "configuration": "default",
+                    "documentId": "1859bf4489c74b8d9d74e797",
+                    "elementId": "385e9f7e25af7f09ad89eaf6",
+                    "documentMicroversion": "e4bc804c8c576f584572ec53",
+                    "id": "M5RYnLYjqM96Gt3Xp",
+                    "type": "Assembly",
+                    "name": "Assembly 1 <2>",
+                    "suppressed": false,
+                    "isRigid": false
+                }
+            ],
+            "patterns": [],
+            "features": [
+                {
+                    "id": "M0Ql6xRGDXp4KXfKC",
+                    "suppressed": false,
+                    "featureType": "mate",
+                    "featureData": {
+                        "matedEntities": [
+                            {
+                                "matedOccurrence": ["MemtmVozirMm3DOIv"],
+                                "matedCS": {
+                                    "xAxis": [1.0, 0.0, 0.0],
+                                    "yAxis": [0.0, -1.0, 0.0],
+                                    "zAxis": [0.0, 0.0, -1.0],
+                                    "origin": [
+                                        0.025, 3.6739403974420597e-19, 0.0
+                                    ],
+                                    "part_tf": null
+                                },
+                                "parentCS": null
+                            },
+                            {
+                                "matedOccurrence": ["MUgiNm7M17UkTi3/g"],
+                                "matedCS": {
+                                    "xAxis": [0.0, 0.0, 1.0],
+                                    "yAxis": [0.0, -1.0, 0.0],
+                                    "zAxis": [1.0, 0.0, 0.0],
+                                    "origin": [0.0, 0.0, 0.0],
+                                    "part_tf": null
+                                },
+                                "parentCS": null
+                            }
+                        ],
+                        "mateType": "REVOLUTE",
+                        "name": "Revolute 1",
+                        "id": "M0Ql6xRGDXp4KXfKC"
+                    }
+                },
+                {
+                    "id": "M7xxEq+WXMoFLJ2j2",
+                    "suppressed": false,
+                    "featureType": "mate",
+                    "featureData": {
+                        "matedEntities": [
+                            {
+                                "matedOccurrence": [
+                                    "McfxrmklF4aj7y0QV",
+                                    "MwuDXa8z8ZtC98px1"
+                                ],
+                                "matedCS": {
+                                    "xAxis": [0.0, 1.0, 0.0],
+                                    "yAxis": [0.0, 0.0, -1.0],
+                                    "zAxis": [-1.0, 0.0, 0.0],
+                                    "origin": [
+                                        -0.025, 0.075, 3.061616997868383e-19
+                                    ],
+                                    "part_tf": null
+                                },
+                                "parentCS": null
+                            },
+                            {
+                                "matedOccurrence": ["MemtmVozirMm3DOIv"],
+                                "matedCS": {
+                                    "xAxis": [-0.0, 1.0, -0.0],
+                                    "yAxis": [-1.0, -0.0, -0.0],
+                                    "zAxis": [-0.0, -0.0, 1.0],
+                                    "origin": [
+                                        0.025, 3.6739403974420597e-19, -0.025
+                                    ],
+                                    "part_tf": null
+                                },
+                                "parentCS": null
+                            }
+                        ],
+                        "mateType": "REVOLUTE",
+                        "name": "Revolute 2",
+                        "id": "M7xxEq+WXMoFLJ2j2"
+                    }
+                },
+                {
+                    "id": "MXX5/WjAO8bEhcs+t",
+                    "suppressed": false,
+                    "featureType": "mate",
+                    "featureData": {
+                        "matedEntities": [
+                            {
+                                "matedOccurrence": [
+                                    "M5RYnLYjqM96Gt3Xp",
+                                    "MwuDXa8z8ZtC98px1"
+                                ],
+                                "matedCS": {
+                                    "xAxis": [0.0, 1.0, 0.0],
+                                    "yAxis": [0.0, 0.0, 1.0],
+                                    "zAxis": [1.0, 0.0, 0.0],
+                                    "origin": [
+                                        0.025, 0.075, 3.061616997868383e-19
+                                    ],
+                                    "part_tf": null
+                                },
+                                "parentCS": null
+                            },
+                            {
+                                "matedOccurrence": ["MemtmVozirMm3DOIv"],
+                                "matedCS": {
+                                    "xAxis": [1.0, 0.0, 0.0],
+                                    "yAxis": [0.0, -1.0, 0.0],
+                                    "zAxis": [-0.0, -0.0, -1.0],
+                                    "origin": [
+                                        0.025, 3.6739403974420597e-19, 0.025
+                                    ],
+                                    "part_tf": null
+                                },
+                                "parentCS": null
+                            }
+                        ],
+                        "mateType": "REVOLUTE",
+                        "name": "Revolute 3",
+                        "id": "MXX5/WjAO8bEhcs+t"
+                    }
+                }
+            ],
+            "MassProperty": null
+        },
+        {
+            "fullConfiguration": "default",
+            "configuration": "default",
+            "documentId": "1859bf4489c74b8d9d74e797",
+            "elementId": "385e9f7e25af7f09ad89eaf6",
+            "documentMicroversion": "e4bc804c8c576f584572ec53",
+            "instances": [
+                {
+                    "fullConfiguration": "default",
+                    "configuration": "default",
+                    "documentId": "1859bf4489c74b8d9d74e797",
+                    "elementId": "2c9f8fbd558d77d25ff136d5",
+                    "documentMicroversion": "e4bc804c8c576f584572ec53",
+                    "isStandardContent": false,
+                    "type": "Part",
+                    "documentVersion": null,
+                    "id": "Mab4chCi5qewaKIBP",
+                    "name": "Part 10 <1>",
+                    "suppressed": false,
+                    "partId": "JKT"
+                },
+                {
+                    "fullConfiguration": "default",
+                    "configuration": "default",
+                    "documentId": "1859bf4489c74b8d9d74e797",
+                    "elementId": "2c9f8fbd558d77d25ff136d5",
+                    "documentMicroversion": "e4bc804c8c576f584572ec53",
+                    "isStandardContent": false,
+                    "type": "Part",
+                    "documentVersion": null,
+                    "id": "MwuDXa8z8ZtC98px1",
+                    "name": "Part 4 <1>",
+                    "suppressed": false,
+                    "partId": "JHP"
+                }
+            ],
+            "patterns": [],
+            "features": [
+                {
+                    "id": "M5tuF0RxE/YtsEb49",
+                    "suppressed": false,
+                    "featureType": "mate",
+                    "featureData": {
+                        "matedEntities": [
+                            {
+                                "matedOccurrence": ["MwuDXa8z8ZtC98px1"],
+                                "matedCS": {
+                                    "xAxis": [0.0, 1.0, 0.0],
+                                    "yAxis": [0.0, 0.0, -1.0],
+                                    "zAxis": [-1.0, 0.0, 0.0],
+                                    "origin": [
+                                        0.0, 0.075, 3.061616997868383e-19
+                                    ],
+                                    "part_tf": null
+                                },
+                                "parentCS": null
+                            },
+                            {
+                                "matedOccurrence": ["Mab4chCi5qewaKIBP"],
+                                "matedCS": {
+                                    "xAxis": [-0.0, -0.0, -1.0],
+                                    "yAxis": [0.0, -1.0, 0.0],
+                                    "zAxis": [-1.0, -0.0, -0.0],
+                                    "origin": [0.0, 0.0, 0.08],
+                                    "part_tf": null
+                                },
+                                "parentCS": null
+                            }
+                        ],
+                        "mateType": "REVOLUTE",
+                        "name": "Revolute 1",
+                        "id": "M5tuF0RxE/YtsEb49"
+                    }
+                }
+            ],
+            "MassProperty": null
+        }
+    ],
+    "parts": [
+        {
+            "fullConfiguration": "default",
+            "configuration": "default",
+            "documentId": "1859bf4489c74b8d9d74e797",
+            "elementId": "2c9f8fbd558d77d25ff136d5",
+            "documentMicroversion": "e4bc804c8c576f584572ec53",
+            "isStandardContent": false,
+            "partId": "JNT",
+            "bodyType": "solid",
+            "mateConnectors": [],
+            "documentVersion": null,
+            "MassProperty": null,
+            "isRigidAssembly": false,
+            "rigidAssemblyToPartTF": null,
+            "rigidAssemblyWorkspaceId": null
+        },
+        {
+            "fullConfiguration": "default",
+            "configuration": "default",
+            "documentId": "1859bf4489c74b8d9d74e797",
+            "elementId": "2c9f8fbd558d77d25ff136d5",
+            "documentMicroversion": "e4bc804c8c576f584572ec53",
+            "isStandardContent": false,
+            "partId": "JKD",
+            "bodyType": "solid",
+            "mateConnectors": [
+                {
+                    "mateConnectorCS": {
+                        "xAxis": [0.0, 1.0, 0.0],
+                        "yAxis": [0.0, 0.0, 1.0],
+                        "zAxis": [1.0, 0.0, 0.0],
+                        "origin": [0.0, 0.0, 0.0],
+                        "part_tf": null
+                    },
+                    "featureId": "FS12ol4NTADqIEU_15"
+                }
+            ],
+            "documentVersion": null,
+            "MassProperty": null,
+            "isRigidAssembly": false,
+            "rigidAssemblyToPartTF": null,
+            "rigidAssemblyWorkspaceId": null
+        },
+        {
+            "fullConfiguration": "default",
+            "configuration": "default",
+            "documentId": "1859bf4489c74b8d9d74e797",
+            "elementId": "2c9f8fbd558d77d25ff136d5",
+            "documentMicroversion": "e4bc804c8c576f584572ec53",
+            "isStandardContent": false,
+            "partId": "JKT",
+            "bodyType": "solid",
+            "mateConnectors": [
+                {
+                    "mateConnectorCS": {
+                        "xAxis": [0.0, 1.0, 0.0],
+                        "yAxis": [0.0, 0.0, 1.0],
+                        "zAxis": [1.0, 0.0, 0.0],
+                        "origin": [0.0, 0.0, 0.08],
+                        "part_tf": null
+                    },
+                    "featureId": "FYfoeFCbLSurXbU_15"
+                }
+            ],
+            "documentVersion": null,
+            "MassProperty": null,
+            "isRigidAssembly": false,
+            "rigidAssemblyToPartTF": null,
+            "rigidAssemblyWorkspaceId": null
+        },
+        {
+            "fullConfiguration": "default",
+            "configuration": "default",
+            "documentId": "1859bf4489c74b8d9d74e797",
+            "elementId": "2c9f8fbd558d77d25ff136d5",
+            "documentMicroversion": "e4bc804c8c576f584572ec53",
+            "isStandardContent": false,
+            "partId": "JHP",
+            "bodyType": "solid",
+            "mateConnectors": [],
+            "documentVersion": null,
+            "MassProperty": null,
+            "isRigidAssembly": false,
+            "rigidAssemblyToPartTF": null,
+            "rigidAssemblyWorkspaceId": null
+        },
+        {
+            "fullConfiguration": "default",
+            "configuration": "default",
+            "documentId": "1859bf4489c74b8d9d74e797",
+            "elementId": "2c9f8fbd558d77d25ff136d5",
+            "documentMicroversion": "e4bc804c8c576f584572ec53",
+            "isStandardContent": false,
+            "partId": "JNH",
+            "bodyType": "solid",
+            "mateConnectors": [],
+            "documentVersion": null,
+            "MassProperty": null,
+            "isRigidAssembly": false,
+            "rigidAssemblyToPartTF": null,
+            "rigidAssemblyWorkspaceId": null
+        },
+        {
+            "fullConfiguration": "default",
+            "configuration": "default",
+            "documentId": "1859bf4489c74b8d9d74e797",
+            "elementId": "2c9f8fbd558d77d25ff136d5",
+            "documentMicroversion": "e4bc804c8c576f584572ec53",
+            "isStandardContent": false,
+            "partId": "JHD",
+            "bodyType": "solid",
+            "mateConnectors": [],
+            "documentVersion": null,
+            "MassProperty": null,
+            "isRigidAssembly": false,
+            "rigidAssemblyToPartTF": null,
+            "rigidAssemblyWorkspaceId": null
+        },
+        {
+            "fullConfiguration": "default",
+            "configuration": "default",
+            "documentId": "1859bf4489c74b8d9d74e797",
+            "elementId": "2c9f8fbd558d77d25ff136d5",
+            "documentMicroversion": "e4bc804c8c576f584572ec53",
+            "isStandardContent": false,
+            "partId": "JNP",
+            "bodyType": "solid",
+            "mateConnectors": [],
+            "documentVersion": null,
+            "MassProperty": null,
+            "isRigidAssembly": false,
+            "rigidAssemblyToPartTF": null,
+            "rigidAssemblyWorkspaceId": null
+        }
+    ],
+    "partStudioFeatures": [],
+    "document": {
+        "url": "https://cad.onshape.com/documents/1859bf4489c74b8d9d74e797/w/8e52be2776b88bd0b8524f80/e/46679c6ab890a1b7a6d11a88",
+        "base_url": "https://cad.onshape.com",
+        "did": "1859bf4489c74b8d9d74e797",
+        "wtype": "w",
+        "wid": "8e52be2776b88bd0b8524f80",
+        "eid": "46679c6ab890a1b7a6d11a88",
+        "name": "coordinates"
+    },
+    "name": "Assembly_3"
+}

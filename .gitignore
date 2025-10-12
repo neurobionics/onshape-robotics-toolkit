@@ -199,6 +199,7 @@ tests/**/*.stl
 tests/**/*.png
 tests/**/*.prof
 tests/**/*.json
+!tests/data/*.json
 examples/**/*.xml
 
 playground
