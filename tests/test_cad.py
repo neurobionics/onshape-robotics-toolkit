@@ -94,3 +94,84 @@ def test_everything_rigid_at_depth_zero(cad_doc_depth_0: CAD) -> None:
 
     # Only root-level mates survive because everything deeper is rigid.
     assert len(cad_doc_depth_0.mates) == 3
+
+
+def test_rigid_subassembly_key_assignment(cad_doc_depth_1: CAD) -> None:
+    """Parts within rigid subassemblies should have rigidAssemblyKey assigned."""
+    # Find all parts that are within rigid assemblies
+    parts_with_rigid_parent = [
+        (key, part)
+        for key, part in cad_doc_depth_1.parts.items()
+        if hasattr(part, "rigidAssemblyKey") and part.rigidAssemblyKey is not None
+    ]
+
+    assert len(parts_with_rigid_parent) > 0, "Expected some parts to have rigid assembly parents"
+
+    for _key, part in parts_with_rigid_parent:
+        # rigidAssemblyKey should point to a valid rigid assembly instance
+        assert part.rigidAssemblyKey in cad_doc_depth_1.instances
+        rigid_instance = cad_doc_depth_1.instances[part.rigidAssemblyKey]
+        assert isinstance(rigid_instance, AssemblyInstance)
+        assert rigid_instance.isRigid
+
+
+def test_rigid_subassembly_transform_propagation(cad_doc_depth_1: CAD) -> None:
+    """rigidAssemblyToPartTF should be set for parts within rigid assemblies when available."""
+    parts_in_rigid = [
+        part
+        for part in cad_doc_depth_1.parts.values()
+        if hasattr(part, "rigidAssemblyToPartTF") and part.rigidAssemblyToPartTF is not None
+    ]
+
+    # Note: This may be 0 if the Client is not provided or root occurrences are not fetched
+    # In that case, we just verify the structure when transforms ARE present
+    if len(parts_in_rigid) > 0:
+        for part in parts_in_rigid:
+            # Transform should be a valid MatedCS
+            from onshape_robotics_toolkit.models.assembly import MatedCS
+
+            assert isinstance(part.rigidAssemblyToPartTF, MatedCS)
+
+            # Transform should be a valid 4x4 matrix
+            tf = part.rigidAssemblyToPartTF.to_tf
+            import numpy as np
+
+            assert tf.shape == (4, 4)
+            # Last row should be [0, 0, 0, 1]
+            assert np.allclose(tf[3, :], [0, 0, 0, 1])
+    else:
+        # If no transforms are set, at least verify the rigid assembly keys are set
+        parts_with_rigid_key = [
+            part
+            for part in cad_doc_depth_1.parts.values()
+            if hasattr(part, "rigidAssemblyKey") and part.rigidAssemblyKey is not None
+        ]
+        # There should be some parts with rigidAssemblyKey even if transforms aren't set
+        assert len(parts_with_rigid_key) > 0, "Expected some parts to have rigid assembly keys"
+
+
+def test_sanitized_names_are_unique(cad_doc: CAD) -> None:
+    """All PathKey string representations should be unique."""
+    names = [str(key) for key in cad_doc.instances]
+    assert len(names) == len(set(names)), "PathKey names should be unique"
+
+
+def test_mate_remapping_for_rigid_subassemblies(cad_doc_depth_1: CAD) -> None:
+    """Mates involving rigid subassemblies should be properly remapped."""
+    # At depth 1, some nested assemblies become rigid
+    # Their internal mates should be filtered out
+    # Only mates connecting to/from rigid assemblies should remain
+
+    for (_asm_key, parent_key, child_key), _mate in cad_doc_depth_1.mates.items():
+        # Parent and child should be valid keys in the parts registry
+        assert parent_key in cad_doc_depth_1.parts, f"Parent {parent_key} not in parts"
+        assert child_key in cad_doc_depth_1.parts, f"Child {child_key} not in parts"
+
+        # If a mate involves a rigid assembly part, it should not be an internal mate
+        parent_part = cad_doc_depth_1.parts[parent_key]
+        child_part = cad_doc_depth_1.parts[child_key]
+
+        # Neither should be a "child part within a rigid assembly"
+        # (i.e., parts with rigidAssemblyToPartTF set are internal and shouldn't have mates)
+        assert parent_part.rigidAssemblyToPartTF is None, "Mate parent should not be internal to rigid assembly"
+        assert child_part.rigidAssemblyToPartTF is None, "Mate child should not be internal to rigid assembly"

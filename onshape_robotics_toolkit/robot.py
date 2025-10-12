@@ -171,7 +171,7 @@ def get_robot_link(
         else:
             LOGGER.warning(f"Part {name} has no worldToPartTF, using identity matrix")
 
-    world_to_link_tf = np.matrix(np.linalg.inv(_link_pose_wrt_world))
+    world_to_link_tf = np.linalg.inv(_link_pose_wrt_world)
     _origin = Origin.zero_origin()
     _principal_axes_rotation = (0.0, 0.0, 0.0)
 
@@ -186,7 +186,7 @@ def get_robot_link(
     else:
         _mass = part.MassProperty.mass[0]
         _com = tuple(part.MassProperty.center_of_mass_wrt(world_to_link_tf))
-        _inertia = part.MassProperty.inertia_wrt(np.matrix(world_to_link_tf[:3, :3]))
+        _inertia = part.MassProperty.inertia_wrt(world_to_link_tf[:3, :3])
 
     LOGGER.info(f"Creating robot link for {name}")
 

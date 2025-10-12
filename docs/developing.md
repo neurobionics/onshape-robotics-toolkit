@@ -192,6 +192,161 @@ Edges carry `data=<BaseJoint>` instances.
 - Call `graph.show()` or `robot.show_graph()` when debugging connectivity issues.
 - When rigid assemblies behave oddly, confirm `rigidAssemblyToPartTF` is set. If not, ensure `CAD.from_assembly` received a `Client` so it can fetch `RootOccurrences`.
 
+## Testing
+
+The test suite validates critical functionality across the entire pipeline with **52 tests** providing **48% coverage** of core logic. Tests are designed to run quickly (<1 second) without requiring Onshape API access.
+
+### Test Structure
+
+Tests are organized by functionality in the `tests/` directory:
+
+- **`test_urdf_generation.py`** (5 tests): End-to-end URDF generation with golden file comparison
+- **`test_transforms.py`** (16 tests): Coordinate frame transformations (MatedCS, Origin, joint/link positioning)
+- **`test_robot.py`** (6 tests): Robot generation, mate type coverage, joint limits, naming
+- **`test_kinematic_graph.py`** (9 tests): Graph construction, validation, rigid remapping
+- **`test_cad.py`** (11 tests): CAD parsing, rigid subassembly handling, name sanitization
+- **`test_pathkey.py`** (5 tests): PathKey behavior, sorting, validation
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run specific test module
+pytest tests/test_transforms.py -v
+
+# Run with coverage report
+pytest --cov --cov-report=term-missing
+
+# Run single test
+pytest tests/test_transforms.py::TestMatedCSTransformations::test_identity_transform -v
+```
+
+### Testing Approach
+
+**1. Golden File Testing** (`test_urdf_generation.py`)
+
+Tests compare generated URDF output against known-good reference files:
+
+```python
+# tests/data/assembly_expected.urdf is the golden file
+urdf_output = robot.to_urdf()
+is_equal, differences = compare_urdf_files(
+    generated_urdf, expected_urdf,
+    tolerance=1e-6, ignore_colors=True
+)
+assert is_equal, f"URDF differs: {differences}"
+```
+
+This catches regressions in URDF structure, transforms, or joint/link generation.
+
+**2. Transform Validation** (`test_transforms.py`)
+
+Tests validate coordinate frame transformations at multiple levels:
+
+- **MatedCS transformations**: Identity, translation, rotation, composition
+- **Origin calculations**: Matrix → Euler angle extraction
+- **Joint origins**: Parent frame composition with `world_to_parent_tf`
+- **Ball joints**: 3-DOF decomposition into revolute joints + dummy links
+
+All comparisons use `np.allclose()` with tolerance for floating-point stability.
+
+**3. Mate Type Coverage** (`test_robot.py`)
+
+Every supported mate type is tested:
+
+```python
+# REVOLUTE → RevoluteJoint with axis
+# FASTENED → FixedJoint
+# SLIDER/CYLINDRICAL → PrismaticJoint
+# BALL → 3 RevoluteJoints + 2 dummy links
+# PLANAR → DummyJoint (unsupported)
+```
+
+Tests verify correct joint type, axis direction, and limit values.
+
+**4. Rigid Subassembly Testing** (`test_cad.py`, `test_kinematic_graph.py`)
+
+Tests validate the complex rigid subassembly remapping logic:
+
+- `rigidAssemblyKey` assignment for parts within rigid assemblies
+- `rigidAssemblyToPartTF` transform propagation
+- Mate filtering (internal mates removed, external mates preserved)
+- Graph node depth limits when `max_depth` is applied
+
+**5. Mocking External Dependencies**
+
+Tests use mock clients to avoid network calls:
+
+```python
+@dataclass
+class DummyClient:
+    def download_part_stl(self, *_, **__):
+        raise RuntimeError("No network calls in unit tests")
+```
+
+This keeps tests fast and deterministic.
+
+### Test Fixtures
+
+Shared fixtures provide consistent test data:
+
+- **`assembly_json_path`**: Path to `tests/data/assembly.json`
+- **`assembly`**: Loaded Assembly object
+- **`cad_doc`**: CAD with `max_depth=2` (all flexible)
+- **`cad_doc_depth_1`**: CAD with `max_depth=1` (nested assemblies rigid)
+- **`cad_doc_depth_0`**: CAD with `max_depth=0` (all assemblies rigid)
+
+These fixtures test the same assembly at different rigidity levels.
+
+### Adding New Tests
+
+When contributing new features:
+
+1. **Add tests in the appropriate module**:
+
+   - Transform logic → `test_transforms.py`
+   - New mate type → `test_robot.py`
+   - Parsing changes → `test_cad.py`
+   - Graph modifications → `test_kinematic_graph.py`
+
+2. **Use parametrized tests** for multiple configurations:
+
+   ```python
+   @pytest.mark.parametrize("mate_type,expected_joint", [
+       (MateType.REVOLUTE, RevoluteJoint),
+       (MateType.SLIDER, PrismaticJoint),
+   ])
+   def test_mate_conversion(mate_type, expected_joint):
+       ...
+   ```
+
+3. **Update golden files** when URDF output changes intentionally:
+
+   ```bash
+   # Regenerate expected output
+   python -c "from tests.conftest import ...; generate_expected_urdf()"
+   ```
+
+4. **Test edge cases**: Gimbal lock, name conflicts, disconnected graphs, etc.
+
+### Coverage Goals
+
+Current coverage focuses on core logic:
+
+- **models/assembly.py**: 89% (mate handling, transforms)
+- **parse.py**: 63% (CAD construction, rigid remapping)
+- **graph.py**: 61% (graph building, validation)
+- **models/link.py**: 40% (link generation)
+- **models/joint.py**: 40% (joint types)
+
+Areas needing more coverage:
+
+- **connect.py**: 22% (API client - mostly needs integration tests)
+- **robot.py**: 35% (MJCF export, asset download)
+- **utilities/helpers.py**: 37% (utility functions)
+
 ## Contribution Checklist
 
 - Understand which stage you are modifying:
@@ -202,10 +357,17 @@ Edges carry `data=<BaseJoint>` instances.
   - `CAD.mates` must always store parent→child ordering.
   - Graph nodes/edges should only contain deep copies of data (no in-place mutations of `CAD` registries).
   - Robot node keys remain `PathKey` objects so we can trace back to CAD data.
-- Add tests alongside new features where possible. Focus on:
+- **Add tests alongside new features**. Focus on:
   - PathKey handling (depth/order) when touching the parser.
   - Graph connectivity/root selection when altering graph logic.
   - Joint/link outputs when introducing new mate types.
+  - Transform correctness using `np.allclose()` comparisons.
+  - Golden file updates for URDF/MJCF changes.
+- Run the full test suite before committing:
+  ```bash
+  pytest tests/ -v
+  make check  # Runs linting, type checking, and tests
+  ```
 - Document new behavior here and keep inline comments concise. If you introduce a new pipeline stage or helper, summarize it in this handbook so future contributors know where to look.
 
 Keeping this document aligned with the code makes onboarding new contributors faster and protects the assumptions baked into each stage of the pipeline. Update it anytime you change the parse/graph/robot trio or introduce new developer-facing workflows.

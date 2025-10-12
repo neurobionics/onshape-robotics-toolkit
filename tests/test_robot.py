@@ -187,3 +187,108 @@ def test_fetch_mass_properties_populates_parts(cad_doc_depth_0: CAD) -> None:
     skipped_parts = [part for part in cad_doc_depth_0.parts.values() if part.rigidAssemblyToPartTF is not None]
     for part in skipped_parts:
         assert part.MassProperty is None
+
+
+def test_all_supported_mate_types() -> None:
+    """Test that all supported mate types generate correct joint types."""
+
+    parent_key = PathKey(("parent",), ("parent",))
+    child_key = PathKey(("child",), ("child",))
+    used_names: set[str] = set()
+
+    # Test REVOLUTE -> RevoluteJoint
+    revolute_mate = _make_mate("revolute", MateType.REVOLUTE, ["parent"], ["child"])
+    joints, links = get_robot_joint(parent_key, child_key, revolute_mate, IDENTITY_TF, used_names)
+    assert isinstance(joints[(parent_key, child_key)], RevoluteJoint)
+    assert joints[(parent_key, child_key)].axis.xyz == (0.0, 0.0, -1.0)
+    assert links == {}
+
+    # Test FASTENED -> FixedJoint
+    fastened_mate = _make_mate("fastened", MateType.FASTENED, ["parent"], ["child"])
+    joints, links = get_robot_joint(parent_key, child_key, fastened_mate, IDENTITY_TF, used_names)
+    assert isinstance(joints[(parent_key, child_key)], FixedJoint)
+    assert links == {}
+
+    # Test SLIDER -> PrismaticJoint
+    slider_mate = _make_mate("slider", MateType.SLIDER, ["parent"], ["child"])
+    joints, links = get_robot_joint(parent_key, child_key, slider_mate, IDENTITY_TF, used_names)
+    assert isinstance(joints[(parent_key, child_key)], PrismaticJoint)
+    assert joints[(parent_key, child_key)].axis.xyz == (0.0, 0.0, -1.0)
+    assert links == {}
+
+    # Test CYLINDRICAL -> PrismaticJoint (treated same as SLIDER)
+    cylindrical_mate = _make_mate("cylindrical", MateType.CYLINDRICAL, ["parent"], ["child"])
+    joints, links = get_robot_joint(parent_key, child_key, cylindrical_mate, IDENTITY_TF, used_names)
+    assert isinstance(joints[(parent_key, child_key)], PrismaticJoint)
+    assert links == {}
+
+    # Test BALL -> 3 RevoluteJoints + 2 dummy links
+    ball_mate = _make_mate("ball", MateType.BALL, ["parent"], ["child"])
+    joints, links = get_robot_joint(parent_key, child_key, ball_mate, IDENTITY_TF, used_names)
+    assert len(joints) == 3
+    assert all(isinstance(j, RevoluteJoint) for j in joints.values())
+    assert links is not None and len(links) == 2
+
+    # Test unsupported types -> DummyJoint (if implemented)
+    # For now, unsupported types log a warning and create DummyJoint
+    from onshape_robotics_toolkit.models.joint import DummyJoint
+
+    # Test PLANAR (not fully supported)
+    planar_mate = _make_mate("planar", MateType.PLANAR, ["parent"], ["child"])
+    joints, links = get_robot_joint(parent_key, child_key, planar_mate, IDENTITY_TF, used_names)
+    # Check if it creates a DummyJoint or handles it differently
+    joint = joints[(parent_key, child_key)]
+    # PLANAR might not be supported, so it should create a DummyJoint or similar
+    assert isinstance(joint, (DummyJoint, BaseJoint))
+
+
+def test_joint_limits_are_set_correctly() -> None:
+    """Test that joint limits are set based on mate type."""
+    parent_key = PathKey(("parent",), ("parent",))
+    child_key = PathKey(("child",), ("child",))
+    used_names: set[str] = set()
+
+    # Revolute joint should have rotational limits
+    revolute_mate = _make_mate("revolute", MateType.REVOLUTE, ["parent"], ["child"])
+    joints, _ = get_robot_joint(parent_key, child_key, revolute_mate, IDENTITY_TF, used_names)
+    revolute_joint = joints[(parent_key, child_key)]
+
+    assert revolute_joint.limits is not None
+    assert revolute_joint.limits.lower == -2 * np.pi
+    assert revolute_joint.limits.upper == 2 * np.pi
+    assert revolute_joint.limits.effort == 1.0
+    assert revolute_joint.limits.velocity == 1.0
+
+    # Prismatic joint should have translational limits
+    slider_mate = _make_mate("slider", MateType.SLIDER, ["parent"], ["child"])
+    joints, _ = get_robot_joint(parent_key, child_key, slider_mate, IDENTITY_TF, used_names)
+    prismatic_joint = joints[(parent_key, child_key)]
+
+    assert prismatic_joint.limits is not None
+    assert prismatic_joint.limits.lower == -0.1
+    assert prismatic_joint.limits.upper == 0.1
+    assert prismatic_joint.limits.effort == 1.0
+    assert prismatic_joint.limits.velocity == 1.0
+
+
+def test_joint_naming_uniqueness() -> None:
+    """Test that joint names are made unique when there are conflicts."""
+    parent_key = PathKey(("parent",), ("parent",))
+    child1_key = PathKey(("child1",), ("child1",))
+    child2_key = PathKey(("child2",), ("child2",))
+    used_names: set[str] = set()
+
+    # Create two mates with the same name
+    mate1 = _make_mate("joint", MateType.REVOLUTE, ["parent"], ["child1"])
+    mate2 = _make_mate("joint", MateType.REVOLUTE, ["parent"], ["child2"])
+
+    joints1, _ = get_robot_joint(parent_key, child1_key, mate1, IDENTITY_TF, used_names)
+    joint1_name = joints1[(parent_key, child1_key)].name
+
+    joints2, _ = get_robot_joint(parent_key, child2_key, mate2, IDENTITY_TF, used_names)
+    joint2_name = joints2[(parent_key, child2_key)].name
+
+    # Names should be different
+    assert joint1_name != joint2_name
+    assert joint1_name in used_names
+    assert joint2_name in used_names

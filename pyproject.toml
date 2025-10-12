@@ -66,6 +66,10 @@ show_error_codes = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # Ignore gimbal lock warnings - these are expected in certain configurations
+    "ignore:Gimbal lock detected:UserWarning:onshape_robotics_toolkit.robot",
+]
 
 [tool.ruff]
 target-version = "py39"
