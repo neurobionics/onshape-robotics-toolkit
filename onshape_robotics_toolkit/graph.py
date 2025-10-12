@@ -214,22 +214,21 @@ class KinematicGraph(nx.DiGraph):
 
     def __init__(self, cad: CAD):
         """
-        Initialize and build kinematic graph from CAD data.
+        Initialize kinematic graph from CAD data.
 
         Note: The preferred way to create a KinematicGraph is via the `from_cad()`
-        classmethod, which makes the construction more explicit.
+        classmethod, which makes the construction more explicit and allows
+        configuring root node detection.
 
         Args:
-            name: Name of the kinematic graph
             cad: CAD assembly with PathKey-based registries
-            use_user_defined_root: Whether to use user-marked fixed part as root
 
         Examples:
             >>> # Preferred (explicit):
             >>> graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
 
             >>> # Also works (backward compatible):
-            >>> graph = KinematicGraph(cad, use_user_defined_root=True)
+            >>> graph = KinematicGraph(cad)
         """
         self.cad = cad
         self.root: Optional[PathKey] = None

@@ -267,15 +267,16 @@ def get_robot_joint(
     Generate a URDF joint from an Onshape mate feature.
 
     Args:
-        parent: The name of the parent link.
-        child: The name of the child link.
+        parent_key: The PathKey of the parent link.
+        child_key: The PathKey of the child link.
         mate: The Onshape mate feature object.
-        stl_to_parent_tf: The transformation matrix from the STL origin to the parent link origin.
+        world_to_parent_tf: The transformation matrix from world to parent link origin.
+        used_joint_names: Set of already used joint names for uniqueness checking.
         mimic: The mimic joint object.
-        is_rigid_assembly: Whether the assembly is a rigid assembly.
 
     Returns:
-        tuple[list[BaseJoint], Optional[list[Link]]]: The generated joint object and the links.
+        tuple[dict[tuple[PathKey, PathKey], BaseJoint], Optional[dict[PathKey, Link]]]:
+            The generated joints dict and optional dummy links dict.
 
     Examples:
         >>> get_robot_joint("root", "link1", mate, np.eye(4))
@@ -529,12 +530,11 @@ class Robot(nx.DiGraph):
         and robot generation in an efficient, streamlined way.
 
         Args:
-            cad: CAD document with PathKey-based registries
             kinematic_graph: Kinematic graph with parts and mates
             client: Onshape client for downloading assets and fetching mass properties
             name: The name of the robot
             robot_type: The type of the robot (URDF or MJCF)
-            include_rigid_subassembly_parts: Whether to include parts from rigid subassemblies
+            fetch_mass_properties: Whether to fetch mass properties for kinematic parts
 
         Returns:
             Robot: The generated robot model
@@ -1049,7 +1049,7 @@ class Robot(nx.DiGraph):
                             element.set("pos", " ".join(format_number(float(v)) for v in new_pos))
                             element.set("euler", " ".join(format_number(float(v)) for v in new_euler))
 
-                        parent_body.append(element)
+                        parent_body.append(element)  # type: ignore[arg-type]
 
                     root_body.remove(child_body)
                     body_elements[child_name] = parent_body
@@ -1075,7 +1075,7 @@ class Robot(nx.DiGraph):
             new_inertial.set("euler", " ".join(format_number(v) for v in combined_euler))
             new_inertial.set("diaginertia", " ".join(format_number(v) for v in combined_diaginertia))
             if parent_body is not None:
-                parent_body.append(new_inertial)
+                parent_body.append(new_inertial)  # type: ignore[arg-type]
 
         # Then process revolute joints
         joint_data_raw2: Optional[BaseJoint]

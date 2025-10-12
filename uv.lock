@@ -968,20 +968,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-dev = [
-    { name = "deptry" },
-    { name = "mypy" },
-    { name = "pre-commit" },
-    { name = "pymdown-extensions" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "tox" },
-    { name = "types-lxml" },
-]
 docs = [
     { name = "mkdocs" },
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
+    { name = "pymdown-extensions" },
 ]
 
 [package.dev-dependencies]
@@ -990,7 +981,6 @@ dev = [
     { name = "mypy" },
     { name = "pandas-stubs" },
     { name = "pre-commit" },
-    { name = "pymdown-extensions" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "scipy-stubs", version = "1.15.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -1004,31 +994,24 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.16.2" },
     { name = "lxml", specifier = ">=5.3.0" },
     { name = "matplotlib", specifier = ">=3.9.2" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.4.2" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.2.7" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.26.1" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.5.1" },
     { name = "networkx", specifier = ">=3.4.2" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "numpy-stl", specifier = ">=3.1.2" },
     { name = "pillow", specifier = ">=10.0.0" },
-    { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.4.0" },
     { name = "pydantic", specifier = ">=2.9.2" },
-    { name = "pymdown-extensions", marker = "extra == 'dev'", specifier = ">=10.12" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.2.0" },
-    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
+    { name = "pymdown-extensions", marker = "extra == 'docs'", specifier = ">=10.12" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "regex", specifier = ">=2024.9.11" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "scipy", specifier = ">=1.14.1" },
-    { name = "tox", marker = "extra == 'dev'", specifier = ">=4.11.1" },
-    { name = "types-lxml", marker = "extra == 'dev'", specifier = ">=2024.12.13" },
     { name = "typing-extensions", specifier = ">=4.12.0" },
 ]
-provides-extras = ["dev", "docs"]
+provides-extras = ["docs"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1036,7 +1019,6 @@ dev = [
     { name = "mypy", specifier = ">=1.5.1" },
     { name = "pandas-stubs", specifier = ">=2.3.2.250926" },
     { name = "pre-commit", specifier = ">=3.4.0" },
-    { name = "pymdown-extensions", specifier = ">=10.12" },
     { name = "pytest", specifier = ">=7.2.0" },
     { name = "pytest-cov", specifier = ">=4.0.0" },
     { name = "scipy-stubs", specifier = ">=1.15.3.0" },

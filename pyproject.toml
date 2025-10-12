@@ -23,20 +23,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.2.0",
-    "pytest-cov>=4.0.0",
-    "deptry>=0.16.2",
-    "mypy>=1.5.1",
-    "pre-commit>=3.4.0",
-    "tox>=4.11.1",
-    "pymdown-extensions>=10.12",
-    "types-lxml>=2024.12.13",
-]
 docs = [
     "mkdocs>=1.4.2",
     "mkdocs-material>=9.2.7",
     "mkdocstrings[python]>=0.26.1",
+    "pymdown-extensions>=10.12",
 ]
 
 [project.urls]
@@ -55,7 +46,6 @@ dev-dependencies = [
     "mypy>=1.5.1",
     "pre-commit>=3.4.0",
     "tox>=4.11.1",
-    "pymdown-extensions>=10.12",
     "types-lxml>=2024.12.13",
     "types-requests>=2.32.4.20250913",
     "types-networkx>=3.5.0.20250918",
@@ -139,4 +129,4 @@ source = ["onshape_robotics_toolkit"]
 # Skip example directories as they are not part of the main package
 extend_exclude = ["examples"]
 # Set dev dependency groups to ignore test/dev dependencies in obsolete check
-pep621_dev_dependency_groups = ["dev", "docs"]
+pep621_dev_dependency_groups = ["docs"]
