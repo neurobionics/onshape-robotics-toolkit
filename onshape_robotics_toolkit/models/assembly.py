@@ -47,10 +47,11 @@ Enum:
 """
 
 from enum import Enum
-from typing import Union
+from typing import Any, Union
 
 import numpy as np
-from pydantic import BaseModel, Field, field_validator
+import numpy.typing as npt
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from onshape_robotics_toolkit.models.document import Document, DocumentMetaData
 from onshape_robotics_toolkit.models.mass import MassProperties
@@ -222,6 +223,29 @@ class Occurrence(BaseModel):
 
         return v
 
+    @property
+    def tf(self) -> npt.NDArray[np.floating[Any]]:
+        """
+        Converts the flat list representation of the transformation matrix into a 4x4 numpy array.
+
+        Returns:
+            np.ndarray: A 4x4 numpy array representing the transformation matrix.
+        """
+        return np.array(self.transform).reshape(4, 4)
+
+    def tf_wrt(self, ref_tf: np.ndarray) -> npt.NDArray[np.floating[Any]]:
+        """
+        Computes the transformation matrix of this occurrence with respect to a reference transformation matrix.
+
+        Args:
+            ref_tf (np.ndarray): The reference 4x4 transformation matrix.
+
+        Returns:
+            np.ndarray: The 4x4 transformation matrix of this occurrence with respect to the reference.
+        """
+        result: npt.NDArray[np.floating[Any]] = np.linalg.inv(ref_tf) @ self.tf
+        return result
+
 
 class IDBase(BaseModel):
     """
@@ -377,8 +401,11 @@ class Part(IDBase):
     isStandardContent: bool = Field(..., description="Indicates if the part is standard content.")
     partId: str = Field(..., description="The unique identifier of the part.")
     bodyType: str = Field(..., description="The type of the body (e.g., solid, surface).")
-    mateConnectors: list[PartMateConnector] = Field(None, description="The mate connectors that belong to the part.")
-    documentVersion: str = Field(None, description="The version of the document.")
+    mateConnectors: list[Union[PartMateConnector, None]] = Field(
+        default_factory=list,
+        description="The mate connectors that belong to the part.",
+    )
+    documentVersion: Union[str, None] = Field(None, description="The version of the document.")
     MassProperty: Union[MassProperties, None] = Field(
         None, description="The mass properties of the part, this is a retrieved via a separate API call."
     )
@@ -386,11 +413,17 @@ class Part(IDBase):
     isRigidAssembly: bool = Field(
         False, description="Indicates if the part is a rigid assembly, i.e., a sub-assembly with no degrees of freedom."
     )
-    rigidAssemblyToPartTF: Union[dict[str, "MatedCS"], None] = Field(
+    rigidAssemblyKey: Union[Any, None] = Field(
+        None, description="The unique key of the rigid assembly, if it is a sub-assembly."
+    )
+    rigidAssemblyToPartTF: Union["MatedCS", None] = Field(
         None, description="The transformation matrix from the rigid assembly to the part coordinate system."
     )
     rigidAssemblyWorkspaceId: Union[str, None] = Field(
         None, description="The workspace ID of the rigid assembly, if it is a sub-assembly."
+    )
+    worldToPartTF: Union["MatedCS", None] = Field(
+        None, description="The transformation matrix representing the part wrt world coordinates"
     )
 
     @property
@@ -461,7 +494,7 @@ class PartInstance(IDBase):
 
     isStandardContent: bool = Field(..., description="Indicates if the part is standard content.")
     type: InstanceType = Field(..., description="The type of the instance, must be 'Part'.")
-    documentVersion: str = Field(None, description="The version of the document.")
+    documentVersion: Union[str, None] = Field(None, description="The version of the document.")
     id: str = Field(..., description="The unique identifier for the part instance.")
     name: str = Field(..., description="The name of the part instance.")
     suppressed: bool = Field(..., description="Indicates if the part instance is suppressed.")
@@ -544,6 +577,7 @@ class AssemblyInstance(IDBase):
     type: InstanceType = Field(..., description="The type of the instance, must be 'Assembly'.")
     name: str = Field(..., description="The name of the assembly instance.")
     suppressed: bool = Field(..., description="Indicates if the assembly instance is suppressed.")
+    documentVersion: Union[str, None] = Field(None, description="The version of the document.")
 
     isRigid: bool = Field(
         False,
@@ -603,15 +637,14 @@ class MatedCS(BaseModel):
         )
     """
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     xAxis: list[float] = Field(..., description="The x-axis vector of the coordinate system.")
     yAxis: list[float] = Field(..., description="The y-axis vector of the coordinate system.")
     zAxis: list[float] = Field(..., description="The z-axis vector of the coordinate system.")
     origin: list[float] = Field(..., description="The origin point of the coordinate system.")
 
-    part_tf: np.matrix = Field(
+    tf: Union[np.ndarray, None] = Field(
         None, description="The 4x4 transformation matrix from the part coordinate system to the mate coordinate system."
     )
 
@@ -635,40 +668,42 @@ class MatedCS(BaseModel):
         return v
 
     @property
-    def part_to_mate_tf(self) -> np.matrix:
+    def to_tf(self) -> np.ndarray:
         """
         Generates a transformation matrix from the part coordinate system to the mate coordinate system.
 
         Returns:
-            np.matrix: The 4x4 transformation matrix.
+            np.ndarray: The 4x4 transformation matrix.
         """
-        if self.part_tf is not None:
-            return self.part_tf
+        if self.tf is not None:
+            return self.tf
 
         rotation_matrix = np.array([self.xAxis, self.yAxis, self.zAxis]).T
         translation_vector = np.array(self.origin)
         part_to_mate_tf = np.eye(4)
         part_to_mate_tf[:3, :3] = rotation_matrix
         part_to_mate_tf[:3, 3] = translation_vector
-        return np.matrix(part_to_mate_tf)
+        return part_to_mate_tf
 
     @classmethod
-    def from_tf(cls, tf: np.matrix) -> "MatedCS":
+    def from_tf(cls, tf: np.ndarray) -> "MatedCS":
         """
         Creates a MatedCS object from a 4x4 transformation matrix.
 
         Args:
-            tf (np.matrix): The 4x4 transformation matrix.
+            tf (np.ndarray): The 4x4 transformation matrix.
 
         Returns:
             MatedCS: The MatedCS object created from the transformation matrix.
         """
+        # Ensure tf is a regular ndarray
+        tf_array = np.asarray(tf)
         return MatedCS(
-            xAxis=tf[:3, 0].flatten().tolist()[0],
-            yAxis=tf[:3, 1].flatten().tolist()[0],
-            zAxis=tf[:3, 2].flatten().tolist()[0],
-            origin=tf[:3, 3].flatten().tolist()[0],
-            part_tf=tf,
+            xAxis=tf_array[:3, 0].flatten().tolist(),
+            yAxis=tf_array[:3, 1].flatten().tolist(),
+            zAxis=tf_array[:3, 2].flatten().tolist(),
+            origin=tf_array[:3, 3].flatten().tolist(),
+            tf=tf_array,
         )
 
 
@@ -716,10 +751,6 @@ class MatedEntity(BaseModel):
 
     matedOccurrence: list[str] = Field(..., description="A list of identifiers for the occurrences that are mated.")
     matedCS: MatedCS = Field(..., description="The coordinate system used for mating the parts.")
-
-    parentCS: MatedCS = Field(
-        None, description="The 4x4 transformation matrix for the mate feature, used for custom transformations."
-    )
 
 
 class MateRelationMate(BaseModel):
@@ -829,8 +860,7 @@ class MateGroupFeatureData(BaseModel):
         ..., description="A list of occurrences in the mate group feature."
     )
     name: str = Field(..., description="The name of the mate group feature.")
-
-    id: str = Field(None, description="The unique identifier of the feature.")
+    id: str = Field(..., description="The unique identifier of the feature.")
 
 
 class MateConnectorFeatureData(BaseModel):
@@ -890,7 +920,7 @@ class MateConnectorFeatureData(BaseModel):
     )
     name: str = Field(..., description="The name of the mate connector feature.")
 
-    id: str = Field(None, description="The unique identifier of the feature.")
+    id: str = Field(..., description="The unique identifier of the feature.")
 
 
 class MateRelationFeatureData(BaseModel):
@@ -956,7 +986,7 @@ class MateRelationFeatureData(BaseModel):
     )
     name: str = Field(..., description="The name of the mate relation feature.")
 
-    id: str = Field(None, description="The unique identifier of the feature.")
+    id: str = Field(..., description="The unique identifier of the feature.")
 
 
 class MateFeatureData(BaseModel):
@@ -1015,14 +1045,13 @@ class MateFeatureData(BaseModel):
 
     """
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     matedEntities: list[MatedEntity] = Field(..., description="A list of mated entities.")
     mateType: MateType = Field(..., description="The type of mate.")
     name: str = Field(..., description="The name of the mate feature.")
 
-    id: str = Field(None, description="The unique identifier of the feature.")
+    id: str = Field(..., description="The unique identifier of the feature.")
 
 
 class AssemblyFeature(BaseModel):
@@ -1101,14 +1130,68 @@ class AssemblyFeature(BaseModel):
         Field(..., description="Data associated with the assembly feature.")
     )
 
+    @model_validator(mode="before")
+    def validate_feature_data(cls, values: Any) -> Any:
+        """Custom validator to properly parse featureData based on featureType."""
+        if isinstance(values, dict):
+            feature_type = values.get("featureType")
+            feature_data = values.get("featureData")
+
+            if feature_data and isinstance(feature_data, dict):
+                # Add the required 'id' field to featureData from the parent feature
+                feature_data["id"] = values.get("id", "")
+
+                # Parse based on feature type
+                if feature_type == AssemblyFeatureType.MATE:
+                    values["featureData"] = MateFeatureData(**feature_data)
+                elif feature_type == AssemblyFeatureType.MATEGROUP:
+                    values["featureData"] = MateGroupFeatureData(**feature_data)
+                elif feature_type == AssemblyFeatureType.MATECONNECTOR:
+                    values["featureData"] = MateConnectorFeatureData(**feature_data)
+                elif feature_type == AssemblyFeatureType.MATERELATION:
+                    values["featureData"] = MateRelationFeatureData(**feature_data)
+
+        return values
+
+
+class PatternType(str, Enum):
+    CIRCULAR = "CIRCULAR"
+    LINEAR = "LINEAR"
+    MIRROR = "MIRROR"
+
 
 class Pattern(BaseModel):
     """
     Represents a pattern feature within an assembly, defining repeated instances of parts or sub-assemblies.
+
+    JSON:
+        ```json
+            {
+                "seedToPatternInstances" : {
+                    "MZAZxYCFuiiBSyUyF" : [ "Iska+TckyjXBC+1xA", "I1QmePT4s7IvbpMFC" ]
+                },
+                "name" : "Circular pattern 1",
+                "suppressed" : false,
+                "id" : "MVJMTPg/7tNhLqnTy",
+                "type" : "CIRCULAR"
+            }
+        ```
+    Attributes:
+        seedToPatternInstances (dict[str, list[str]]): A mapping of seed instance IDs to their
+            corresponding pattern instance IDs.
+        name (str): The name of the pattern feature.
+        suppressed (bool): Indicates if the pattern feature is suppressed.
+        id (str): The unique identifier of the pattern feature.
+        type (PatternType): The type of the pattern (e.g., CIRCULAR, LINEAR).
     """
 
-    # TODO: Implement Pattern model
-    pass
+    seedToPatternInstances: dict[Union[tuple[str, ...], str], Union[list[list[str]], list[str]]] = Field(
+        ..., description="A mapping of seed instance IDs to their corresponding pattern instance IDs."
+    )
+    name: str = Field(..., description="The name of the pattern feature.")
+    suppressed: bool = Field(..., description="Indicates if the pattern feature is suppressed.")
+    id: str = Field(..., description="The unique identifier of the pattern feature.")
+    type: PatternType = Field(..., description="The type of the pattern (e.g., CIRCULAR, LINEAR).")
 
 
 class SubAssembly(IDBase):
@@ -1175,7 +1258,13 @@ class SubAssembly(IDBase):
     features: list[AssemblyFeature] = Field(..., description="A list of features in the sub-assembly")
 
     MassProperty: Union[MassProperties, None] = Field(
-        None, description="The mass properties of the sub-assembly, this is a retrieved via a separate API call."
+        None, description="The mass properties of the sub-assembly, this is retrieved via a separate API call."
+    )
+
+    isRigid: bool = Field(False, description="Indicates if the sub-assembly is a rigid assembly")
+
+    RootOccurrences: Union[dict[Any, Occurrence], None] = Field(
+        None, description="A list of occurrences from the subassembly frame, this is retrieved via a separate API call"
     )
 
     @property
@@ -1333,14 +1422,12 @@ class Assembly(BaseModel):
 
 
 if __name__ == "__main__":
-    # mated_cs = MatedCS(
-    #     xAxis=[1.0, 2.0, 3.0],
-    #     yAxis=[4.0, 5.0, 6.0],
-    #     zAxis=[7.0, 8.0, 9.0],
-    #     origin=[10.0, 11.0, 12.0],
-    # )
+    mated_cs = MatedCS(
+        xAxis=[1.0, 2.0, 3.0],
+        yAxis=[4.0, 5.0, 6.0],
+        zAxis=[7.0, 8.0, 9.0],
+        origin=[10.0, 11.0, 12.0],
+        tf=None,
+    )
 
-    transform = [1.0, 0.0, 0.0, 0.1, 0.0, 1.0, 0.0, -0.15, 0.0, 0.0, 1.0, -0.01, 0.0, 0.0, 0.0, 1.0]
-
-    mated_cs = MatedCS.from_tf(np.matrix(transform).reshape(4, 4))
     print(mated_cs.xAxis, mated_cs.yAxis, mated_cs.zAxis, mated_cs.origin)

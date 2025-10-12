@@ -28,6 +28,7 @@ from collections import deque
 from datetime import datetime
 from enum import Enum
 from logging.handlers import RotatingFileHandler
+from types import TracebackType
 from typing import Any, Callable, Optional, Union
 
 __all__ = ["LOGGER", "LOG_LEVEL", "Logger"]
@@ -110,7 +111,7 @@ class Logger(logging.Logger):
 
     _instance = None
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, *args: Any, **kwargs: Any) -> "Logger":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         else:
@@ -154,7 +155,7 @@ class Logger(logging.Logger):
             self._file_path: str = ""
             self._csv_path: str = ""
             self._file: Optional[Any] = None
-            self._writer = None
+            self._writer: Optional[Any] = None
             self._is_logging = False
             self._header_written = False
 
@@ -201,7 +202,7 @@ class Logger(logging.Logger):
             self._file_handler.setFormatter(fmt=self._std_formatter)
             self.addHandler(hdlr=self._file_handler)
 
-    def _ensure_file_handler(self):
+    def _ensure_file_handler(self) -> None:
         if not hasattr(self, "_file_handler"):
             self._setup_file_handler()
 
@@ -373,14 +374,16 @@ class Logger(logging.Logger):
         if not self._header_written:
             self._write_header()
 
-        self._writer.writerows(self._buffer)
+        if self._writer is not None:
+            self._writer.writerows(self._buffer)
         self._buffer.clear()
         self._file.flush()
 
     def _write_header(self) -> None:
         header = list(self._var_names.values())
 
-        self._writer.writerow(header)  # type: ignore[assignment]
+        if self._writer is not None:
+            self._writer.writerow(header)
         self._header_written = True
 
     def _generate_file_paths(self) -> None:
@@ -397,7 +400,9 @@ class Logger(logging.Logger):
     def __enter__(self) -> "Logger":
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self, exc_type: Optional[type[BaseException]], exc_val: Optional[BaseException], exc_tb: Optional[TracebackType]
+    ) -> None:
         self.close()
 
     def reset(self) -> None:
@@ -426,27 +431,27 @@ class Logger(logging.Logger):
             self._file = None
             self._writer = None
 
-    def debug(self, msg, *args, **kwargs):
+    def debug(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         self._ensure_file_handler()
         super().debug(msg, *args, **kwargs)
 
-    def info(self, msg, *args, **kwargs):
+    def info(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         self._ensure_file_handler()
         super().info(msg, *args, **kwargs)
 
-    def warning(self, msg, *args, **kwargs):
+    def warning(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         self._ensure_file_handler()
         super().warning(msg, *args, **kwargs)
 
-    def error(self, msg, *args, **kwargs):
+    def error(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         self._ensure_file_handler()
         super().error(msg, *args, **kwargs)
 
-    def critical(self, msg, *args, **kwargs):
+    def critical(self, msg: Any, *args: Any, **kwargs: Any) -> None:
         self._ensure_file_handler()
         super().critical(msg, *args, **kwargs)
 
-    def log(self, level, msg, *args, **kwargs):
+    def log(self, level: int, msg: Any, *args: Any, **kwargs: Any) -> None:
         self._ensure_file_handler()
         super().log(level, msg, *args, **kwargs)
 

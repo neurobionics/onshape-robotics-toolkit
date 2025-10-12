@@ -5,8 +5,14 @@ subassemblies, instances, and mates, and generate a hierarchical representation 
 """
 
 import asyncio
-import uuid
-from typing import Optional, Union
+from collections import deque
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional, Union
+
+if TYPE_CHECKING:
+    pass
+
+import copy
 
 import numpy as np
 
@@ -17,25 +23,26 @@ from onshape_robotics_toolkit.models.assembly import (
     AssemblyFeature,
     AssemblyFeatureType,
     AssemblyInstance,
-    InstanceType,
     MatedCS,
     MateFeatureData,
-    MateRelationFeatureData,
     Occurrence,
     Part,
     PartInstance,
-    RelationType,
+    Pattern,
     RootAssembly,
     SubAssembly,
 )
 from onshape_robotics_toolkit.models.document import WorkspaceType
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
-SUBASSEMBLY_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
-MATE_JOINER = f"_{uuid.uuid4().hex[:4].upper()}_"
+# Path and entity constants
+ROOT_PATH_NAME = "root"
+SUBASSEMBLY_PATH_PREFIX = "subassembly"
 
-LOGGER.info(f"Generated joiners - SUBASSEMBLY: {SUBASSEMBLY_JOINER}, MATE: {MATE_JOINER}")
+# Assembly classification constants
+RIGID_ASSEMBLY_ONLY_FEATURE_TYPES = {AssemblyFeatureType.MATEGROUP}
 
+# Entity relationship constants
 CHILD = 0
 PARENT = 1
 
@@ -43,626 +50,1110 @@ RELATION_CHILD = 1
 RELATION_PARENT = 0
 
 
-# TODO: get_mate_connectors method to parse part mate connectors that may be useful to someone
-async def traverse_instances_async(
-    root: Union[RootAssembly, SubAssembly],
-    prefix: str,
-    current_depth: int,
-    max_depth: int,
-    assembly: Assembly,
-    id_to_name_map: dict[str, str],
-    instance_map: dict[str, Union[PartInstance, AssemblyInstance]],
-) -> None:
+@dataclass(frozen=True, slots=True)
+class PathKey:
     """
-    Asynchronously traverse the assembly structure to get instances.
+    Immutable path-based key using Onshape's natural ID hierarchy.
 
-    Args:
-        root: The root assembly or subassembly to traverse.
-        prefix: The prefix for the instance ID.
-        current_depth: The current depth in the assembly hierarchy.
-        max_depth: The maximum depth to traverse.
-        assembly: The assembly object to traverse.
-        id_to_name_map: A dictionary mapping instance IDs to their sanitized names.
-        instance_map: A dictionary mapping instance IDs to their corresponding instances.
-    """
-    isRigid = False
-    if current_depth >= max_depth:
-        LOGGER.debug(
-            f"Max depth {max_depth} reached. Assuming all sub-assemblies to be rigid at depth {current_depth}."
-        )
-        isRigid = True
-
-    for instance in root.instances:
-        sanitized_name = get_sanitized_name(instance.name)
-        LOGGER.debug(f"Parsing instance: {sanitized_name}")
-        instance_id = f"{prefix}{SUBASSEMBLY_JOINER}{sanitized_name}" if prefix else sanitized_name
-        id_to_name_map[instance.id] = sanitized_name
-        instance_map[instance_id] = instance
-
-        if instance.type == InstanceType.ASSEMBLY:
-            instance_map[instance_id].isRigid = isRigid
-
-        # Handle subassemblies concurrently
-        if instance.type == InstanceType.ASSEMBLY:
-            tasks = [
-                traverse_instances_async(
-                    sub_assembly, instance_id, current_depth + 1, max_depth, assembly, id_to_name_map, instance_map
-                )
-                for sub_assembly in assembly.subAssemblies
-                if sub_assembly.uid == instance.uid
-            ]
-            await asyncio.gather(*tasks)
-
-
-def get_instances(
-    assembly: Assembly, max_depth: int = 0
-) -> tuple[dict[str, Union[PartInstance, AssemblyInstance]], dict[str, Occurrence], dict[str, str]]:
-    """
-    Optimized synchronous wrapper for `get_instances`.
-
-    Args:
-        assembly: The assembly object to traverse.
-        max_depth: The maximum depth to traverse.
-
-    Returns:
-        A tuple containing:
-        - A dictionary mapping instance IDs to their corresponding instances.
-        - A dictionary mapping instance IDs to their sanitized names.
-    """
-    instance_map: dict[str, Union[PartInstance, AssemblyInstance]] = {}
-    id_to_name_map: dict[str, str] = {}
-    asyncio.run(
-        traverse_instances_async(
-            assembly.rootAssembly,
-            "",
-            0,
-            max_depth,
-            assembly,
-            id_to_name_map,
-            instance_map,
-        )
-    )
-    occurrence_map = get_occurrences(assembly, id_to_name_map, max_depth)
-    return instance_map, occurrence_map, id_to_name_map
-
-
-def get_instances_sync(
-    assembly: Assembly, max_depth: int = 0
-) -> tuple[dict[str, Union[PartInstance, AssemblyInstance]], dict[str, Occurrence], dict[str, str]]:
-    """
-    Get instances and their sanitized names from an Onshape assembly.
-
-    Args:
-        assembly: The Onshape assembly object to use for extracting instances.
-        max_depth: Maximum depth to traverse in the assembly hierarchy. Default is 0
-
-    Returns:
-        A tuple containing:
-        - A dictionary mapping instance IDs to their corresponding instances.
-        - A dictionary mapping instance IDs to their sanitized names.
+    Stores both ID path (for uniqueness/hashing) and name path (for readability).
+    Both paths are built during CAD population and cached in the PathKey.
 
     Examples:
-        >>> assembly = Assembly(...)
-        >>> get_instances(assembly, max_depth=2)
-        (
-            {
-                "part1": PartInstance(...),
-                "subassembly1": AssemblyInstance(...),
-            },
-            {
-                "part1": "part1",
-                "subassembly1": "subassembly1",
-            }
+        # Root-level part instance
+        PathKey(("MqRDHdbA0tAm2ygBR",), ("wheel_1",))
+
+        # Nested part in subassembly
+        PathKey(
+            ("MoN/4FhyvQ92+I8TU", "MZHBlAU4IxmX6u6A0", "MrpOYQ6mQsyqwPVz0"),
+            ("assembly_1", "subassembly_2", "part_3")
         )
     """
 
-    def traverse_instances(
-        root: Union[RootAssembly, SubAssembly], prefix: str = "", current_depth: int = 0
-    ) -> tuple[dict[str, Union[PartInstance, AssemblyInstance]], dict[str, str]]:
+    _path: tuple[str, ...]
+    _name_path: tuple[str, ...]
+
+    def __init__(self, path: tuple[str, ...], name_path: tuple[str, ...]):
         """
-        Traverse the assembly structure to get instances.
+        Create a PathKey from tuples of instance IDs and names.
 
         Args:
-            root: Root assembly or subassembly object to traverse.
-            prefix: Prefix for the instance ID.
-            current_depth: Current depth in the assembly hierarchy.
+            path: Tuple of Onshape instance IDs representing hierarchical position
+            name_path: Tuple of sanitized names parallel to path
+        """
+        if len(path) != len(name_path):
+            raise ValueError(f"path and name_path must have same length: {len(path)} != {len(name_path)}")
+
+        object.__setattr__(self, "_path", path)
+        object.__setattr__(self, "_name_path", name_path)
+
+    @property
+    def path(self) -> tuple[str, ...]:
+        """Get the immutable ID path tuple."""
+        return self._path
+
+    @property
+    def name_path(self) -> tuple[str, ...]:
+        """Get the immutable name path tuple."""
+        return self._name_path
+
+    @property
+    def leaf(self) -> str:
+        """Get the last ID in the path (the actual entity ID)."""
+        return self._path[-1] if self._path else ""
+
+    @property
+    def name(self) -> str:
+        """Get the last name in the path (human-readable leaf name)."""
+        return self._name_path[-1] if self._name_path else ""
+
+    @property
+    def parent(self) -> Optional["PathKey"]:
+        """Get parent PathKey by trimming last element."""
+        if len(self._path) <= 1:
+            return None
+        return PathKey(self._path[:-1], self._name_path[:-1])
+
+    @property
+    def root(self) -> Optional[str]:
+        """Get the root ID (first element in path)."""
+        return self._path[0] if self._path else None
+
+    @property
+    def depth(self) -> int:
+        """Get depth in hierarchy (0 = root level)."""
+        return len(self._path) - 1
+
+    def __repr__(self) -> str:
+        return f"PathKey({self._path})"
+
+    def __str__(self) -> str:
+        """String representation showing the name path structure."""
+        return "_".join(self._name_path) if self._name_path else "(empty)"
+
+    def __lt__(self, other: "PathKey") -> bool:
+        """
+        Less-than comparison for sorting PathKeys.
+
+        Compares by depth first, then lexicographically by path elements.
+        This ensures consistent ordering for visualization and debugging.
+
+        Args:
+            other: Another PathKey to compare with
 
         Returns:
-            A tuple containing:
-            - A dictionary mapping instance IDs to their corresponding instances.
-            - A dictionary mapping instance IDs to their sanitized names.
+            True if this PathKey should sort before other
         """
-        instance_map = {}
-        id_to_name_map = {}
+        if not isinstance(other, PathKey):
+            return NotImplemented
+        # Sort by depth first (shallower first), then by path
+        return (self.depth, self._path) < (other.depth, other._path)
 
-        # Stop traversing if the maximum depth is reached
-        if current_depth >= max_depth:
-            LOGGER.debug(f"Max depth {max_depth} reached. Stopping traversal at depth {current_depth}.")
-            return instance_map, id_to_name_map
+    def __le__(self, other: "PathKey") -> bool:
+        """Less-than-or-equal comparison."""
+        if not isinstance(other, PathKey):
+            return NotImplemented
+        return (self.depth, self._path) <= (other.depth, other._path)
 
-        for instance in root.instances:
-            sanitized_name = get_sanitized_name(instance.name)
-            LOGGER.debug(f"Parsing instance: {sanitized_name}")
-            instance_id = f"{prefix}{SUBASSEMBLY_JOINER}{sanitized_name}" if prefix else sanitized_name
-            id_to_name_map[instance.id] = sanitized_name
-            instance_map[instance_id] = instance
+    def __gt__(self, other: "PathKey") -> bool:
+        """Greater-than comparison."""
+        if not isinstance(other, PathKey):
+            return NotImplemented
+        return (self.depth, self._path) > (other.depth, other._path)
 
-            # Recursively process sub-assemblies if applicable
-            if instance.type == InstanceType.ASSEMBLY:
-                for sub_assembly in assembly.subAssemblies:
-                    if sub_assembly.uid == instance.uid:
-                        sub_instance_map, sub_id_to_name_map = traverse_instances(
-                            sub_assembly, instance_id, current_depth + 1
-                        )
-                        instance_map.update(sub_instance_map)
-                        id_to_name_map.update(sub_id_to_name_map)
+    def __ge__(self, other: "PathKey") -> bool:
+        """Greater-than-or-equal comparison."""
+        if not isinstance(other, PathKey):
+            return NotImplemented
+        return (self.depth, self._path) >= (other.depth, other._path)
 
-        return instance_map, id_to_name_map
+    @classmethod
+    def from_path(cls, path: Union[list[str], str], id_to_name: dict[str, str]) -> "PathKey":
+        """
+        Create PathKey from a path (list) or single instance ID (string).
 
-    instance_map, id_to_name_map = traverse_instances(assembly.rootAssembly)
-    # return occurrences internally as it relies on max_depth
-    occurrence_map = get_occurrences(assembly, id_to_name_map, max_depth)
+        This handles both:
+        - occurrence.path from JSON (list of IDs)
+        - matedOccurrence from mate features (list of IDs)
+        - single instance ID for root-level instances (string)
 
-    return instance_map, occurrence_map, id_to_name_map
+        Args:
+            path: Either a list of instance IDs or a single instance ID string
+            id_to_name: Mapping from instance ID to sanitized name
+
+        Returns:
+            PathKey with both ID and name paths
+
+        Examples:
+            # From occurrence JSON (list)
+            occ_key = PathKey.from_path(occurrence.path, id_to_name)
+            # PathKey(("MoN/4FhyvQ92+I8TU", "MM10pxoGk/3TUSoYG"), ("asm_1", "part_2"))
+
+            # From single instance ID (string)
+            part_key = PathKey.from_path("MqRDHdbA0tAm2ygBR", id_to_name)
+            # PathKey(("MqRDHdbA0tAm2ygBR",), ("wheel_1",))
+        """
+        # Single instance ID -> single-element tuple, otherwise convert list to tuple
+        id_tuple = (path,) if isinstance(path, str) else tuple(path)
+        try:
+            name_tuple = tuple(id_to_name[instance_id] for instance_id in id_tuple)
+        except KeyError as e:
+            raise KeyError(f"Instance ID {e} not found in id_to_name mapping") from e
+
+        return cls(id_tuple, name_tuple)
 
 
-def get_occurrences(assembly: Assembly, id_to_name_map: dict[str, str], max_depth: int = 0) -> dict[str, Occurrence]:
+@dataclass
+class CAD:
     """
-    Optimized occurrences fetching using comprehensions.
+    Streamlined CAD document with flat dict-based storage.
 
-    Args:
-        assembly: The assembly object to traverse.
-        id_to_name_map: A dictionary mapping instance IDs to their sanitized names.
-        max_depth: The maximum depth to traverse. Default is 0
+    All data is stored in simple dicts keyed by PathKey for O(1) lookup.
+    No nested registries, no duplicate storage, single source of truth.
 
-    Returns:
-        A dictionary mapping occurrence paths to their corresponding occurrences.
-    """
-    return {
-        SUBASSEMBLY_JOINER.join([
-            id_to_name_map[path] for path in occurrence.path if path in id_to_name_map
-        ]): occurrence
-        for occurrence in assembly.rootAssembly.occurrences
-        if len(occurrence.path) <= max_depth + 1
+    This structure maps to Onshape's assembly JSON schema but flattens
+    the hierarchy for easier access:
+    {
+      "parts": [...],                    -> parts (populated eagerly, mass props None)
+      "rootAssembly": {
+        "instances": [...],              -> instances (flattened)
+        "occurrences": [...],            -> occurrences (flattened)
+        "features": [...],               -> mates (with assembly provenance)
+        "patterns": [...]                -> patterns (flattened)
+      },
+      "subAssemblies": [...]             -> data merged into root dicts
     }
 
-
-async def fetch_rigid_subassemblies_async(
-    subassembly: SubAssembly, key: str, client: Client, rigid_subassembly_map: dict[str, RootAssembly]
-):
+    Attributes:
+        document_id: Onshape document ID
+        element_id: Onshape element (assembly) ID
+        workspace_id: Onshape workspace ID
+        document_microversion: Onshape document microversion
+        max_depth: Maximum depth for flexible assemblies (0 = all rigid)
+        keys_by_id: Canonical PathKey index by ID (ID path tuple → PathKey)
+        keys_by_name: Reverse PathKey index by name (name path tuple → PathKey)
+        instances: All instances (parts AND assemblies) from root + subassemblies
+        occurrences: All occurrence transforms from root + subassemblies
+        mates: All mate relationships with assembly provenance
+               Key = (assembly_key, parent_key, child_key)
+               - assembly_key: None for root, PathKey for subassembly
+               - parent_key, child_key: absolute PathKeys
+        patterns: All pattern definitions from root + subassemblies
+        parts: Part definitions from assembly.parts (mass properties None until fetched)
+        fetched_subassemblies: Recursively fetched subassembly CAD documents
     """
-    Fetch rigid subassemblies asynchronously.
 
-    Args:
-        subassembly: The subassembly to fetch.
-        key: The instance key to fetch.
-        client: The client object to use for fetching the subassembly.
-        rigid_subassembly_map: A dictionary to store the fetched subassemblies.
-    """
-    try:
-        rigid_subassembly_map[key] = await asyncio.to_thread(
-            client.get_root_assembly,
-            did=subassembly.documentId,
-            wtype=WorkspaceType.M.value,
-            wid=subassembly.documentMicroversion,
-            eid=subassembly.elementId,
-            with_mass_properties=True,
-            log_response=False,
-        )
-    except Exception as e:
-        LOGGER.error(f"Failed to fetch rigid subassembly for {key}: {e}")
+    # Document metadata
+    document_id: str
+    element_id: str
+    wtype: str
+    workspace_id: str
+    document_microversion: str
+    name: Optional[str]
+    max_depth: int
 
+    # Core data (flat dicts with absolute PathKeys)
+    keys_by_id: dict[tuple[str, ...], PathKey]  # ID path tuple -> PathKey (canonical index)
+    keys_by_name: dict[tuple[str, ...], PathKey]  # Name path tuple -> PathKey (reverse index)
+    instances: dict[PathKey, Union[PartInstance, AssemblyInstance]]
+    occurrences: dict[PathKey, Occurrence]
+    subassemblies: dict[PathKey, SubAssembly]
+    mates: dict[tuple[Optional[PathKey], PathKey, PathKey], MateFeatureData]  # (assembly, parent, child)
+    patterns: dict[str, Pattern]
+    parts: dict[PathKey, Part]  # Populated eagerly from assembly.parts
 
-async def get_subassemblies_async(
-    assembly: Assembly,
-    client: Client,
-    instance_map: dict[str, Union[PartInstance, AssemblyInstance]],
-) -> tuple[dict[str, SubAssembly], dict[str, RootAssembly]]:
-    """
-    Asynchronously fetch subassemblies.
+    def __init__(
+        self,
+        document_id: str,
+        element_id: str,
+        wtype: str,
+        workspace_id: str,
+        document_microversion: str,
+        name: Optional[str] = "cad",
+        max_depth: int = 0,
+        client: Optional[Client] = None,
+    ):
+        """
+        Initialize an empty CAD document.
 
-    Args:
-        assembly: The assembly object to traverse.
-        client: The client object to use for fetching the subassemblies.
-        instance_map: A dictionary mapping instance IDs to their corresponding instances.
+        Args:
+            document_id: Onshape document ID
+            element_id: Onshape element (assembly) ID
+            wtype: Workspace type of the document
+            workspace_id: Onshape workspace ID
+            document_microversion: Onshape document microversion
+            name: name of the Onshape document (not element)
+            max_depth: Maximum depth for flexible assemblies
+        """
+        self.document_id = document_id
+        self.element_id = element_id
+        self.wtype = wtype
+        self.workspace_id = workspace_id
+        self.document_microversion = document_microversion
+        self.name = name
+        self.max_depth = max_depth
 
-    Returns:
-        A tuple containing:
-        - A dictionary mapping instance IDs to their corresponding subassemblies.
-        - A dictionary mapping instance IDs to their corresponding rigid subassemblies.
-    """
-    subassembly_map: dict[str, SubAssembly] = {}
-    rigid_subassembly_map: dict[str, RootAssembly] = {}
+        # Initialize empty dicts
+        self.keys_by_id = {}
+        self.keys_by_name = {}
+        self.instances = {}
+        self.occurrences = {}
+        self.mates = {}
+        self.patterns = {}
+        self.parts = {}
+        self.subassemblies = {}
 
-    # Group by UID
-    subassembly_instance_map = {}
-    rigid_subassembly_instance_map = {}
+        self._client = client
 
-    for instance_key, instance in instance_map.items():
-        if instance.type == InstanceType.ASSEMBLY:
-            if instance.isRigid:
-                rigid_subassembly_instance_map.setdefault(instance.uid, []).append(instance_key)
+    def get_path_key(self, path: Union[str, list[str], tuple[str, ...]]) -> Optional[PathKey]:
+        """
+        Get PathKey from an ID path.
+
+        Args:
+            path: Instance ID (string) or path (list/tuple of IDs)
+
+        Returns:
+            PathKey if found, None otherwise
+
+        Examples:
+            # From single ID
+            key = cad.get_path_key("M123")
+
+            # From path list
+            key = cad.get_path_key(["M123", "M456"])
+
+            # From path tuple
+            key = cad.get_path_key(("M123", "M456"))
+        """
+        path_tuple = (path,) if isinstance(path, str) else tuple(path)
+        return self.keys_by_id.get(path_tuple)
+
+    def get_path_key_by_name(self, name_path: Union[str, list[str], tuple[str, ...]]) -> Optional[PathKey]:
+        """
+        Get PathKey from a name path (reverse lookup).
+
+        Args:
+            name_path: Instance name (string) or name path (list/tuple of names)
+
+        Returns:
+            PathKey if found, None otherwise
+
+        Examples:
+            # From single name
+            key = cad.get_path_key_by_name("wheel_1")
+
+            # From name path list
+            key = cad.get_path_key_by_name(["Assembly_1", "Part_1"])
+
+            # From name path tuple
+            key = cad.get_path_key_by_name(("Assembly_1", "Part_1"))
+        """
+        name_tuple = (name_path,) if isinstance(name_path, str) else tuple(name_path)
+        return self.keys_by_name.get(name_tuple)
+
+    def is_rigid_assembly(self, key: PathKey) -> bool:
+        """Check if instance is a rigid assembly."""
+        # TODO: this should come out of subassemblies dict
+        instance = self.instances.get(key)
+        return isinstance(instance, AssemblyInstance) and instance.isRigid
+
+    def is_flexible_assembly(self, key: PathKey) -> bool:
+        """Check if instance is a flexible assembly."""
+        # TODO: this should come out of subassemblies dict
+        instance = self.instances.get(key)
+        return isinstance(instance, AssemblyInstance) and not instance.isRigid
+
+    def is_part(self, key: PathKey) -> bool:
+        """Check if instance is a part."""
+        # TODO: this should come out of parts dict w/ regard to rigid subassemblies
+        return isinstance(self.instances.get(key), PartInstance)
+
+    def get_transform(self, key: PathKey, wrt: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
+        """Get 4x4 transform matrix for occurrence."""
+        occ = self.occurrences.get(key)
+
+        if occ:
+            if wrt is not None:
+                return occ.tf_wrt(wrt)
             else:
-                subassembly_instance_map.setdefault(instance.uid, []).append(instance_key)
+                return occ.tf
+        return None
 
-    # Process subassemblies concurrently
-    tasks = []
-    for subassembly in assembly.subAssemblies:
-        uid = subassembly.uid
-        if uid in subassembly_instance_map:
-            is_rigid = len(subassembly.features) == 0 or all(
-                feature.featureType == AssemblyFeatureType.MATEGROUP for feature in subassembly.features
-            )
-            for key in subassembly_instance_map[uid]:
-                if is_rigid:
-                    tasks.append(fetch_rigid_subassemblies_async(subassembly, key, client, rigid_subassembly_map))
-                else:
-                    subassembly_map[key] = subassembly
+    def get_rigid_assembly_root(self, key: PathKey) -> Optional[PathKey]:
+        """
+        Find the top-most rigid assembly root for a given PathKey.
 
-        elif uid in rigid_subassembly_instance_map:
-            for key in rigid_subassembly_instance_map[uid]:
-                tasks.append(fetch_rigid_subassemblies_async(subassembly, key, client, rigid_subassembly_map))
+        Walks up the hierarchy to find the highest-level rigid assembly.
+        This ensures that if an assembly is inside another rigid assembly,
+        we return the outermost one.
 
-    await asyncio.gather(*tasks)
-    return subassembly_map, rigid_subassembly_map
+        If the key itself is a rigid assembly, checks if it's inside another rigid assembly.
+        If the key is inside a rigid assembly, returns the top-most rigid assembly's PathKey.
+        If the key is not inside any rigid assembly, returns None.
 
+        Args:
+            key: PathKey to find rigid assembly root for
 
-def get_subassemblies(
-    assembly: Assembly,
-    client: Client,
-    instances: dict[str, Union[PartInstance, AssemblyInstance]],
-) -> tuple[dict[str, SubAssembly], dict[str, RootAssembly]]:
-    """
-    Synchronous wrapper for `get_subassemblies_async`.
+        Returns:
+            PathKey of top-most rigid assembly root, or None if not inside rigid assembly
 
-    Args:
-        assembly: The assembly object to traverse.
-        client: The client object to use for fetching the subassemblies.
-        instances: A dictionary mapping instance IDs to their corresponding instances.
+        Examples:
+            >>> # Part at depth 2 inside rigid assembly at depth 1
+            >>> key = PathKey(("asm1", "sub1", "part1"), ("Assembly_1", "Sub_1", "Part_1"))
+            >>> rigid_root = cad.get_rigid_assembly_root(key)
+            >>> # Returns PathKey(("asm1", "sub1"), ("Assembly_1", "Sub_1"))
+        """
+        # Walk up the hierarchy from the key to find ALL rigid assemblies
+        # Return the top-most one (closest to root)
+        rigid_root: Optional[PathKey] = None
+        current: Optional[PathKey] = key
 
-    Returns:
-        A tuple containing:
-        - A dictionary mapping instance IDs to their corresponding subassemblies.
-        - A dictionary mapping instance IDs to their corresponding rigid subassemblies.
-    """
-    return asyncio.run(get_subassemblies_async(assembly, client, instances))
+        while current is not None:
+            instance = self.instances.get(current)
+            if isinstance(instance, AssemblyInstance) and instance.isRigid:
+                rigid_root = current  # Keep updating to get the top-most
+            current = current.parent
 
+        return rigid_root
 
-async def _fetch_mass_properties_async(
-    part: Part,
-    key: str,
-    client: Client,
-    rigid_subassemblies: dict[str, RootAssembly],
-    parts: dict[str, Part],
-):
-    """
-    Asynchronously fetch mass properties for a part.
+    def get_mates_from_root(self) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
+        """
+        Get only root-level mates (no assembly provenance).
 
-    Args:
-        part: The part for which to fetch mass properties.
-        key: The instance key associated with the part.
-        client: The Onshape client object.
-        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
-        parts: The dictionary to store fetched parts.
-    """
-    if key.split(SUBASSEMBLY_JOINER)[0] not in rigid_subassemblies:
-        try:
-            LOGGER.info(f"Fetching mass properties for part: {part.uid}, {part.partId}")
-            part.MassProperty = await asyncio.to_thread(
-                client.get_mass_property,
-                did=part.documentId,
-                wtype=WorkspaceType.M.value,
-                wid=part.documentMicroversion,
-                eid=part.elementId,
-                partID=part.partId,
-            )
-        except Exception as e:
-            LOGGER.error(f"Failed to fetch mass properties for part {part.partId}: {e}")
+        Returns:
+            Dictionary with (parent, child) keys
+        """
+        return {(p, c): mate for (asm, p, c), mate in self.mates.items() if asm is None}
 
-    parts[key] = part
+    def get_mates_from_subassembly(self, sub_key: PathKey) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
+        """
+        Get mates from specific subassembly.
 
+        Args:
+            sub_key: PathKey of the subassembly
 
-async def _get_parts_async(
-    assembly: Assembly,
-    rigid_subassemblies: dict[str, RootAssembly],
-    client: Client,
-    instances: dict[str, Union[PartInstance, AssemblyInstance]],
-) -> dict[str, Part]:
-    """
-    Asynchronously get parts of an Onshape assembly.
+        Returns:
+            Dictionary with (parent, child) keys
+        """
+        return {(p, c): mate for (asm, p, c), mate in self.mates.items() if asm == sub_key}
 
-    Args:
-        assembly: The Onshape assembly object to use for extracting parts.
-        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
-        client: The Onshape client object.
-        instances: Mapping of instance IDs to their corresponding instances.
+    def get_all_mates_flattened(self) -> dict[tuple[PathKey, PathKey], MateFeatureData]:
+        """
+        Get all mates without assembly provenance (backward compatible).
 
-    Returns:
-        A dictionary mapping part IDs to their corresponding part objects.
-    """
-    part_instance_map: dict[str, list[str]] = {}
-    part_map: dict[str, Part] = {}
+        If there are duplicate (parent, child) pairs from different assemblies,
+        this will only keep one (last one wins).
 
-    for key, instance in instances.items():
-        if instance.type == InstanceType.PART:
-            part_instance_map.setdefault(instance.uid, []).append(key)
+        Returns:
+            Dictionary with (parent, child) keys
+        """
+        return {(p, c): mate for (asm, p, c), mate in self.mates.items()}
 
-    tasks = []
-    for part in assembly.parts:
-        if part.uid in part_instance_map:
-            for key in part_instance_map[part.uid]:
-                tasks.append(_fetch_mass_properties_async(part, key, client, rigid_subassemblies, part_map))
+    def get_mate_data(
+        self, parent: PathKey, child: PathKey, assembly: Optional[PathKey] = None
+    ) -> Optional[MateFeatureData]:
+        """
+        Get mate data for specific parent-child pair.
 
-    await asyncio.gather(*tasks)
+        Args:
+            parent: Parent PathKey
+            child: Child PathKey
+            assembly: Assembly PathKey (None for root, PathKey for subassembly)
+                     If None, searches all assemblies (root first)
 
-    return part_map
+        Returns:
+            MateFeatureData if found, None otherwise
+        """
+        if assembly is not None:
+            return self.mates.get((assembly, parent, child))
+        else:
+            mate = self.mates.get((None, parent, child))
+            if mate:
+                return mate
 
+            for (_asm, p, c), mate in self.mates.items():
+                if p == parent and c == child:
+                    return mate
+            return None
 
-def get_parts(
-    assembly: Assembly,
-    rigid_subassemblies: dict[str, RootAssembly],
-    client: Client,
-    instances: dict[str, Union[PartInstance, AssemblyInstance]],
-) -> dict[str, Part]:
-    """
-    Get parts of an Onshape assembly.
+    def get_mate_assembly(self, parent: PathKey, child: PathKey) -> Optional[Optional[PathKey]]:
+        """
+        Find which assembly contains this mate.
 
-    Args:
-        assembly: The Onshape assembly object to use for extracting parts.
-        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
-        client: The Onshape client object to use for sending API requests.
-        instances: Mapping of instance IDs to their corresponding instances.
+        Args:
+            parent: Parent PathKey
+            child: Child PathKey
 
-    Returns:
-        A dictionary mapping part IDs to their corresponding part objects.
-    """
-    return asyncio.run(_get_parts_async(assembly, rigid_subassemblies, client, instances))
+        Returns:
+            None if root assembly, PathKey if subassembly, None if not found
+        """
+        for asm, p, c in self.mates:
+            if p == parent and c == child:
+                return asm  # Returns None for root, PathKey for subassembly
+        return None
 
-
-def get_occurrence_name(occurrences: list[str], subassembly_prefix: Optional[str] = None) -> str:
-    """
-    Get the mapping name for an occurrence path.
-
-    Args:
-        occurrences: Occurrence path.
-        subassembly_prefix: Prefix for the subassembly.
-
-    Returns:
-        The mapping name.
-
-    Examples:
-        >>> get_occurrence_name(["subassembly1", "part1"], "subassembly1")
-        "subassembly1-SUB-part1"
-
-        >>> get_occurrence_name(["part1"], "subassembly1")
-        "subassembly1-SUB-part1"
-    """
-    prefix = f"{subassembly_prefix}{SUBASSEMBLY_JOINER}" if subassembly_prefix else ""
-    return f"{prefix}{SUBASSEMBLY_JOINER.join(occurrences)}"
-
-
-def join_mate_occurrences(parent: list[str], child: list[str], prefix: Optional[str] = None) -> str:
-    """
-    Join two occurrence paths with a mate joiner.
-
-    Args:
-        parent: Occurrence path of the parent entity.
-        child: Occurrence path of the child entity.
-        prefix: Prefix to add to the occurrence path.
-
-    Returns:
-        The joined occurrence path.
-
-    Examples:
-        >>> join_mate_occurrences(["subassembly1", "part1"], ["subassembly2"])
-        "subassembly1-SUB-part1-MATE-subassembly2"
-
-        >>> join_mate_occurrences(["part1"], ["part2"])
-        "part1-MATE-part2"
-    """
-    parent_occurrence = get_occurrence_name(parent, prefix)
-    child_occurrence = get_occurrence_name(child, prefix)
-    return f"{parent_occurrence}{MATE_JOINER}{child_occurrence}"
-
-
-async def build_rigid_subassembly_occurrence_map(
-    rigid_subassemblies: dict[str, RootAssembly], id_to_name_map: dict[str, str], parts: dict[str, Part]
-) -> dict[str, dict[str, Occurrence]]:
-    """
-    Asynchronously build a map of rigid subassembly occurrences.
-
-    Args:
-        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
-        id_to_name_map: A dictionary mapping instance IDs to their sanitized names.
-        parts: A dictionary mapping instance IDs to their corresponding parts.
-
-    Returns:
-        A dictionary mapping occurrence paths to their corresponding occurrences.
-    """
-    occurrence_map: dict[str, dict[str, Occurrence]] = {}
-    for assembly_key, rigid_subassembly in rigid_subassemblies.items():
-        sub_occurrences: dict[str, Occurrence] = {}
-        for occurrence in rigid_subassembly.occurrences:
-            try:
-                occurrence_path = [id_to_name_map[path] for path in occurrence.path]
-                sub_occurrences[SUBASSEMBLY_JOINER.join(occurrence_path)] = occurrence
-            except KeyError:
-                LOGGER.warning(f"Occurrence path {occurrence.path} not found")
-
-        # Populate parts data
-        parts[assembly_key] = Part(
-            isStandardContent=False,
-            fullConfiguration=rigid_subassembly.fullConfiguration,
-            configuration=rigid_subassembly.configuration,
-            documentId=rigid_subassembly.documentId,
-            elementId=rigid_subassembly.elementId,
-            documentMicroversion=rigid_subassembly.documentMicroversion,
-            documentVersion="",
-            partId="",
-            bodyType="",
-            MassProperty=rigid_subassembly.MassProperty,
-            isRigidAssembly=True,
-            rigidAssemblyWorkspaceId=rigid_subassembly.documentMetaData.defaultWorkspace.id,
-            rigidAssemblyToPartTF={},
+    def __repr__(self) -> str:
+        # TODO: would be nice to have the CAD tree print here
+        part_count = sum(1 for inst in self.instances.values() if isinstance(inst, PartInstance))
+        asm_count = sum(1 for inst in self.instances.values() if isinstance(inst, AssemblyInstance))
+        return (
+            f"CAD("
+            f"keys={len(self.keys_by_id)}, "
+            f"instances={len(self.instances)} (parts={part_count}, asm={asm_count}), "
+            f"occurrences={len(self.occurrences)}, "
+            f"subassemblies={(len(self.subassemblies))}, "
+            f"mates={len(self.mates)}, "
+            f"patterns={len(self.patterns)}, "
+            f"parts={len(self.parts)})"
         )
-        occurrence_map[assembly_key] = sub_occurrences
 
-    return occurrence_map
+    @classmethod
+    def from_assembly(
+        cls,
+        assembly: Assembly,
+        max_depth: int = 0,
+        client: Optional[Client] = None,
+    ) -> "CAD":
+        """
+        Create a CAD from an Onshape Assembly.
 
+        Args:
+            assembly: Onshape assembly data
+            max_depth: Maximum depth for flexible assemblies
 
-async def process_features_async(  # noqa: C901
-    features: list[AssemblyFeature],
-    parts: dict[str, Part],
-    id_to_name_map: dict[str, str],
-    rigid_subassembly_occurrence_map: dict[str, dict[str, Occurrence]],
-    rigid_subassemblies: dict[str, RootAssembly],
-    subassembly_prefix: Optional[str],
-) -> tuple[dict[str, MateFeatureData], dict[str, MateRelationFeatureData]]:
-    """
-    Process assembly features asynchronously.
+        Returns:
+            CAD with populated flat dicts
+        """
+        # Create CAD instance
+        if assembly.document is None:
+            raise ValueError("Assembly document is None")
 
-    Args:
-        features: The assembly features to process.
-        parts: A dictionary mapping instance IDs to their corresponding parts.
-        id_to_name_map: A dictionary mapping instance IDs to their sanitized names.
-        rigid_subassembly_occurrence_map: A dictionary mapping occurrence paths to their corresponding occurrences.
-        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
-        subassembly_prefix: The prefix for the subassembly.
+        cad = cls(
+            document_id=assembly.rootAssembly.documentId,
+            element_id=assembly.rootAssembly.elementId,
+            wtype=assembly.document.wtype,
+            workspace_id=assembly.document.wid,
+            document_microversion=assembly.rootAssembly.documentMicroversion,
+            name=assembly.document.name,  # TODO: this is different from assembly.name
+            max_depth=max_depth,
+            client=client,
+        )
 
-    Returns:
-        A tuple containing:
-        - A dictionary mapping occurrence paths to their corresponding mates.
-        - A dictionary mapping occurrence paths to their corresponding relations.
-    """
-    mates_map: dict[str, MateFeatureData] = {}
-    relations_map: dict[str, MateRelationFeatureData] = {}
+        # Build id_to_name mapping (needed for PathKey creation)
+        id_to_name = cls._build_id_to_name_map(assembly)
 
-    for feature in features:
-        feature.featureData.id = feature.id
+        # Build PathKeys from occurrences (single source of truth)
+        cad.keys_by_id, cad.keys_by_name = cls._build_path_keys_from_occurrences(
+            assembly.rootAssembly.occurrences, id_to_name
+        )
 
-        if feature.suppressed:
-            continue
+        # Populate all data using the pre-built PathKeys
+        cad._populate_from_assembly(assembly)
 
-        if feature.featureType == AssemblyFeatureType.MATE:
-            if len(feature.featureData.matedEntities) < 2:
-                LOGGER.warning(f"Invalid mate feature: {feature}")
+        LOGGER.info(f"Created {cad}")
+
+        return cad
+
+    @staticmethod
+    def _build_path_keys_from_occurrences(
+        occurrences: list[Occurrence], id_to_name: dict[str, str]
+    ) -> tuple[dict[tuple[str, ...], PathKey], dict[tuple[str, ...], PathKey]]:
+        """
+        Build all PathKeys upfront from occurrences.
+
+        Occurrences are the single source of truth for paths in the assembly.
+        This creates PathKeys once and builds two indexes for O(1) lookup:
+        - By ID path: for internal lookups
+        - By name path: for user-facing lookups
+
+        Args:
+            occurrences: List of occurrences from root assembly
+            id_to_name: Mapping from instance ID to sanitized name
+
+        Returns:
+            Tuple of (keys_by_id, keys_by_name) dictionaries
+        """
+        LOGGER.debug("Building PathKeys from occurrences...")
+
+        keys_by_id: dict[tuple[str, ...], PathKey] = {}
+        keys_by_name: dict[tuple[str, ...], PathKey] = {}
+
+        for occurrence in occurrences:
+            # Create PathKey with both ID and name paths
+            key = PathKey.from_path(occurrence.path, id_to_name)
+
+            # Index by ID path tuple (immutable, hashable)
+            keys_by_id[key.path] = key
+
+            # Index by name path tuple for reverse lookup
+            keys_by_name[key.name_path] = key
+
+        LOGGER.debug(f"Built {len(keys_by_id)} PathKeys from {len(occurrences)} occurrences")
+        return keys_by_id, keys_by_name
+
+    @staticmethod
+    def _build_id_to_name_map(assembly: Assembly) -> dict[str, str]:
+        """
+        Build mapping from instance ID to sanitized name.
+
+        Processes root assembly and all subassemblies to build complete mapping.
+        This must be called FIRST before creating any PathKeys.
+
+        Args:
+            assembly: Assembly from Onshape API
+
+        Returns:
+            Dictionary mapping instance IDs to sanitized names
+        """
+        LOGGER.debug("Building instance ID to name mapping...")
+
+        id_to_name: dict[str, str] = {}
+
+        # Root assembly instances
+        for instance in assembly.rootAssembly.instances:
+            sanitized = get_sanitized_name(instance.name)
+            id_to_name[instance.id] = sanitized
+
+        # Subassembly instances
+        visited_uids: set[str] = set()
+        subassembly_deque: deque[SubAssembly] = deque(assembly.subAssemblies)
+
+        while subassembly_deque:
+            subassembly = subassembly_deque.popleft()
+
+            if subassembly.uid in visited_uids:
                 continue
+            visited_uids.add(subassembly.uid)
 
-            try:
-                child_occurrences = [
-                    id_to_name_map[path] for path in feature.featureData.matedEntities[CHILD].matedOccurrence
-                ]
-                parent_occurrences = [
-                    id_to_name_map[path] for path in feature.featureData.matedEntities[PARENT].matedOccurrence
-                ]
-            except KeyError as e:
-                LOGGER.warning(e)
-                LOGGER.warning(f"Key not found in {id_to_name_map.keys()}")
-                continue
+            for instance in subassembly.instances:
+                sanitized = get_sanitized_name(instance.name)
+                id_to_name[instance.id] = sanitized
 
-            # Handle rigid subassemblies
-            if parent_occurrences[0] in rigid_subassemblies:
-                _occurrence = rigid_subassembly_occurrence_map[parent_occurrences[0]].get(parent_occurrences[1])
-                if _occurrence:
-                    parent_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
-                    parts[parent_occurrences[0]].rigidAssemblyToPartTF[parent_occurrences[1]] = parent_parentCS.part_tf
-                    feature.featureData.matedEntities[PARENT].parentCS = parent_parentCS
-                parent_occurrences = [parent_occurrences[0]]
+        LOGGER.debug(f"Mapped {len(id_to_name)} instance IDs to names")
+        return id_to_name
 
-            if child_occurrences[0] in rigid_subassemblies:
-                _occurrence = rigid_subassembly_occurrence_map[child_occurrences[0]].get(child_occurrences[1])
-                if _occurrence:
-                    child_parentCS = MatedCS.from_tf(np.matrix(_occurrence.transform).reshape(4, 4))
-                    parts[child_occurrences[0]].rigidAssemblyToPartTF[child_occurrences[1]] = child_parentCS.part_tf
-                    feature.featureData.matedEntities[CHILD].parentCS = child_parentCS
-                child_occurrences = [child_occurrences[0]]
+    def _populate_from_assembly(self, assembly: Assembly) -> None:
+        """
+        Populate all CAD data using pre-built PathKeys from self.keys_by_id.
 
-            mates_map[
-                join_mate_occurrences(
-                    parent=parent_occurrences,
-                    child=child_occurrences,
-                    prefix=subassembly_prefix,
+        Flattens data from root assembly and all subassemblies into flat registries.
+
+        Args:
+            assembly: Assembly from Onshape API
+        """
+        # Step 1: Populate instances (root + subassemblies)
+        self._populate_instances(assembly)
+
+        # Step 2: Populate occurrences (root + subassemblies)
+        self._populate_occurrences(assembly)
+
+        # Step 3: Populate subassemblies and check/mark if they are rigid
+        self._populate_subassemblies(assembly)
+
+        # Step 4: Populate parts from assembly.parts (mass properties still None)
+        self._populate_parts(assembly)
+
+        # Step 6: Populate mates with assembly provenance
+        self._populate_mates(assembly)
+
+        # Step 5: Populate patterns (root + subassemblies)
+        self._populate_patterns(assembly)
+
+        LOGGER.debug(
+            f"Populated CAD: {len(self.instances)} instances, "
+            f"{len(self.occurrences)} occurrences, {len(self.mates)} mates, "
+            f"{len(self.patterns)} patterns, {len(self.parts)} parts"
+        )
+
+    def _populate_instances(self, assembly: Assembly) -> None:
+        """
+        Populate instances from root assembly and all subassemblies.
+
+        This creates a flat registry of ALL instances (root + nested) mapped by absolute PathKeys.
+
+        Args:
+            assembly: Assembly from Onshape API
+        """
+        subassembly_lookup = {subassembly.uid: subassembly for subassembly in assembly.subAssemblies}
+
+        def _populate_branch(
+            branch_instances: list[Union[PartInstance, AssemblyInstance]],
+            parent_key: Optional[PathKey],
+        ) -> None:
+            for instance in branch_instances:
+                path_tuple = (instance.id,) if parent_key is None else (*parent_key.path, instance.id)
+                key = self.keys_by_id.get(path_tuple)
+                if not key:
+                    scope = "root" if parent_key is None else "nested"
+                    LOGGER.warning(f"No PathKey for {scope} instance {instance.id} ({instance.name})")
+                    continue
+
+                self.instances[key] = copy.deepcopy(instance)
+
+                if isinstance(instance, AssemblyInstance):
+                    subassembly = subassembly_lookup.get(instance.uid)
+                    if not subassembly:
+                        LOGGER.warning(
+                            f"Missing SubAssembly definition for instance {instance.id} "
+                            f"({instance.name}) with uid {instance.uid}"
+                        )
+                        continue
+                    _populate_branch(subassembly.instances, key)
+
+        _populate_branch(assembly.rootAssembly.instances, None)
+        LOGGER.info(f"Populated {len(self.instances)} instances (including nested)")
+
+    def _populate_occurrences(self, assembly: Assembly) -> None:
+        """
+        Populate occurrences from root assembly (includes all nested occurrences).
+
+        Args:
+            assembly: Assembly from Onshape API
+        """
+        for occurrence in assembly.rootAssembly.occurrences:
+            path_tuple = tuple(occurrence.path)
+            key = self.keys_by_id.get(path_tuple)
+            if key:
+                self.occurrences[key] = occurrence
+            else:
+                LOGGER.warning(f"No PathKey for occurrence {occurrence.path}")
+
+        LOGGER.info(f"Populated {len(self.occurrences)} occurrences")
+
+    def _populate_subassemblies(self, assembly: Assembly) -> None:
+        """
+        Populate subassemblies from the assembly JSON
+
+        Args:
+            assembly: Assembly from Onshape API
+        """
+        # Build a multimap from subassembly UID -> list[PathKey] (one per occurrence)
+        uid_to_pathkeys: dict[str, list[PathKey]] = {}
+        for key, inst in self.instances.items():
+            if isinstance(inst, AssemblyInstance):
+                uid_to_pathkeys.setdefault(inst.uid, []).append(key)
+
+        total_defs = len(assembly.subAssemblies)
+        total_occurrences = 0
+        rigid_marked = 0
+
+        for subassembly in assembly.subAssemblies:
+            pathkeys = uid_to_pathkeys.get(subassembly.uid)
+            if not pathkeys:
+                LOGGER.warning(
+                    "SubAssembly definition uid=%s has no matching AssemblyInstance occurrences", subassembly.uid
                 )
-            ] = feature.featureData
+                continue
 
-        elif feature.featureType == AssemblyFeatureType.MATERELATION:
-            if feature.featureData.relationType == RelationType.SCREW:
-                child_joint_id = feature.featureData.mates[0].featureId
-            else:
-                child_joint_id = feature.featureData.mates[RELATION_CHILD].featureId
+            for pathkey in pathkeys:
+                # Mark rigidity for this occurrence if depth logic requires it.
+                if pathkey.depth >= self.max_depth:
+                    subassembly.isRigid = True
+                    inst = self.instances[pathkey]
+                    if isinstance(inst, AssemblyInstance):
+                        inst.isRigid = True
+                        rigid_marked += 1
 
-            relations_map[child_joint_id] = feature.featureData
+                self.subassemblies[pathkey] = copy.deepcopy(subassembly)
+                total_occurrences += 1
 
-    return mates_map, relations_map
-
-
-async def get_mates_and_relations_async(
-    assembly: Assembly,
-    subassemblies: dict[str, SubAssembly],
-    rigid_subassemblies: dict[str, RootAssembly],
-    id_to_name_map: dict[str, str],
-    parts: dict[str, Part],
-) -> tuple[dict[str, MateFeatureData], dict[str, MateRelationFeatureData]]:
-    """
-    Asynchronously get mates and relations.
-
-    Args:
-        assembly: The assembly object to traverse.
-        subassemblies: A dictionary mapping instance IDs to their corresponding subassemblies.
-        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
-        id_to_name_map: A dictionary mapping instance IDs to their sanitized names.
-        parts: A dictionary mapping instance IDs to their corresponding parts.
-
-    Returns:
-        A tuple containing:
-        - A dictionary mapping occurrence paths to their corresponding mates.
-        - A dictionary mapping occurrence paths to their corresponding relations.
-    """
-    rigid_subassembly_occurrence_map = await build_rigid_subassembly_occurrence_map(
-        rigid_subassemblies, id_to_name_map, parts
-    )
-
-    mates_map, relations_map = await process_features_async(
-        assembly.rootAssembly.features,
-        parts,
-        id_to_name_map,
-        rigid_subassembly_occurrence_map,
-        rigid_subassemblies,
-        None,
-    )
-
-    for key, subassembly in subassemblies.items():
-        sub_mates, sub_relations = await process_features_async(
-            subassembly.features, parts, id_to_name_map, rigid_subassembly_occurrence_map, rigid_subassemblies, key
+        LOGGER.info(
+            "Populated %d subassembly occurrences from %d definitions (rigid=%d, max_depth=%d)",
+            total_occurrences,
+            total_defs,
+            rigid_marked,
+            self.max_depth,
         )
-        mates_map.update(sub_mates)
-        relations_map.update(sub_relations)
 
-    return mates_map, relations_map
+    def _populate_mates(self, assembly: Assembly) -> None:
+        """
+        Populate mates from root and all subassemblies with assembly provenance.
 
+        Root mates: Key = (None, parent, child)
+        Subassembly mates: Key = (sub_key, parent, child)
 
-def get_mates_and_relations(
-    assembly: Assembly,
-    subassemblies: dict[str, SubAssembly],
-    rigid_subassemblies: dict[str, RootAssembly],
-    id_to_name_map: dict[str, str],
-    parts: dict[str, Part],
-) -> tuple[dict[str, MateFeatureData], dict[str, MateRelationFeatureData]]:
-    """
-    Synchronous wrapper for `get_mates_and_relations_async`.
+        For mates referencing parts inside rigid assemblies:
+        - Remap PathKey to rigid assembly root
+        - Update matedCS transform to be relative to rigid assembly
 
-    Args:
-        assembly: The assembly object to traverse.
-        subassemblies: A dictionary mapping instance IDs to their corresponding subassemblies.
-        rigid_subassemblies: Mapping of instance IDs to rigid subassemblies.
-        id_to_name_map: A dictionary mapping instance IDs to their sanitized names.
-        parts: A dictionary mapping instance IDs to their corresponding parts.
+        Args:
+            assembly: Assembly from Onshape API
+        """
 
-    Returns:
-        A tuple containing:
-        - A dictionary mapping occurrence paths to their corresponding mates.
-        - A dictionary mapping occurrence paths to their corresponding relations.
-    """
-    return asyncio.run(
-        get_mates_and_relations_async(assembly, subassemblies, rigid_subassemblies, id_to_name_map, parts)
-    )
+        def _process_feature(
+            feature: AssemblyFeature,
+            assembly_key: Optional[PathKey],
+            path_prefix: Optional[tuple[str, ...]],
+        ) -> None:
+            """Internal helper to process a single mate feature.
+
+            Args:
+                feature: Feature object which may contain MateFeatureData
+                assembly_key: None for root, or PathKey of subassembly provenance
+                path_prefix: Tuple prefix to prepend for relative subassembly paths
+            """
+            if feature.featureType != AssemblyFeatureType.MATE or not isinstance(feature.featureData, MateFeatureData):
+                # TODO: add support for mate groups and connectors
+                return
+
+            mate_data: MateFeatureData = copy.deepcopy(feature.featureData)
+
+            # TODO: Onshape mate feature data always has two entities (parent/child). If origin mates ever
+            # appear differently, this is the place to update handling.
+            try:
+                parent_occ = mate_data.matedEntities[PARENT].matedOccurrence
+                child_occ = mate_data.matedEntities[CHILD].matedOccurrence
+            except Exception:
+                LOGGER.warning(f"Malformed mate feature {mate_data.name}")
+                return
+
+            parent_path = tuple(parent_occ)
+            child_path = tuple(child_occ)
+
+            if path_prefix:
+                parent_path = path_prefix + parent_path
+                child_path = path_prefix + child_path
+
+            parent_key = self.keys_by_id.get(parent_path)
+            child_key = self.keys_by_id.get(child_path)
+
+            # NOTE: reorient the mated entities to match this parent, child order
+            # TODO: add tests to make sure this convention is preserved
+            # We create indices for parent and child, get the occurrences,
+            # remap the mate data to always be parent -> child
+            mate_data.matedEntities = [
+                mate_data.matedEntities[PARENT],
+                mate_data.matedEntities[CHILD],
+            ]
+
+            if parent_key and child_key:
+                self.mates[(assembly_key, parent_key, child_key)] = mate_data
+            else:
+                scope = "root" if assembly_key is None else f"subassembly {assembly_key}"
+                LOGGER.warning(
+                    "Missing PathKey for %s mate: %s (parent_found=%s, child_found=%s)",
+                    scope,
+                    mate_data.name,
+                    bool(parent_key),
+                    bool(child_key),
+                )
+
+        # Process root assembly features (absolute paths)
+        for feature in assembly.rootAssembly.features:
+            _process_feature(feature, None, None)
+
+        # Process subassembly features (relative paths)
+        for sub_key, subassembly in self.subassemblies.items():
+            if subassembly.isRigid:
+                continue
+
+            for feature in subassembly.features:
+                _process_feature(feature=feature, assembly_key=sub_key, path_prefix=sub_key.path)
+
+        LOGGER.debug(f"Populated {len(self.mates)} mates (root + flexible subassemblies)")
+
+    def _populate_patterns(self, assembly: Assembly) -> None:
+        """
+        Populate patterns from root assembly and all subassemblies.
+
+        Args:
+            assembly: Assembly from Onshape API
+        """
+
+        def _add_pattern(pattern: Pattern, path_prefix: Optional[tuple[str, ...]]) -> None:
+            if pattern.suppressed:
+                return
+
+            mutated_seed_pattern_instances: dict[tuple[str, ...], list[tuple[str, ...]]] = {}
+            for seed_id, instance_ids in pattern.seedToPatternInstances.items():
+                # since seed_id can be both a single string or a tuple of strings,
+                # we need to make it a tuple for consistent keying
+                seed_id_tuple: tuple[str, ...] = (seed_id,) if isinstance(seed_id, str) else seed_id
+
+                mutated_id = seed_id_tuple if path_prefix is None else (*path_prefix, *seed_id_tuple)
+
+                for instance_id in instance_ids:
+                    # since instance_id can be both a single string or a tuple of strings,
+                    # we need to make it a tuple for consistent keying
+                    instance_id_tuple: tuple[str, ...]
+                    if isinstance(instance_id, str):
+                        instance_id_tuple = (instance_id,)
+                    elif isinstance(instance_id, list):
+                        instance_id_tuple = tuple(instance_id)
+                    else:
+                        instance_id_tuple = instance_id
+
+                    mutated_instance_id = (
+                        instance_id_tuple if path_prefix is None else (*path_prefix, *instance_id_tuple)
+                    )
+                    mutated_seed_pattern_instances.setdefault(mutated_id, []).append(mutated_instance_id)
+
+            pattern.seedToPatternInstances = mutated_seed_pattern_instances  # type: ignore[assignment]
+            self.patterns[pattern.id] = pattern
+
+        # Root patterns
+        for pattern in assembly.rootAssembly.patterns:
+            _add_pattern(pattern, None)
+
+        # Subassembly patterns (only from flexible subassemblies)
+        for subassembly_key, subassembly in self.subassemblies.items():
+            if subassembly.isRigid:
+                continue
+
+            for pattern in subassembly.patterns:
+                _add_pattern(pattern, subassembly_key.path)
+
+        self._flatten_patterns()
+
+        LOGGER.debug(f"Populated {len(self.patterns)} patterns")
+
+    def _flatten_patterns(
+        self,
+    ) -> None:
+        def _add_mate(
+            seed_mate: MateFeatureData,
+            seed_key: PathKey,
+            instance_key: PathKey,
+            other_entity_key: PathKey,
+            mate_key: tuple[Optional[PathKey], PathKey, PathKey],
+            is_seed_parent: bool = True,
+        ) -> None:
+            new_mate = copy.deepcopy(seed_mate)
+            # NOTE: seed index needs to be replaced by the instance
+            # since we reordered the populated mates to always have parent->child order,
+            # we should not use the global constants (PARENT, CHILD) here
+            oe_index = 1 if is_seed_parent else 0
+            oe_mated_cs = new_mate.matedEntities[oe_index].matedCS
+
+            # NOTE: compute new matedCS for the other entity, this is crucial because
+            # this governs where this new instance will be placed in the robot structure
+            seed_pose_wrt_world = self.occurrences[seed_key].tf
+            instance_pose_wrt_world = self.occurrences[instance_key].tf
+            oe_pose_wrt_world = self.occurrences[other_entity_key].tf
+
+            # NOTE: find the other entity's mated CS wrt to the instance part
+            # First, find the other entity's mated CS wrt seed part, then transform it
+            # to the instance global coordinates, then find this wrt to the other entity
+            oe_mated_cs_wrt_world = oe_pose_wrt_world @ oe_mated_cs.to_tf
+            oe_mated_cs_wrt_seed = np.linalg.inv(seed_pose_wrt_world) @ oe_mated_cs_wrt_world
+            oe_mated_cs_for_instance = instance_pose_wrt_world @ oe_mated_cs_wrt_seed
+            oe_mated_cs_tf = np.linalg.inv(oe_pose_wrt_world) @ oe_mated_cs_for_instance
+
+            new_mate.matedEntities[oe_index].matedCS = MatedCS.from_tf(oe_mated_cs_tf)
+            new_mate.matedEntities[1 - oe_index].matedOccurrence = list(instance_key.path)
+            self.mates[mate_key] = new_mate
+
+        seed_instance_to_pattern_instances: dict[tuple[str, PathKey], list[PathKey]] = {}
+
+        for pattern_id, pattern in self.patterns.items():
+            if pattern.suppressed:
+                continue
+
+            for seed_id, instance_ids in pattern.seedToPatternInstances.items():
+                # Ensure seed_id is a tuple for dictionary lookup
+                seed_id_tuple = seed_id if isinstance(seed_id, tuple) else (seed_id,)
+                seed_path_key = self.keys_by_id[seed_id_tuple]
+                key = (pattern_id, seed_path_key)
+
+                if key not in seed_instance_to_pattern_instances:
+                    seed_instance_to_pattern_instances[key] = []
+
+                for instance_id in instance_ids:
+                    # NOTE: instance_id is a list of strings (path)
+                    instance_path_key = self.keys_by_id[tuple(instance_id)]
+                    seed_instance_to_pattern_instances[key].append(instance_path_key)
+
+        # find all mates referencing this part
+        original_mates = copy.deepcopy(self.mates)
+        for (assembly_key, parent_key, child_key), mate in original_mates.items():
+            for (_, seed_key), instance_keys in seed_instance_to_pattern_instances.items():
+                if parent_key == seed_key:
+                    for instance_key in instance_keys:
+                        _add_mate(
+                            seed_mate=mate,
+                            seed_key=parent_key,
+                            instance_key=instance_key,
+                            other_entity_key=child_key,
+                            mate_key=(assembly_key, instance_key, child_key),
+                            is_seed_parent=True,
+                        )
+                if child_key == seed_key:
+                    for instance_key in instance_keys:
+                        _add_mate(
+                            seed_mate=mate,
+                            seed_key=child_key,
+                            instance_key=instance_key,
+                            other_entity_key=parent_key,
+                            mate_key=(assembly_key, parent_key, instance_key),
+                            is_seed_parent=False,
+                        )
+
+    def _populate_parts(self, assembly: Assembly) -> None:
+        """
+        Populate parts from assembly.parts list.
+
+        Maps Part objects to PathKeys by matching instance UIDs.
+        Creates synthetic Part objects for rigid assemblies.
+        Mass properties remain None (populated later via API calls).
+
+        Args:
+            assembly: Assembly from Onshape API
+        """
+        # Build Part lookup by UID
+        # Build a multimap from part UID -> list[PathKey] (one per occurrence)
+        uid_to_pathkeys: dict[str, list[PathKey]] = {}
+        for key, inst in self.instances.items():
+            if isinstance(inst, PartInstance):
+                uid_to_pathkeys.setdefault(inst.uid, []).append(key)
+
+        for part in assembly.parts:
+            pathkeys = uid_to_pathkeys.get(part.uid)
+            if not pathkeys:
+                LOGGER.warning("Part definition uid=%s has no matching PartInstance", part.uid)
+                continue
+
+            for pathkey in pathkeys:
+                self.parts[pathkey] = copy.deepcopy(part)  # Avoid mutating original data
+                self.parts[pathkey].worldToPartTF = MatedCS.from_tf(self.occurrences[pathkey].tf)
+                if pathkey.depth > self.max_depth:
+                    rigid_root = self.get_rigid_assembly_root(pathkey)
+                    if not rigid_root:
+                        LOGGER.warning(f"Part {pathkey} exceeds max_depth but has no rigid assembly root")
+                        continue
+
+                    self.parts[pathkey].rigidAssemblyKey = rigid_root
+                    self.parts[pathkey].rigidAssemblyWorkspaceId = self.workspace_id
+
+                    # NOTE: Using the root occurrences of the rigid assembly directly from Onshape API
+                    # instead of computing it from the root assembly's global occurrences because
+                    # Onshape's occurrence TF for subassemblies are not what we expect it to be, the occurrence TF
+                    # does not reflect the pose of the subassembly in world frame, will Onshape potentially fix this?
+                    if self.subassemblies[rigid_root].RootOccurrences is None:
+                        if self._client is None:
+                            LOGGER.warning(
+                                f"At max_depth of {self.max_depth}, we require Client to "
+                                "fetch all root occurrences of a subassembly."
+                            )
+                            LOGGER.warning("These root occurrences are used to remap parts inside rigid assemblies.")
+                            LOGGER.warning(
+                                f"Skipping setting rigidAssemblyToPartTF for part {pathkey} "
+                                f"inside rigid assembly {rigid_root}."
+                            )
+                            LOGGER.warning(
+                                "This will result in malformed joints that have refer to parts within rigid assemblies."
+                            )
+                            continue
+
+                        asyncio.run(self.fetch_occurrences_for_subassemblies(self._client))
+
+                    part_pose_wrt_rigid_root = self.subassemblies[rigid_root].RootOccurrences[pathkey]  # type: ignore[index]
+                    self.parts[pathkey].rigidAssemblyToPartTF = MatedCS.from_tf(tf=part_pose_wrt_rigid_root.tf)
+
+                    LOGGER.debug(f"Set rigidAssemblyToPartTF for {pathkey}, with rigid assembly {rigid_root}")
+
+        # Create synthetic Part objects for rigid assemblies
+        for key, subassembly in self.subassemblies.items():
+            if subassembly.isRigid:
+                subassembly_instance = self.instances[key]
+                # Rigid assembly: create synthetic Part object
+                self.parts[key] = Part(
+                    isStandardContent=False,
+                    partId=subassembly_instance.elementId,  # Use element ID as part ID
+                    bodyType="assembly",
+                    documentId=subassembly_instance.documentId,
+                    elementId=subassembly_instance.elementId,
+                    documentMicroversion=subassembly_instance.documentMicroversion,
+                    configuration=subassembly_instance.configuration,
+                    fullConfiguration=subassembly_instance.fullConfiguration,
+                    documentVersion=subassembly_instance.documentVersion,
+                    isRigidAssembly=True,
+                    rigidAssemblyKey=None,  # Not applicable for rigid assembly itself
+                    rigidAssemblyWorkspaceId=self.workspace_id,
+                    rigidAssemblyToPartTF=None,
+                    worldToPartTF=MatedCS.from_tf(self.occurrences[key].tf),
+                    MassProperty=None,  # Populated later via mass property fetch
+                )
+
+        LOGGER.info(f"Populated {len(self.parts)} parts from assembly")
+
+    async def fetch_mass_properties_for_parts(self, client: Client) -> None:
+        async def _fetch_mass_properties(key: PathKey, part: Part, client: Client) -> None:
+            try:
+                if part.isRigidAssembly:
+                    LOGGER.debug(f"Fetching mass properties for rigid assembly: {key}")
+                    part.MassProperty = await asyncio.to_thread(
+                        client.get_assembly_mass_properties,
+                        did=part.documentId,
+                        wtype=WorkspaceType.W.value,
+                        wid=part.rigidAssemblyWorkspaceId,  # type: ignore[arg-type]
+                        eid=part.elementId,
+                    )
+                else:
+                    LOGGER.debug(f"Fetching mass properties for part: {key}")
+                    part.MassProperty = await asyncio.to_thread(
+                        client.get_mass_property,
+                        did=part.documentId,
+                        wtype=WorkspaceType.M.value,
+                        wid=part.documentMicroversion if part.documentMicroversion else self.document_microversion,
+                        eid=part.elementId,
+                        partID=part.partId,
+                    )
+            except Exception as e:
+                LOGGER.error(f"Failed to fetch mass properties for part {key}: {e}")
+
+        tasks = []
+        for key, part in self.parts.items():
+            if part.MassProperty is not None:
+                LOGGER.debug(f"Part {key} already has mass properties, skipping")
+                continue
+
+            if part.rigidAssemblyToPartTF is not None:
+                # this part belongs to a rigid subassembly, skip fetching mass properties
+                continue
+
+            tasks.append(_fetch_mass_properties(key, part, client))
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def fetch_occurrences_for_subassemblies(self, client: Client) -> None:
+        async def _fetch_rootassembly(key: PathKey, subassembly: SubAssembly, client: Client) -> None:
+            try:
+                LOGGER.debug(f"Fetching root assembly for subassembly: {key}")
+                _subassembly_data: RootAssembly = await asyncio.to_thread(
+                    client.get_root_assembly,
+                    did=subassembly.documentId,
+                    wtype=WorkspaceType.M.value,
+                    wid=subassembly.documentMicroversion,
+                    eid=subassembly.elementId,
+                    with_mass_properties=True,
+                    log_response=False,
+                )
+                _subassembly_occurrences = _subassembly_data.occurrences
+                for occurrence in _subassembly_occurrences:
+                    # NOTE: add sub-assembly key as prefix to get absolute path
+                    path_tuple = tuple(key.path) + tuple(occurrence.path)
+                    occ_key = self.keys_by_id.get(path_tuple)
+                    if occ_key:
+                        if subassembly.RootOccurrences is None:
+                            subassembly.RootOccurrences = {}
+                        subassembly.RootOccurrences[occ_key] = occurrence
+                    else:
+                        LOGGER.warning(f"No PathKey for subassembly occurrence {occurrence.path} in {key}")
+
+            except Exception as e:
+                LOGGER.error(f"Failed to fetch root assembly for subassembly {key}: {e}")
+
+        tasks = []
+        for key, subassembly in self.subassemblies.items():
+            if subassembly.RootOccurrences is not None:
+                LOGGER.debug(f"Subassembly {key} already has RootOccurrences, skipping")
+                continue
+
+            if not subassembly.isRigid:
+                # dont fetch root occurrences for flexible subassemblies
+                continue
+
+            tasks.append(_fetch_rootassembly(key, subassembly, client))
+
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)

@@ -31,7 +31,6 @@ nav:
       - Mesh: api/mesh.md
       - Parse: api/parse.md
       - Robot: api/robot.md
-      - Urdf: api/urdf.md
       - Utilities: api/utilities.md
 
 plugins:

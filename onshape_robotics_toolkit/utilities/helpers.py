@@ -15,6 +15,7 @@ import json
 import os
 import random
 import re
+from typing import Any
 from xml.sax.saxutils import escape
 
 import dotenv
@@ -26,15 +27,114 @@ from pydantic import BaseModel
 
 from onshape_robotics_toolkit.log import LOGGER
 
+# New unified key system for assembly parsing
+Key = tuple[str, ...]
+
+
+def clean_numeric_value(value: float, threshold: float = 1e-10, decimals: int = 8) -> float:
+    """
+    Clean a numeric value by:
+    1. Setting values below threshold to exactly 0
+    2. Rounding to specified decimal places
+
+    Args:
+        value: The numeric value to clean
+        threshold: Values with absolute value below this are set to 0 (default 1e-10)
+        decimals: Number of decimal places to round to (default 8)
+
+    Returns:
+        Cleaned numeric value
+
+    Examples:
+        >>> clean_numeric_value(5.62050406e-16)
+        0.0
+        >>> clean_numeric_value(0.123456789012345, decimals=5)
+        0.12346
+        >>> clean_numeric_value(-1e-11)
+        0.0
+    """
+    # First check if value is below threshold
+    if abs(value) < threshold:
+        return 0.0
+    # Round to specified decimal places
+    return round(value, decimals)
+
+
+def clean_numeric_list(data: Any, threshold: float = 1e-10, decimals: int = 8) -> Any:
+    """
+    Recursively clean numeric values in nested lists/arrays.
+
+    Args:
+        data: Data structure (can be list, nested list, or scalar)
+        threshold: Values with absolute value below this are set to 0
+        decimals: Number of decimal places to round to
+
+    Returns:
+        Cleaned data structure
+    """
+    if isinstance(data, (list, tuple)):
+        return [clean_numeric_list(item, threshold, decimals) for item in data]
+    elif isinstance(data, (float, np.floating)):
+        return clean_numeric_value(float(data), threshold, decimals)
+    elif isinstance(data, (int, np.integer)):
+        return int(data)
+    else:
+        return data
+
 
 class CustomJSONEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()  # Convert numpy array to list
-        if isinstance(obj, np.matrix):
-            return obj.tolist()  # Convert numpy matrix to list
+    """
+    Custom JSON encoder that:
+    1. Converts numpy arrays/matrices to lists
+    2. Cleans numerical values (removes near-zero noise, rounds to precision)
+    3. Converts sets to lists
+    """
+
+    def __init__(
+        self, *args: Any, clean_numerics: bool = True, threshold: float = 1e-10, decimals: int = 8, **kwargs: Any
+    ):
+        """
+        Args:
+            clean_numerics: If True, clean numeric values (default True)
+            threshold: Values below this are set to 0 (default 1e-10)
+            decimals: Number of decimal places to round to (default 8)
+        """
+        super().__init__(*args, **kwargs)
+        self.clean_numerics = clean_numerics
+        self.threshold = threshold
+        self.decimals = decimals
+
+    def encode(self, obj: Any) -> str:
+        """Override encode to clean numerics in the entire structure."""
+        if self.clean_numerics:
+            obj = self._clean_object(obj)
+        return super().encode(obj)
+
+    def _clean_object(self, obj: Any) -> Any:
+        """Recursively clean numeric values in any object."""
+        if isinstance(obj, dict):
+            return {k: self._clean_object(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._clean_object(item) for item in obj]
+        elif isinstance(obj, (float, np.floating)):
+            return clean_numeric_value(float(obj), self.threshold, self.decimals)
+        elif isinstance(obj, (int, np.integer)):
+            return int(obj)
+        elif isinstance(obj, (np.ndarray, np.matrix)):
+            # Convert to list and clean
+            return clean_numeric_list(obj.tolist(), self.threshold, self.decimals)
+        elif isinstance(obj, set):
+            return [self._clean_object(item) for item in obj]
+        else:
+            return obj
+
+    def default(self, obj: Any) -> Any:
+        """Handle non-serializable objects."""
+        if isinstance(obj, (np.ndarray, np.matrix)):
+            cleaned = clean_numeric_list(obj.tolist(), self.threshold, self.decimals)
+            return cleaned
         if isinstance(obj, set):
-            return list(obj)  # Convert set to list
+            return list(obj)
         return super().default(obj)
 
 
@@ -55,13 +155,24 @@ def load_key_from_dotenv(env: str, key_to_load: str) -> str:
     return key
 
 
-def save_model_as_json(model: BaseModel, file_path: str, indent: int = 4) -> None:
+def save_model_as_json(
+    model: BaseModel,
+    file_path: str,
+    indent: int = 4,
+    clean_numerics: bool = True,
+    threshold: float = 1e-10,
+    decimals: int = 8,
+) -> None:
     """
-    Save a Pydantic model as a JSON file
+    Save a Pydantic model as a JSON file with optional numeric cleaning.
 
     Args:
         model (BaseModel): Pydantic model to save
         file_path (str): File path to save JSON file
+        indent (int): JSON indentation level
+        clean_numerics (bool): If True, clean numeric values (default True)
+        threshold (float): Values below this are set to 0 (default 1e-10)
+        decimals (int): Number of decimal places to round to (default 8)
 
     Returns:
         None
@@ -72,10 +183,75 @@ def save_model_as_json(model: BaseModel, file_path: str, indent: int = 4) -> Non
         ...     b: str
         ...
         >>> save_model_as_json(TestModel(a=1, b="hello"), "test.json")
+        >>> save_model_as_json(model, "test.json", decimals=5, threshold=1e-8)
     """
-
     with open(file_path, "w") as file:
-        json.dump(model.model_dump(), file, indent=indent, cls=CustomJSONEncoder)
+        encoder = CustomJSONEncoder(
+            indent=indent, clean_numerics=clean_numerics, threshold=threshold, decimals=decimals
+        )
+        file.write(encoder.encode(model.model_dump()))
+
+
+def clean_json_numerics(data: Any, threshold: float = 1e-10, decimals: int = 8) -> Any:
+    """
+    Recursively clean numeric values in a JSON-like data structure.
+
+    Args:
+        data: JSON data (dict, list, or scalar)
+        threshold: Values below this are set to 0
+        decimals: Number of decimal places to round to
+
+    Returns:
+        Cleaned data structure
+    """
+    if isinstance(data, dict):
+        return {k: clean_json_numerics(v, threshold, decimals) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_json_numerics(item, threshold, decimals) for item in data]
+    elif isinstance(data, float):
+        return clean_numeric_value(data, threshold, decimals)
+    else:
+        return data
+
+
+def load_model_from_json(
+    model_class: type[BaseModel],
+    file_path: str,
+    clean_numerics: bool = True,
+    threshold: float = 1e-10,
+    decimals: int = 8,
+) -> BaseModel:
+    """
+    Load a Pydantic model from a JSON file with optional numeric cleaning.
+
+    Args:
+        model_class (type[BaseModel]): The Pydantic model class to instantiate
+        file_path (str): Path to JSON file
+        clean_numerics (bool): If True, clean numeric values before validation (default True)
+        threshold (float): Values below this are set to 0 (default 1e-10)
+        decimals (int): Number of decimal places to round to (default 8)
+
+    Returns:
+        BaseModel: Instance of the model class populated from JSON
+
+    Examples:
+        >>> class TestModel(BaseModel):
+        ...     a: int
+        ...     b: str
+        ...
+        >>> model = load_model_from_json(TestModel, "test.json")
+        >>> print(model.a, model.b)
+        1 hello
+
+        >>> from onshape_robotics_toolkit.models import Assembly
+        >>> assembly = load_model_from_json(Assembly, "assembly.json")
+        >>> assembly = load_model_from_json(Assembly, "assembly.json", decimals=5)
+    """
+    with open(file_path) as file:
+        data = json.load(file)
+        if clean_numerics:
+            data = clean_json_numerics(data, threshold, decimals)
+        return model_class.model_validate(data)
 
 
 def xml_escape(unescaped: str) -> str:
@@ -139,7 +315,7 @@ def generate_uid(values: list[str]) -> str:
     return hashlib.sha256(_value.encode()).hexdigest()[:16]
 
 
-def print_dict(d: dict, indent=0) -> None:
+def print_dict(d: dict, indent: int = 0) -> None:
     """
     Print a dictionary with indentation for nested dictionaries
 
@@ -168,7 +344,35 @@ def print_dict(d: dict, indent=0) -> None:
             print("\t" * (indent + 1) + str(value))
 
 
-def get_random_files(directory: str, file_extension: str, count: int) -> list[str]:
+def print_tf(tf: np.ndarray) -> None:
+    """
+    Print a 4x4 transformation matrix in a readable format
+
+    Args:
+        tf (np.ndarray): 4x4 transformation matrix
+
+    Returns:
+        None
+
+    Examples:
+        >>> import numpy as np
+        >>> tf = np.array([[1, 0, 0, 1],
+        ...                [0, 1, 0, 2],
+        ...                [0, 0, 1, 3],
+        ...                [0, 0, 0, 1]])
+        >>> print_tf(tf)
+        [[1.         0.         0.         1.        ]
+         [0.         1.         0.         2.        ]
+         [0.         0.         1.         3.        ]
+         [0.         0.         0.         1.        ]]
+    """
+    if tf.shape != (4, 4):
+        raise ValueError("Input must be a 4x4 matrix")
+    with np.printoptions(precision=8, suppress=True):
+        print(tf)
+
+
+def get_random_files(directory: str, file_extension: str, count: int) -> tuple[list[str], list[str]]:
     """
     Get random files from a directory with a specific file extension and count
 
@@ -254,7 +458,7 @@ def make_unique_keys(keys: list[str]) -> dict[str, int]:
         {"a": 0, "b": 1, "a-1": 2, "a-2": 3}
     """
     unique_key_map = {}
-    key_count = {}
+    key_count: dict[str, int] = {}
 
     for index, key in enumerate(keys):
         if key in key_count:
@@ -342,13 +546,38 @@ def get_sanitized_name(name: str, replace_with: str = "_", remove_onshape_tags: 
     return sanitized_name
 
 
-def show_video(frames, framerate=60):
+def clean_name_for_urdf(name: str) -> str:
+    """
+    Clean a name to be URDF-safe by replacing problematic characters.
+
+    This is similar to get_sanitized_name but specifically for URDF compatibility,
+    following the reference implementation's approach.
+
+    Args:
+        name: Name to clean for URDF compatibility.
+
+    Returns:
+        URDF-safe name.
+
+    Examples:
+        >>> clean_name_for_urdf("wheel <1>")
+        "wheel_(1)"
+        >>> clean_name_for_urdf("joint/arm\\link")
+        "joint_arm_link"
+    """
+    name = name.replace("<", "(").replace(">", ")")
+    name = re.sub(r"\s+", "_", name)
+    name = re.sub(r"[/\\]+", "_", name)
+    return name
+
+
+def show_video(frames: list[Any], framerate: int = 60) -> None:
     fig, ax = plt.subplots()
     ax.axis("off")
 
     im = ax.imshow(frames[0], animated=True)
 
-    def update(frame):
+    def update(frame: Any) -> list[Any]:
         im.set_array(frame)
         return [im]
 
@@ -357,7 +586,7 @@ def show_video(frames, framerate=60):
     plt.show()
 
 
-def save_gif(frames, filename="sim.gif", framerate=60):
+def save_gif(frames: list[Any], filename: str = "sim.gif", framerate: int = 60) -> None:
     images = [Image.fromarray(frame) for frame in frames]
     images[0].save(filename, save_all=True, append_images=images[1:], duration=1000 / framerate, loop=0)
 

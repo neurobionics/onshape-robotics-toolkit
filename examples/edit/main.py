@@ -1,14 +1,13 @@
 from onshape_robotics_toolkit.connect import Client
-from onshape_robotics_toolkit.graph import create_graph
+from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.parse import (
-    get_instances,
-    get_mates_and_relations,
-    get_parts,
-    get_subassemblies,
+    CAD,
 )
-from onshape_robotics_toolkit.robot import get_robot
+from onshape_robotics_toolkit.robot import Robot
+
+MAX_DEPTH = 2
 
 if __name__ == "__main__":
     LOGGER.set_file_name("edit.log")
@@ -24,22 +23,22 @@ if __name__ == "__main__":
     elements = client.get_elements(doc.did, doc.wtype, doc.wid)
     variables = client.get_variables(doc.did, doc.wid, elements["variables"].id)
 
+    # Update variable expressions
     variables["wheelDiameter"].expression = "180 mm"
     variables["wheelThickness"].expression = "71 mm"
     variables["forkAngle"].expression = "20 deg"
 
-    client.set_variables(doc.did, doc.wid, elements["variables"].id, variables)
+    # Create dictionary with variable names and their new expressions
+    variables_to_set = {
+        "wheelDiameter": variables["wheelDiameter"].expression,
+        "wheelThickness": variables["wheelThickness"].expression,
+        "forkAngle": variables["forkAngle"].expression,
+    }
+
+    client.set_variables(doc.did, doc.wid, elements["variables"].id, variables_to_set)
     assembly = client.get_assembly(doc.did, doc.wtype, doc.wid, elements["assembly"].id)
 
-    instances, occurrences, id_to_name_map = get_instances(assembly, max_depth=1)
-
-    subassemblies, rigid_subassemblies = get_subassemblies(assembly, client, instances)
-    parts = get_parts(assembly, rigid_subassemblies, client, instances)
-
-    mates, relations = get_mates_and_relations(assembly, subassemblies, rigid_subassemblies, id_to_name_map, parts)
-
-    graph, root_node = create_graph(occurrences=occurrences, instances=instances, parts=parts, mates=mates)
-    robot = get_robot(assembly, graph, root_node, parts, mates, relations, client, "test")
-    robot.show_tree()
-    robot.show_graph("bike.png")
+    cad = CAD.from_assembly(assembly, max_depth=MAX_DEPTH, client=client)
+    graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+    robot = Robot.from_graph(kinematic_graph=graph, client=client, name=f"edit_{MAX_DEPTH}")
     robot.save()
