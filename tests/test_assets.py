@@ -20,5 +20,6 @@ def test_asset_absolute_path_creates_mesh_directory(tmp_path, monkeypatch) -> No
     assert expected_dir.is_dir()
     assert absolute_path == os.path.join(str(expected_dir), "part.stl")
 
-    # Relative path should be computed from CURRENT_DIR
-    assert asset.relative_path == os.path.relpath(absolute_path, str(tmp_path))
+    # Relative path should use forward slashes for cross-platform compatibility
+    expected_relative_path = os.path.relpath(absolute_path, str(tmp_path)).replace(os.sep, "/")
+    assert asset.relative_path == expected_relative_path

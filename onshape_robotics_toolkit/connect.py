@@ -1169,9 +1169,11 @@ class Asset:
         Returns the relative path of the mesh file.
 
         Returns:
-            The relative path of the mesh file.
+            The relative path of the mesh file with forward slashes (cross-platform compatible).
         """
-        return os.path.relpath(self.absolute_path, CURRENT_DIR)
+        # Use forward slashes for cross-platform compatibility in URDF/MJCF files
+        rel_path = os.path.relpath(self.absolute_path, CURRENT_DIR)
+        return rel_path.replace(os.sep, "/")
 
     async def download(self) -> None:
         """

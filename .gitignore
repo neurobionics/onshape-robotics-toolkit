@@ -195,6 +195,7 @@ examples/simulation/**/*.html
 
 
 tests/**/*.urdf
+!tests/data/*.urdf
 tests/**/*.stl
 tests/**/*.png
 tests/**/*.prof
