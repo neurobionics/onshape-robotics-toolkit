@@ -1,0 +1,257 @@
+<?xml version="1.0" ?>
+<robot name="test_robot">
+  <link name="Part_1_1">
+    <visual name="Part_1_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Part_1_1.stl"/>
+      </geometry>
+      <material name="Part_1_1-material">
+        <color rgba="0 0 1 1"/>
+      </material>
+    </visual>
+    <collision name="Part_1_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Part_1_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Assembly_2_1_Part_6_1">
+    <visual name="Assembly_2_1_Part_6_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Part_6_1.stl"/>
+      </geometry>
+      <material name="Assembly_2_1_Part_6_1-material">
+        <color rgba="1 0 1 1"/>
+      </material>
+    </visual>
+    <collision name="Assembly_2_1_Part_6_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Part_6_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Assembly_2_1_Part_12_1">
+    <visual name="Assembly_2_1_Part_12_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Part_12_1.stl"/>
+      </geometry>
+      <material name="Assembly_2_1_Part_12_1-material">
+        <color rgba="0 1 1 1"/>
+      </material>
+    </visual>
+    <collision name="Assembly_2_1_Part_12_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Part_12_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Assembly_2_1_Assembly_1_1_Part_4_1">
+    <visual name="Assembly_2_1_Assembly_1_1_Part_4_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Assembly_1_1_Part_4_1.stl"/>
+      </geometry>
+      <material name="Assembly_2_1_Assembly_1_1_Part_4_1-material">
+        <color rgba="1 0 1 1"/>
+      </material>
+    </visual>
+    <collision name="Assembly_2_1_Assembly_1_1_Part_4_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Assembly_1_1_Part_4_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Assembly_2_1_Assembly_1_2_Part_4_1">
+    <visual name="Assembly_2_1_Assembly_1_2_Part_4_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Assembly_1_2_Part_4_1.stl"/>
+      </geometry>
+      <material name="Assembly_2_1_Assembly_1_2_Part_4_1-material">
+        <color rgba="1 0 0 1"/>
+      </material>
+    </visual>
+    <collision name="Assembly_2_1_Assembly_1_2_Part_4_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Assembly_1_2_Part_4_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Assembly_2_1_Assembly_1_1_Part_10_1">
+    <visual name="Assembly_2_1_Assembly_1_1_Part_10_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Assembly_1_1_Part_10_1.stl"/>
+      </geometry>
+      <material name="Assembly_2_1_Assembly_1_1_Part_10_1-material">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+    <collision name="Assembly_2_1_Assembly_1_1_Part_10_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Assembly_1_1_Part_10_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Assembly_2_1_Assembly_1_2_Part_10_1">
+    <visual name="Assembly_2_1_Assembly_1_2_Part_10_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Assembly_1_2_Part_10_1.stl"/>
+      </geometry>
+      <material name="Assembly_2_1_Assembly_1_2_Part_10_1-material">
+        <color rgba="1 0.5 0 1"/>
+      </material>
+    </visual>
+    <collision name="Assembly_2_1_Assembly_1_2_Part_10_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Assembly_2_1_Assembly_1_2_Part_10_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Part_15_1">
+    <visual name="Part_15_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Part_15_1.stl"/>
+      </geometry>
+      <material name="Part_15_1-material">
+        <color rgba="1 0 0 1"/>
+      </material>
+    </visual>
+    <collision name="Part_15_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Part_15_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="Part_14_1">
+    <visual name="Part_14_1_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Part_14_1.stl"/>
+      </geometry>
+      <material name="Part_14_1-material">
+        <color rgba="1 0 1 1"/>
+      </material>
+    </visual>
+    <collision name="Part_14_1_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes\Part_14_1.stl"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="1" iyy="1" izz="1" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <joint name="Revolute_1" type="revolute">
+    <origin xyz="0.025 -0.05 0" rpy="3.1415927 1.5707963 0"/>
+    <parent link="Part_1_1"/>
+    <child link="Assembly_2_1_Part_6_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_1-1" type="revolute">
+    <origin xyz="0 0 -0.025" rpy="-1.5707963 0 -1.5707963"/>
+    <parent link="Assembly_2_1_Part_6_1"/>
+    <child link="Assembly_2_1_Part_12_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_2" type="revolute">
+    <origin xyz="0 0 0.025" rpy="3.1415927 0 -1.5707963"/>
+    <parent link="Assembly_2_1_Part_12_1"/>
+    <child link="Assembly_2_1_Assembly_1_1_Part_4_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_3" type="revolute">
+    <origin xyz="0 0 -0.025" rpy="0 0 0"/>
+    <parent link="Assembly_2_1_Part_12_1"/>
+    <child link="Assembly_2_1_Assembly_1_2_Part_4_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_1-2" type="revolute">
+    <origin xyz="0 0 -0.025" rpy="0 0 0"/>
+    <parent link="Assembly_2_1_Assembly_1_1_Part_4_1"/>
+    <child link="Assembly_2_1_Assembly_1_1_Part_10_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_1-3" type="revolute">
+    <origin xyz="0 0 -0.025" rpy="3.1415927 0 0"/>
+    <parent link="Assembly_2_1_Assembly_1_2_Part_4_1"/>
+    <child link="Assembly_2_1_Assembly_1_2_Part_10_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_3-1" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.5707963 0 -3.1415927"/>
+    <parent link="Assembly_2_1_Assembly_1_1_Part_10_1"/>
+    <child link="Part_15_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+  <joint name="Revolute_2-1" type="revolute">
+    <origin xyz="0 0 0" rpy="-1.5707963 0 -3.1415927"/>
+    <parent link="Assembly_2_1_Assembly_1_2_Part_10_1"/>
+    <child link="Part_14_1"/>
+    <axis xyz="0 0 -1"/>
+    <limit effort="1" velocity="1" lower="-6.2831853" upper="6.2831853"/>
+  </joint>
+</robot>
