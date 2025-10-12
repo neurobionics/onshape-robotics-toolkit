@@ -185,8 +185,10 @@ def get_robot_link(
         _inertia = np.eye(3)  # Default identity inertia matrix
     else:
         _mass = part.MassProperty.mass[0]
-        _com = tuple(part.MassProperty.center_of_mass_wrt(world_to_link_tf))
-        _inertia = part.MassProperty.inertia_wrt(world_to_link_tf[:3, :3])
+        # Convert ndarray to matrix for compatibility with MassProperty methods
+        world_to_link_matrix = np.matrix(world_to_link_tf)
+        _com = tuple(part.MassProperty.center_of_mass_wrt(world_to_link_matrix))
+        _inertia = part.MassProperty.inertia_wrt(world_to_link_matrix[:3, :3])
 
     LOGGER.info(f"Creating robot link for {name}")
 
@@ -252,7 +254,9 @@ def get_robot_link(
         ),
     )
 
-    return link, world_to_link_tf, asset
+    # Convert to matrix for compatibility with downstream code
+    world_to_link_matrix = np.matrix(world_to_link_tf)
+    return link, world_to_link_matrix, asset
 
 
 def get_robot_joint(
