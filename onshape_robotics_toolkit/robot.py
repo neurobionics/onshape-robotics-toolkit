@@ -1224,6 +1224,10 @@ class Robot(nx.DiGraph):
                 LOGGER.warning(
                     f"File extension {current_ext} doesn't match robot type {self.type}. Changed to {expected_ext}"
                 )
+            # If extension matches but has different case, normalize to lowercase
+            elif path_obj.suffix != expected_ext:
+                file_path = str(path_obj.with_suffix(expected_ext))
+                LOGGER.info(f"Normalized extension from {path_obj.suffix} to {expected_ext}")
 
         # Set robot_file_dir on all assets so relative paths in XML are correct
         from pathlib import Path
