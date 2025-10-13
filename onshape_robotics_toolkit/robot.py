@@ -128,6 +128,7 @@ def get_robot_link(
     part: Part,
     client: Client,
     mate: Optional[Union[MateFeatureData, None]] = None,
+    mesh_dir: Optional[str] = None,
 ) -> tuple[Link, np.matrix, Asset]:
     """
     Generate a URDF link from an Onshape part.
@@ -137,6 +138,7 @@ def get_robot_link(
         part: The Onshape part object.
         client: The Onshape client object to use for sending API requests.
         mate: MateFeatureData object to use for generating the transformation matrix.
+        mesh_dir: Optional custom directory for mesh files.
 
     Returns:
         tuple[Link, np.matrix]: The generated link object
@@ -221,6 +223,7 @@ def get_robot_link(
         transform=world_to_link_tf,
         is_rigid_assembly=part.isRigidAssembly,
         file_name=f"{name}.stl",
+        mesh_dir=mesh_dir,
     )
     _mesh_path = asset.relative_path
 
@@ -1172,20 +1175,84 @@ class Robot(nx.DiGraph):
 
         return ET.tostring(model, pretty_print=True, encoding="unicode")
 
-    def save(self, file_path: Optional[str] = None, download_assets: bool = True) -> None:
+    def save(
+        self, file_path: Optional[str] = None, download_assets: bool = True, mesh_dir: Optional[str] = None
+    ) -> None:
         """Save the robot model to a URDF file.
 
         Args:
             file_path: The path to the file to save the robot model.
             download_assets: Whether to download the assets.
+            mesh_dir: Optional custom directory for mesh files. If not specified and file_path is provided,
+                defaults to a 'meshes' subdirectory next to the file_path. If neither is provided,
+                uses the current working directory.
         """
+        # Determine the mesh directory with smart defaults
+        resolved_mesh_dir: Optional[str] = None
+        if mesh_dir is not None:
+            # User explicitly provided mesh_dir
+            resolved_mesh_dir = mesh_dir
+        elif file_path is not None:
+            # Smart default: use file_path.parent / "meshes"
+            from pathlib import Path
+
+            file_parent = Path(file_path).parent
+            resolved_mesh_dir = os.path.join(str(file_parent), "meshes")
+
         if download_assets:
-            asyncio.run(self._download_assets())
+            asyncio.run(self._download_assets(resolved_mesh_dir))
 
         if not file_path:
             LOGGER.warning("No file path provided. Saving to current directory.")
             LOGGER.warning("Please keep in mind that the path to the assets will not be updated")
             file_path = f"{self.name}.{self.type}"
+        else:
+            # Validate and fix file extension based on robot type
+            from pathlib import Path
+
+            path_obj = Path(file_path)
+            current_ext = path_obj.suffix.lower()
+            expected_ext = f".{self.type}"
+
+            # If no extension, add the correct one
+            if not current_ext:
+                file_path = str(path_obj) + expected_ext
+                LOGGER.info(f"No file extension provided. Using {expected_ext}")
+            # If extension doesn't match robot type, fix it
+            elif current_ext != expected_ext:
+                file_path = str(path_obj.with_suffix(expected_ext))
+                LOGGER.warning(
+                    f"File extension {current_ext} doesn't match robot type {self.type}. Changed to {expected_ext}"
+                )
+            # If extension matches but has different case, normalize to lowercase
+            elif path_obj.suffix != expected_ext:
+                file_path = str(path_obj.with_suffix(expected_ext))
+                LOGGER.info(f"Normalized extension from {path_obj.suffix} to {expected_ext}")
+
+        # Set robot_file_dir on all assets so relative paths in XML are correct
+        from pathlib import Path
+
+        robot_file_dir = str(Path(file_path).parent.absolute())
+        for _node, data in self.nodes(data=True):
+            asset = data.get("asset")
+            link_data = data.get("data")
+            if asset:
+                asset.robot_file_dir = robot_file_dir
+                # Update the mesh paths in the link's geometry objects
+                if (
+                    link_data
+                    and hasattr(link_data, "visual")
+                    and link_data.visual
+                    and hasattr(link_data.visual.geometry, "filename")
+                ):
+                    link_data.visual.geometry.filename = asset.relative_path
+                if (
+                    link_data
+                    and hasattr(link_data, "collision")
+                    and link_data.collision
+                    and hasattr(link_data.collision.geometry, "filename")
+                ):
+                    link_data.collision.geometry.filename = asset.relative_path
 
         xml_declaration = '<?xml version="1.0" ?>\n'
 
@@ -1214,13 +1281,20 @@ class Robot(nx.DiGraph):
         for root in root_nodes:
             print_tree(root)
 
-    async def _download_assets(self) -> None:
-        """Asynchronously download the assets."""
+    async def _download_assets(self, mesh_dir: Optional[str] = None) -> None:
+        """Asynchronously download the assets.
 
+        Args:
+            mesh_dir: Optional custom directory for mesh files. If provided, updates all assets
+                to use this directory before downloading.
+        """
         tasks = []
         for _node, data in self.nodes(data=True):
             asset = data.get("asset")
             if asset and not asset.is_from_file:
+                # Update asset's mesh directory if specified
+                if mesh_dir is not None:
+                    asset.mesh_dir = mesh_dir
                 tasks.append(asset.download())
         try:
             await asyncio.gather(*tasks)

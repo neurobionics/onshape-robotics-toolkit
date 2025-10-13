@@ -20,4 +20,4 @@ if __name__ == "__main__":
     cad = CAD.from_assembly(assembly, max_depth=MAX_DEPTH, client=client)
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
     robot = Robot.from_graph(kinematic_graph=graph, client=client, name=f"edit_{MAX_DEPTH}")
-    robot.save()
+    robot.save(file_path="output/robot", mesh_dir="custom_meshes")
