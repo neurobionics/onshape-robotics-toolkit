@@ -15,7 +15,10 @@ matplotlib.use("Agg")
 
 from onshape_robotics_toolkit.models.assembly import Assembly
 from onshape_robotics_toolkit.parse import CAD
-from onshape_robotics_toolkit.utilities import load_model_from_json
+from onshape_robotics_toolkit.utilities import load_model_from_json, setup_quiet_logging
+
+# Configure quiet logging for tests
+setup_quiet_logging(file_path="tests/test.log", level="DEBUG")
 
 # Ensure the project root is on sys.path when pytest uses importlib mode.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]

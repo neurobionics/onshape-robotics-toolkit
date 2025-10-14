@@ -180,13 +180,13 @@ def test_mate_remapping_for_rigid_subassemblies(cad_doc_depth_1: CAD) -> None:
 
 def test_client_api_call_counter_initialization() -> None:
     """Test that Client initializes with API call counter at 0."""
-    client = Client(env=None)
+    client = Client(env="tests/test.env")
     assert client.api_call_count == 0
 
 
 def test_client_reset_api_call_count() -> None:
     """Test that reset_api_call_count() resets the counter to 0."""
-    client = Client(env=None)
+    client = Client(env="tests/test.env")
     # Manually increment counter
     client._api_call_count = 5
     assert client.api_call_count == 5
