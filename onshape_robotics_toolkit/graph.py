@@ -167,6 +167,11 @@ def remove_disconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
     Returns:
         The main connected subgraph of the graph, which is the largest connected subgraph.
     """
+    # Handle empty graph case (e.g., assemblies with only mate groups)
+    if len(graph.nodes) == 0:
+        LOGGER.debug("Graph is empty (no nodes) - this may indicate an assembly with only mate groups")
+        return graph
+
     if not nx.is_connected(graph):
         LOGGER.warning("Graph has one or more unconnected subgraphs")
 
@@ -309,12 +314,25 @@ class KinematicGraph(nx.DiGraph):
             2. Convert to directed graph with root detection
             3. Calculate topological order
         """
-        # TODO: add processing methods to:
-        # 1. Identify if the graph has disconnected subgraphs
-        # 2. Identify and process any loops present in the graph
-
         # remove disconnected subgraphs
         graph = remove_disconnected_subgraphs(raw_graph)
+
+        # Handle empty graph case (assemblies with only mate groups and no fixed/rigid parts)
+        if len(graph.nodes) == 0:
+            LOGGER.warning(
+                "Graph has no nodes - assembly contains only mate groups with no rigid assemblies or fixed parts. "
+                "Cannot create kinematic graph."
+            )
+            return
+
+        # Handle single-node graph case (e.g., single rigid assembly from mate groups)
+        if len(graph.nodes) == 1:
+            LOGGER.info("Graph has single node - this is a fully rigid assembly (one link, no joints)")
+            single_node = next(iter(graph.nodes))
+            self.root = single_node
+            part = self.cad.parts[single_node]
+            self.add_node(single_node, data=part)
+            return
 
         self._find_root_node(
             graph=graph,
@@ -431,22 +449,101 @@ class KinematicGraph(nx.DiGraph):
             remapped_mates[remapped_mate_key] = _mate_data
         return remapped_mates
 
+    def _is_root_assembly_rigid(self) -> bool:
+        """
+        Check if the root assembly should be treated as rigid.
+
+        Root assembly is rigid if it has only mate groups (no regular mates).
+        This is indicated by having 0 mates in cad.mates at the root level.
+
+        Returns:
+            True if root assembly has only mate groups, False otherwise
+        """
+        # Check if root assembly has any regular mates (not from subassemblies)
+        root_mates = [
+            mate
+            for (assembly_key, _, _), mate in self.cad.mates.items()
+            if assembly_key is None  # Root level mates
+        ]
+
+        has_root_mates = len(root_mates) > 0
+
+        if not has_root_mates:
+            LOGGER.debug("Root assembly has no regular mates - checking features")
+            # No mates at root level means root is rigid (only mate groups)
+            return True
+
+        return False
+
     def _get_parts_involved_in_mates(self, mates: dict[tuple[PathKey, PathKey], MateFeatureData]) -> set[PathKey]:
         """
-        Extract all part PathKeys that are involved in mates.
+        Extract all part PathKeys that should be nodes in the kinematic graph.
+
+        This includes:
+        1. Parts involved in mates (normal case)
+        2. When root is rigid: single node representing entire assembly
+        3. When root has mates: rigid assemblies and root-level parts as separate nodes
 
         Args:
             mates: Dictionary of mate relationships
 
         Returns:
-            Set of PathKeys for parts involved in mates
+            Set of PathKeys for parts that should be graph nodes
         """
         involved_parts: set[PathKey] = set()
+
+        # Add parts involved in mates
         for parent_key, child_key in mates:
             involved_parts.add(parent_key)
             involved_parts.add(child_key)
 
-        LOGGER.debug(f"Found {len(involved_parts)} parts involved in mates")
+        # If no mates exist, check if root assembly is rigid
+        if len(mates) == 0:
+            root_is_rigid = self._is_root_assembly_rigid()
+
+            if root_is_rigid:
+                LOGGER.info(
+                    "Root assembly is rigid (only mate groups) - entire assembly will be one node. "
+                    "All parts and subassemblies merged into single rigid body."
+                )
+                # Pick one representative node for the entire rigid assembly
+                # Priority: fixed parts > rigid subassemblies > first root part
+                for part_key, _ in self.cad.parts.items():
+                    occurrence = self.cad.occurrences.get(part_key)
+                    if occurrence and occurrence.fixed:
+                        involved_parts.add(part_key)
+                        LOGGER.debug(f"Using fixed part as root for rigid assembly: {part_key}")
+                        break
+
+                if len(involved_parts) == 0:
+                    for part_key, part in self.cad.parts.items():
+                        if part.isRigidAssembly:
+                            involved_parts.add(part_key)
+                            LOGGER.debug(f"Using rigid subassembly as root: {part_key}")
+                            break
+
+                if len(involved_parts) == 0:
+                    for part_key, _ in self.cad.parts.items():
+                        if part_key.depth == 0:
+                            involved_parts.add(part_key)
+                            LOGGER.debug(f"Using first root part as root: {part_key}")
+                            break
+            else:
+                LOGGER.debug("Root not rigid - adding parts as separate nodes")
+                for part_key, part in self.cad.parts.items():
+                    if part.isRigidAssembly:
+                        involved_parts.add(part_key)
+                        LOGGER.debug(f"Adding rigid assembly as node: {part_key}")
+                    elif part_key.depth == 0:
+                        involved_parts.add(part_key)
+                        LOGGER.debug(f"Adding root-level part as node: {part_key}")
+                    else:
+                        occurrence = self.cad.occurrences.get(part_key)
+                        if occurrence and occurrence.fixed:
+                            involved_parts.add(part_key)
+                            LOGGER.debug(f"Adding fixed part as node: {part_key}")
+
+        LOGGER.debug(f"Found {len(involved_parts)} parts to include in graph")
         return involved_parts
 
     def _find_root_node(self, graph: nx.Graph, parts: set[PathKey], use_user_defined_root: bool) -> None:

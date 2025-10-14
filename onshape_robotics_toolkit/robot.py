@@ -554,6 +554,15 @@ class Robot(nx.DiGraph):
             >>> robot = Robot.from_graph(cad, graph, client, "my_robot")
             >>> robot.save("robot.urdf", download_assets=True)
         """
+        # Check for empty kinematic graph
+        if len(kinematic_graph.nodes) == 0:
+            raise ValueError(
+                "Cannot create robot from empty kinematic graph. "
+                "The assembly contains only mate groups with no rigid assemblies or fixed parts. "
+                "Cannot determine a root link for the robot. "
+                "Mark at least one part or subassembly as fixed in Onshape, or ensure rigid assemblies exist."
+            )
+
         if fetch_mass_properties:
             asyncio.run(kinematic_graph.cad.fetch_mass_properties_for_parts(client))
 
