@@ -599,7 +599,7 @@ class Robot(nx.DiGraph):
 
         # Process edges in topological order
         for parent_key, child_key in robot.kinematic_graph.edges:
-            logger.info(f"Processing edge: {parent_key} -> {child_key}")
+            logger.info(f"Processing edge: {parent_key} → {child_key}")
 
             # Get parent transform
             world_to_parent_tf = robot.nodes[parent_key]["world_to_link_tf"]
@@ -610,7 +610,7 @@ class Robot(nx.DiGraph):
             # Get mate data from graph edge
             mate_data: MateFeatureData = robot.kinematic_graph.get_edge_data(parent_key, child_key)["data"]
             if mate_data is None:
-                logger.warning(f"No mate data found for edge {parent_key} -> {child_key}. Skipping.")
+                logger.warning(f"No mate data found for edge {parent_key} → {child_key}. Skipping.")
                 continue
 
             # Check for mate relations (mimic joints)
@@ -1123,7 +1123,7 @@ class Robot(nx.DiGraph):
                     # Convert to MuJoCo convention while maintaining the joint axis orientation
                     final_euler = final_rot.as_euler(cast(Literal["XYZ"], MJCF_EULER_SEQ), degrees=False)
 
-                    logger.debug(f"Joint {parent_name}->{child_name}:")
+                    logger.debug(f"Joint {parent_name} → {child_name}:")
                     logger.debug(f"  Original: pos={joint_data_typed2.origin.xyz}, rpy={joint_data_typed2.origin.rpy}")
                     logger.debug(f"  Final: pos={final_pos}, euler={final_euler}")
 

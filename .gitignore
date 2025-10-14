@@ -124,7 +124,7 @@ celerybeat.pid
 *.sage.py
 
 # Environments
-.env
+*.env
 .venv
 env/
 venv/
@@ -201,6 +201,7 @@ tests/**/*.png
 tests/**/*.prof
 tests/**/*.json
 !tests/data/*.json
+!tests/test.env
 examples/**/*.xml
 
 playground

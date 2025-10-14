@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.models.assembly import AssemblyInstance, MateFeatureData, PartInstance
 from onshape_robotics_toolkit.parse import CAD, PathKey
 
@@ -175,3 +176,73 @@ def test_mate_remapping_for_rigid_subassemblies(cad_doc_depth_1: CAD) -> None:
         # (i.e., parts with rigidAssemblyToPartTF set are internal and shouldn't have mates)
         assert parent_part.rigidAssemblyToPartTF is None, "Mate parent should not be internal to rigid assembly"
         assert child_part.rigidAssemblyToPartTF is None, "Mate child should not be internal to rigid assembly"
+
+
+def test_client_api_call_counter_initialization() -> None:
+    """Test that Client initializes with API call counter at 0."""
+    client = Client(env="tests/test.env")
+    assert client.api_call_count == 0
+
+
+def test_client_reset_api_call_count() -> None:
+    """Test that reset_api_call_count() resets the counter to 0."""
+    client = Client(env="tests/test.env")
+    # Manually increment counter
+    client._api_call_count = 5
+    assert client.api_call_count == 5
+
+    # Reset counter
+    client.reset_api_call_count()
+    assert client.api_call_count == 0
+
+
+def test_cad_estimate_api_calls(cad_doc: CAD) -> None:
+    """Test CAD instance method for API call estimation."""
+    estimation = cad_doc.estimate_api_calls(fetch_mass_properties=True, download_meshes=True)
+
+    # Verify structure of returned dictionary (no 'base' anymore)
+    assert "subassemblies" in estimation
+    assert "mass_properties" in estimation
+    assert "meshes" in estimation
+    assert "total" in estimation
+
+    # All values should be non-negative integers
+    for value in estimation.values():
+        assert isinstance(value, int)
+        assert value >= 0
+
+    # Total should be sum of components
+    assert estimation["total"] == (estimation["subassemblies"] + estimation["mass_properties"] + estimation["meshes"])
+
+
+def test_cad_estimate_api_calls_with_rigid_subassemblies(cad_doc_depth_1: CAD) -> None:
+    """Test API call estimation with rigid subassemblies at max_depth=1."""
+    estimation = cad_doc_depth_1.estimate_api_calls(fetch_mass_properties=True, download_meshes=True)
+
+    # At depth 1, there should be rigid subassemblies
+    assert estimation["subassemblies"] > 0, "Expected some rigid subassemblies at max_depth=1"
+
+    # Total should include subassembly calls
+    assert estimation["total"] > 0
+
+
+def test_cad_estimate_api_calls_no_mass_properties(cad_doc: CAD) -> None:
+    """Test CAD estimation without mass properties."""
+    estimation = cad_doc.estimate_api_calls(fetch_mass_properties=False, download_meshes=True)
+
+    # Mass properties should be 0
+    assert estimation["mass_properties"] == 0
+
+    # Meshes should still be counted
+    assert estimation["meshes"] > 0
+
+
+def test_cad_estimate_api_calls_no_meshes(cad_doc: CAD) -> None:
+    """Test CAD estimation without mesh downloads."""
+    estimation = cad_doc.estimate_api_calls(fetch_mass_properties=True, download_meshes=False)
+
+    # Mass properties should be counted
+    assert estimation["mass_properties"] > 0
+
+    # Meshes should be 0
+    assert estimation["meshes"] == 0

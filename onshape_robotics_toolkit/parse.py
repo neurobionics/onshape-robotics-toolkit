@@ -496,6 +496,66 @@ class CAD:
                 return asm  # Returns None for root, PathKey for subassembly
         return None
 
+    def estimate_api_calls(
+        self,
+        fetch_mass_properties: bool = True,
+        download_meshes: bool = True,
+    ) -> dict[str, int]:
+        """
+        Estimate the number of REMAINING API calls needed to process this CAD assembly.
+
+        This method analyzes the parsed assembly structure and calculates how many
+        additional API calls will be required to fetch mass properties and download meshes.
+
+        Note: This does NOT include the initial get_assembly() call that was already
+        made to create this CAD object.
+
+        Args:
+            fetch_mass_properties: Whether mass properties will be fetched
+            download_meshes: Whether mesh files will be downloaded
+
+        Returns:
+            Dictionary containing breakdown of estimated REMAINING API calls:
+                - 'subassemblies': Calls for fetching rigid subassembly data
+                - 'mass_properties': Calls for fetching mass properties
+                - 'meshes': Calls for downloading mesh files
+                - 'total': Total estimated REMAINING API calls
+
+        Examples:
+            >>> cad = CAD.from_assembly(assembly, max_depth=1)
+            >>> estimation = cad.estimate_api_calls(
+            ...     fetch_mass_properties=True,
+            ...     download_meshes=True
+            ... )
+            >>> print(f"Estimated remaining API calls: {estimation['total']}")
+            Estimated remaining API calls: 24
+        """
+        num_kinematic_parts = sum(
+            1 for key, part in self.parts.items() if part.rigidAssemblyToPartTF is None and not part.isRigidAssembly
+        )
+
+        num_rigid_subassemblies = sum(1 for key, sub in self.subassemblies.items() if sub.isRigid)
+
+        # Each rigid subassembly needs get_root_assembly to fetch occurrence data
+        subassembly_calls = num_rigid_subassemblies
+
+        mass_property_calls = 0
+        if fetch_mass_properties:
+            mass_property_calls = num_kinematic_parts + num_rigid_subassemblies
+
+        mesh_download_calls = 0
+        if download_meshes:
+            mesh_download_calls = num_kinematic_parts + num_rigid_subassemblies
+
+        total_calls = subassembly_calls + mass_property_calls + mesh_download_calls
+
+        return {
+            "subassemblies": subassembly_calls,
+            "mass_properties": mass_property_calls,
+            "meshes": mesh_download_calls,
+            "total": total_calls,
+        }
+
     def __repr__(self) -> str:
         # TODO: would be nice to have the CAD tree print here
         part_count = sum(1 for inst in self.instances.values() if isinstance(inst, PartInstance))
@@ -555,6 +615,15 @@ class CAD:
         cad._populate_from_assembly(assembly)
 
         logger.info(f"Created {cad}")
+
+        if client is not None:
+            estimation = cad.estimate_api_calls(fetch_mass_properties=True, download_meshes=True)
+            logger.info(
+                f"Estimated API calls → Total: {estimation['total']} "
+                f"(subassemblies: {estimation['subassemblies']}, "
+                f"mass_properties: {estimation['mass_properties']}, "
+                f"meshes: {estimation['meshes']})"
+            )
 
         return cad
 
@@ -792,13 +861,8 @@ class CAD:
                 total_occurrences += 1
 
         logger.info(
-            "Populated %d subassembly occurrences from %d definitions "
-            "(rigid_by_depth=%d, rigid_by_features=%d, max_depth=%d)",
-            total_occurrences,
-            total_defs,
-            rigid_by_depth,
-            rigid_by_features,
-            self.max_depth,
+            f"Populated {total_occurrences} subassembly occurrences from {total_defs} definitions "
+            f"(rigid_by_depth={rigid_by_depth}, rigid_by_features={rigid_by_features}, max_depth={self.max_depth})",
         )
 
     def _is_rigid_by_features(self, subassembly: SubAssembly) -> bool:
