@@ -6,7 +6,12 @@ import sys
 import types
 from pathlib import Path
 
+# Configure matplotlib to use non-GUI backend before any imports
+# This prevents tkinter initialization issues on Windows
+import matplotlib
 import pytest
+
+matplotlib.use("Agg")
 
 from onshape_robotics_toolkit.models.assembly import Assembly
 from onshape_robotics_toolkit.parse import CAD
