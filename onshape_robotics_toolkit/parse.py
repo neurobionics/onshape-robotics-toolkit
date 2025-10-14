@@ -25,6 +25,7 @@ from onshape_robotics_toolkit.models.assembly import (
     AssemblyInstance,
     MatedCS,
     MateFeatureData,
+    MateGroupFeatureData,
     Occurrence,
     Part,
     PartInstance,
@@ -40,6 +41,10 @@ ROOT_PATH_NAME = "root"
 SUBASSEMBLY_PATH_PREFIX = "subassembly"
 
 # Assembly classification constants
+# Feature types that indicate a rigid assembly when they're the ONLY features present.
+# Mate groups are organizational features that group parts together without defining
+# kinematic relationships. When an assembly contains ONLY mate groups (or no features),
+# it signals the designer's intent for those parts to move as a single rigid body.
 RIGID_ASSEMBLY_ONLY_FEATURE_TYPES = {AssemblyFeatureType.MATEGROUP}
 
 # Entity relationship constants
@@ -683,6 +688,12 @@ class CAD:
                 path_tuple = (instance.id,) if parent_key is None else (*parent_key.path, instance.id)
                 key = self.keys_by_id.get(path_tuple)
                 if not key:
+                    if instance.suppressed:
+                        continue
+                    # check if parent is suppressed
+                    if parent_key and self.instances[parent_key].suppressed:
+                        continue
+
                     scope = "root" if parent_key is None else "nested"
                     LOGGER.warning(f"No PathKey for {scope} instance {instance.id} ({instance.name})")
                     continue
@@ -734,7 +745,8 @@ class CAD:
 
         total_defs = len(assembly.subAssemblies)
         total_occurrences = 0
-        rigid_marked = 0
+        rigid_by_depth = 0
+        rigid_by_features = 0
 
         for subassembly in assembly.subAssemblies:
             pathkeys = uid_to_pathkeys.get(subassembly.uid)
@@ -744,25 +756,94 @@ class CAD:
                 )
                 continue
 
-            for pathkey in pathkeys:
-                # Mark rigidity for this occurrence if depth logic requires it.
-                if pathkey.depth >= self.max_depth:
-                    subassembly.isRigid = True
-                    inst = self.instances[pathkey]
-                    if isinstance(inst, AssemblyInstance):
-                        inst.isRigid = True
-                        rigid_marked += 1
+            # Analyze features to determine if this subassembly should be rigid
+            # An assembly is rigid by features if:
+            # 1. It has no features (empty assembly), OR
+            # 2. It has features AND all features are mate groups (organizational only)
+            is_rigid_by_mate_groups = self._is_rigid_by_features(subassembly)
 
-                self.subassemblies[pathkey] = copy.deepcopy(subassembly)
+            for pathkey in pathkeys:
+                # Create a deep copy for this occurrence
+                subassembly_copy = copy.deepcopy(subassembly)
+
+                # Mark rigidity based on depth or feature analysis
+                is_rigid_by_depth_check = pathkey.depth >= self.max_depth
+
+                if is_rigid_by_mate_groups:
+                    subassembly_copy.isRigid = True
+                    rigid_by_features += 1
+                    LOGGER.debug(
+                        f"Subassembly {pathkey} marked as rigid (features analysis: "
+                        f"{len(subassembly.features)} features, all mate groups)"
+                    )
+                elif is_rigid_by_depth_check:
+                    subassembly_copy.isRigid = True
+                    rigid_by_depth += 1
+                    LOGGER.debug(
+                        f"Subassembly {pathkey} marked as rigid (depth {pathkey.depth} >= max_depth {self.max_depth})"
+                    )
+
+                # Update the corresponding instance
+                inst = self.instances[pathkey]
+                if isinstance(inst, AssemblyInstance):
+                    inst.isRigid = subassembly_copy.isRigid
+
+                self.subassemblies[pathkey] = subassembly_copy
                 total_occurrences += 1
 
         LOGGER.info(
-            "Populated %d subassembly occurrences from %d definitions (rigid=%d, max_depth=%d)",
+            "Populated %d subassembly occurrences from %d definitions "
+            "(rigid_by_depth=%d, rigid_by_features=%d, max_depth=%d)",
             total_occurrences,
             total_defs,
-            rigid_marked,
+            rigid_by_depth,
+            rigid_by_features,
             self.max_depth,
         )
+
+    def _is_rigid_by_features(self, subassembly: SubAssembly) -> bool:
+        """
+        Determine if a subassembly should be treated as rigid based on its features.
+
+        A subassembly is considered rigid if:
+        1. It has no features at all (empty assembly), OR
+        2. It has features but ALL of them are mate groups
+
+        Mate groups are organizational features that group parts together without
+        defining kinematic relationships. When an assembly contains only mate groups,
+        it indicates the designer intends for those parts to move as a single rigid body.
+
+        Args:
+            subassembly: SubAssembly to analyze
+
+        Returns:
+            True if subassembly should be rigid, False otherwise
+
+        Examples:
+            >>> # Empty assembly -> rigid
+            >>> sub = SubAssembly(features=[])
+            >>> _is_rigid_by_features(sub)
+            True
+
+            >>> # Only mate groups -> rigid
+            >>> sub = SubAssembly(features=[MateGroup1, MateGroup2])
+            >>> _is_rigid_by_features(sub)
+            True
+
+            >>> # Mix of mate groups and mates -> flexible
+            >>> sub = SubAssembly(features=[MateGroup1, RevoluteMate])
+            >>> _is_rigid_by_features(sub)
+            False
+        """
+        if len(subassembly.features) == 0:
+            return True
+
+        # Check if all non-suppressed features are mate groups
+        non_suppressed_features = [f for f in subassembly.features if not f.suppressed]
+        if len(non_suppressed_features) == 0:
+            return True
+
+        return all(feature.featureType in RIGID_ASSEMBLY_ONLY_FEATURE_TYPES for feature in non_suppressed_features)
 
     def _populate_mates(self, assembly: Assembly) -> None:
         """
@@ -784,15 +865,37 @@ class CAD:
             assembly_key: Optional[PathKey],
             path_prefix: Optional[tuple[str, ...]],
         ) -> None:
-            """Internal helper to process a single mate feature.
+            """Internal helper to process a single assembly feature.
+
+            Handles both mate features (which create kinematic relationships) and
+            mate groups (which are organizational only and don't create edges).
 
             Args:
-                feature: Feature object which may contain MateFeatureData
+                feature: Feature object which may contain MateFeatureData or MateGroupFeatureData
                 assembly_key: None for root, or PathKey of subassembly provenance
                 path_prefix: Tuple prefix to prepend for relative subassembly paths
             """
+            if feature.suppressed:
+                return
+
+            # Handle mate groups (organizational only - no kinematic relationship)
+            if feature.featureType == AssemblyFeatureType.MATEGROUP:
+                if isinstance(feature.featureData, MateGroupFeatureData):
+                    mate_group_data: MateGroupFeatureData = feature.featureData
+                    scope = "root" if assembly_key is None else f"subassembly {assembly_key}"
+                    LOGGER.debug(
+                        f"Found mate group '{mate_group_data.name}' in {scope} with "
+                        f"{len(mate_group_data.occurrences)} occurrences (organizational only, no mate edges created)"
+                    )
+                return
+
+            # Handle mate connectors (not yet implemented)
+            if feature.featureType == AssemblyFeatureType.MATECONNECTOR:
+                # TODO: add support for mate connectors
+                return
+
+            # Handle regular mates (create kinematic relationships)
             if feature.featureType != AssemblyFeatureType.MATE or not isinstance(feature.featureData, MateFeatureData):
-                # TODO: add support for mate groups and connectors
                 return
 
             mate_data: MateFeatureData = copy.deepcopy(feature.featureData)
@@ -1014,12 +1117,13 @@ class CAD:
             for pathkey in pathkeys:
                 self.parts[pathkey] = copy.deepcopy(part)  # Avoid mutating original data
                 self.parts[pathkey].worldToPartTF = MatedCS.from_tf(self.occurrences[pathkey].tf)
-                if pathkey.depth > self.max_depth:
-                    rigid_root = self.get_rigid_assembly_root(pathkey)
-                    if not rigid_root:
-                        LOGGER.warning(f"Part {pathkey} exceeds max_depth but has no rigid assembly root")
-                        continue
 
+                # Check if this part belongs to a rigid assembly
+                # This can happen either because:
+                # 1. The part's depth exceeds max_depth (depth-based rigidity), OR
+                # 2. The part is inside an assembly that was marked rigid by feature analysis (mate groups only)
+                rigid_root = self.get_rigid_assembly_root(pathkey)
+                if rigid_root is not None:
                     self.parts[pathkey].rigidAssemblyKey = rigid_root
                     self.parts[pathkey].rigidAssemblyWorkspaceId = self.workspace_id
 
@@ -1138,7 +1242,22 @@ class CAD:
                             subassembly.RootOccurrences = {}
                         subassembly.RootOccurrences[occ_key] = occurrence
                     else:
-                        LOGGER.warning(f"No PathKey for subassembly occurrence {occurrence.path} in {key}")
+                        # Check if any parent in the hierarchy is suppressed (causing missing PathKey)
+                        # Walk up the path and check if any instance is suppressed
+                        is_suppressed_parent = False
+                        for i in range(len(path_tuple), 0, -1):
+                            partial_path = path_tuple[:i]
+                            partial_key = self.keys_by_id.get(partial_path)
+                            if (
+                                partial_key
+                                and self.instances.get(partial_key, None)
+                                and self.instances[partial_key].suppressed
+                            ):
+                                is_suppressed_parent = True
+                                break
+
+                        if not is_suppressed_parent:
+                            LOGGER.warning(f"No PathKey for subassembly occurrence {occurrence.path} in {key}")
 
             except Exception as e:
                 LOGGER.error(f"Failed to fetch root assembly for subassembly {key}: {e}")

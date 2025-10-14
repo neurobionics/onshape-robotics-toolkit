@@ -818,6 +818,17 @@ class MateGroupFeatureData(BaseModel):
     """
     Represents data for a mate group feature within an assembly.
 
+    Mate groups are organizational features in Onshape that group multiple parts together
+    without defining kinematic relationships between them. They are used by designers to
+    organize complex assemblies and indicate that grouped parts should move as a single
+    rigid body.
+
+    - Assemblies containing ONLY mate groups (no regular mates) are treated as rigid bodies
+    - Mate groups do not create kinematic joints or edges in the robot graph
+    - Parts in mate-group-only assemblies are merged into a single rigid assembly part
+    - Mixed assemblies (mate groups + regular mates) remain flexible, with mate groups
+      serving as organizational markers only
+
     JSON:
         ```json
             {
