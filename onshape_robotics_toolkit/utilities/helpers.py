@@ -22,7 +22,7 @@ import json
 import os
 import random
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from xml.sax.saxutils import escape
 
 import dotenv
@@ -32,6 +32,18 @@ import numpy as np
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    pass  # pragma: no cover
+
+
+def _record_logging_config(**kwargs: Any) -> None:
+    try:
+        from onshape_robotics_toolkit.config import LoggingConfig, record_logging_config
+    except ImportError:
+        return
+    record_logging_config(LoggingConfig(**kwargs))
+
 
 # New unified key system for assembly parsing
 Key = tuple[str, ...]
@@ -735,6 +747,15 @@ def setup_default_logging(
     console_id = setup_console_logging(level=console_level, colorize=True)
     file_id = setup_file_logging(file_path=file_path, level=file_level, delay=delay_file_creation)
 
+    _record_logging_config(
+        mode="default",
+        console_level=console_level,
+        file_level=file_level,
+        file_path=file_path,
+        clear_existing_handlers=clear_existing_handlers,
+        delay_file_creation=delay_file_creation,
+    )
+
     return console_id, file_id
 
 
@@ -754,7 +775,9 @@ def setup_minimal_logging(level: str = "INFO") -> int:
         >>> setup_minimal_logging(level="WARNING")
     """
     logger.remove()
-    return setup_console_logging(level=level, format_string=MINIMAL_CONSOLE_FORMAT)
+    handler_id = setup_console_logging(level=level, format_string=MINIMAL_CONSOLE_FORMAT)
+    _record_logging_config(mode="minimal", console_level=level)
+    return handler_id
 
 
 def setup_quiet_logging(file_path: str = "onshape_toolkit.log", level: str = "DEBUG") -> int:
@@ -775,7 +798,14 @@ def setup_quiet_logging(file_path: str = "onshape_toolkit.log", level: str = "DE
         >>> setup_quiet_logging("background_task.log")
     """
     logger.remove()
-    return setup_file_logging(file_path=file_path, level=level)
+    handler_id = setup_file_logging(file_path=file_path, level=level)
+    _record_logging_config(
+        mode="quiet",
+        file_path=file_path,
+        file_level=level,
+        clear_existing_handlers=True,
+    )
+    return handler_id
 
 
 # ============================================================================

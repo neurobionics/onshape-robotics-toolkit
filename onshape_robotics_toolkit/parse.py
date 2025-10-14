@@ -17,6 +17,7 @@ import copy
 import numpy as np
 from loguru import logger
 
+from onshape_robotics_toolkit.config import record_cad_config, record_mate_name, record_part_name
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.models.assembly import (
     Assembly,
@@ -33,7 +34,7 @@ from onshape_robotics_toolkit.models.assembly import (
     RootAssembly,
     SubAssembly,
 )
-from onshape_robotics_toolkit.models.document import WorkspaceType
+from onshape_robotics_toolkit.models.document import Document, WorkspaceType, parse_url
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
 
 # Path and entity constants
@@ -615,6 +616,7 @@ class CAD:
         cad._populate_from_assembly(assembly)
 
         logger.info(f"Created {cad}")
+        record_cad_config(max_depth=max_depth)
 
         if client is not None:
             estimation = cad.estimate_api_calls(fetch_mass_properties=True, download_meshes=True)
@@ -626,6 +628,36 @@ class CAD:
             )
 
         return cad
+
+    @classmethod
+    def from_url(
+        cls,
+        url: str,
+        *,
+        client: Client,
+        max_depth: int = 0,
+        configuration: str = "default",
+        log_response: bool = True,
+        with_meta_data: bool = True,
+    ) -> "CAD":
+        """Create a CAD instance directly from an Onshape document URL."""
+        base_url, did, wtype, wid, eid = parse_url(url)
+        if client is None:
+            raise ValueError("client must be provided to load CAD from URL")
+
+        document = Document(base_url=base_url, did=did, wtype=wtype, wid=wid, eid=eid, url=url)
+
+        assembly = client.get_assembly(
+            document.did,
+            document.wtype,
+            document.wid,
+            document.eid,
+            configuration=configuration,
+            log_response=log_response,
+            with_meta_data=with_meta_data,
+        )
+
+        return cls.from_assembly(assembly, max_depth=max_depth, client=client)
 
     @staticmethod
     def _build_path_keys_from_occurrences(
@@ -778,6 +810,8 @@ class CAD:
                         )
                         continue
                     _populate_branch(subassembly.instances, key)
+                elif isinstance(instance, PartInstance):
+                    record_part_name(str(key), getattr(instance, "name", None))
 
         _populate_branch(assembly.rootAssembly.instances, None)
         logger.info(f"Populated {len(self.instances)} instances (including nested)")
@@ -991,6 +1025,9 @@ class CAD:
                 mate_data.matedEntities[PARENT],
                 mate_data.matedEntities[CHILD],
             ]
+
+            sanitized_mate_name = get_sanitized_name(mate_data.name)
+            record_mate_name(sanitized_mate_name, mate_data.name)
 
             if parent_key and child_key:
                 self.mates[(assembly_key, parent_key, child_key)] = mate_data

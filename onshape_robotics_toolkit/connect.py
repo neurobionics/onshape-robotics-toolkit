@@ -32,6 +32,12 @@ import requests
 import stl
 from loguru import logger
 
+from onshape_robotics_toolkit.config import (
+    record_assembly_config,
+    record_client_config,
+    record_document_config,
+    record_variable_update,
+)
 from onshape_robotics_toolkit.mesh import transform_mesh
 from onshape_robotics_toolkit.models.assembly import Assembly, RootAssembly
 from onshape_robotics_toolkit.models.document import BASE_URL, Document, DocumentMetaData, generate_url
@@ -174,6 +180,7 @@ class Client:
         self._access_key, self._secret_key = load_env_variables(env)
         self._api_call_count = 0
         logger.info(f"Onshape API initialized with env file: {env}")
+        record_client_config(env=env, base_url=base_url)
 
         # Register cleanup function to log API usage on exit
         atexit.register(self._log_final_api_count)
@@ -375,11 +382,15 @@ class Client:
         # api/v9/variables/d/a1c1addf75444f54b504f25c/w/0d17b8ebb2a4c76be9fff3c7/e/cba5e3ca026547f34f8d9f0f/variables
         request_path = "/api/variables/d/" + did + "/w/" + wid + "/e/" + eid + "/variables"
 
-        return self.request(
+        response = self.request(
             HTTP.POST,
             request_path,
             body=payload,
         )
+
+        record_variable_update(element_id=eid, expressions=variables)
+
+        return response
 
     def get_assembly_name(
         self,
@@ -634,6 +645,22 @@ class Client:
             assembly.name = self.get_assembly_name(did, wtype, wid, eid, configuration)
             document_meta_data = self.get_document_metadata(did)
             assembly.document.name = document_meta_data.name
+
+        record_document_config(
+            url=getattr(assembly.document, "url", None),
+            base_url=self._url,
+            did=did,
+            wtype=wtype,
+            wid=wid,
+            eid=eid,
+            name=getattr(assembly.document, "name", None),
+        )
+        record_assembly_config(
+            element_id=eid,
+            configuration=configuration,
+            log_response=log_response,
+            with_meta_data=with_meta_data,
+        )
 
         return assembly
 

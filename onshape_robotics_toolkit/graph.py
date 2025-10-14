@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 from loguru import logger
 
+from onshape_robotics_toolkit.config import record_kinematics_config
 from onshape_robotics_toolkit.models.assembly import MatedCS, MateFeatureData
 from onshape_robotics_toolkit.parse import CAD, CHILD, PARENT, PathKey
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
@@ -264,6 +265,8 @@ class KinematicGraph(nx.DiGraph):
         """
         kinematic_graph = cls(cad=cad)
         kinematic_graph._build_graph(use_user_defined_root)
+
+        record_kinematics_config(use_user_defined_root=use_user_defined_root)
 
         return kinematic_graph
 

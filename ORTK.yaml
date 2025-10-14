@@ -1,0 +1,50 @@
+cad:
+  max_depth: 2
+kinematics:
+  use_user_defined_root: true
+robot:
+  name: test_robot
+  type: urdf
+  fetch_mass_properties: false
+export:
+  file_path: /tmp/pytest-of-senthur/pytest-9/test_save_nested_directory_cre0/output/robots/robot.urdf
+  download_assets: false
+names:
+  parts:
+    Part_1_1:
+      original: Part 1 <1>
+      name: Part_1_1
+    Assembly_2_1_Part_6_1:
+      original: Part 6 <1>
+      name: Assembly_2_1_Part_6_1
+    Assembly_2_1_Part_12_1:
+      original: Part 12 <1>
+      name: Assembly_2_1_Part_12_1
+    Assembly_2_1_Assembly_1_1_Part_10_1:
+      original: Part 10 <1>
+      name: Assembly_2_1_Assembly_1_1_Part_10_1
+    Assembly_2_1_Assembly_1_1_Part_4_1:
+      original: Part 4 <1>
+      name: Assembly_2_1_Assembly_1_1_Part_4_1
+    Assembly_2_1_Assembly_1_2_Part_10_1:
+      original: Part 10 <1>
+      name: Assembly_2_1_Assembly_1_2_Part_10_1
+    Assembly_2_1_Assembly_1_2_Part_4_1:
+      original: Part 4 <1>
+      name: Assembly_2_1_Assembly_1_2_Part_4_1
+    Part_14_1:
+      original: Part 14 <1>
+      name: Part_14_1
+    Part_15_1:
+      original: Part 15 <1>
+      name: Part_15_1
+  mates:
+    Revolute_1:
+      original: Revolute 1
+      name: Revolute_1
+    Revolute_2:
+      original: Revolute 2
+      name: Revolute_2
+    Revolute_3:
+      original: Revolute 3
+      name: Revolute_3
