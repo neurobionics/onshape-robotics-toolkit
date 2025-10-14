@@ -1,9 +1,6 @@
-import sys
-
 import mujoco
 import mujoco.viewer
 import numpy as np
-from loguru import logger
 from mods import modify_ballbot
 from scipy.spatial.transform import Rotation
 from transformations import compute_motor_torques
@@ -11,9 +8,7 @@ from transformations import compute_motor_torques
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.robot import Robot, RobotType
-
-# from onshape_robotics_toolkit.robot import RobotType, get_robot
-from onshape_robotics_toolkit.utilities import save_gif
+from onshape_robotics_toolkit.utilities import save_gif, setup_default_logging
 
 HEIGHT = 480
 WIDTH = 640
@@ -90,10 +85,8 @@ def control(data, roll_sp=0, pitch_sp=0):
 
 
 if __name__ == "__main__":
-    # Configure loguru for this example
-    logger.remove()  # Remove default handler
-    logger.add("sim.log", rotation="10 MB", level="DEBUG")
-    logger.add(sys.stderr, level="INFO")
+    # Configure logging: console at INFO + file at DEBUG
+    setup_default_logging(file_path="sim.log", console_level="INFO")
 
     client = Client()
     doc = Document.from_url(

@@ -467,17 +467,16 @@ def find_best_design_variables(trial):
 
 
 if __name__ == "__main__":
-    import sys
+    from onshape_robotics_toolkit.utilities import setup_default_logging
 
     run_name = input("Enter run name: ")
     # Create output directory for this run
     output_dir = run_name
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(os.path.join(output_dir, "scenes"), exist_ok=True)  # Create scenes subdirectory
-    # Update log file path
-    logger.remove()
-    logger.add(os.path.join(output_dir, f"{run_name}.log"), rotation="10 MB", level="DEBUG")
-    logger.add(sys.stderr, level="INFO")
+
+    # Configure logging: console at INFO + file at DEBUG
+    setup_default_logging(file_path=os.path.join(output_dir, f"{run_name}.log"), console_level="INFO")
 
     client = Client(env=".env")
     doc = Document.from_url(

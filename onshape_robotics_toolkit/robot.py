@@ -1264,6 +1264,9 @@ class Robot(nx.DiGraph):
                 ):
                     link_data.collision.geometry.filename = asset.relative_path
 
+        file_path_obj = Path(file_path)
+        file_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
         xml_declaration = '<?xml version="1.0" ?>\n'
 
         if self.type == RobotType.URDF:

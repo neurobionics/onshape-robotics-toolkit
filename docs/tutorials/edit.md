@@ -25,20 +25,17 @@ Before you begin, make sure you have:
 Set up the Onshape API client for authentication and interaction:
 
 ```python
-import sys
-from loguru import logger
 from onshape_robotics_toolkit.connect import Client
+from onshape_robotics_toolkit.utilities import setup_default_logging
 
-# Set up logging (optional - toolkit has sensible defaults)
-logger.remove()  # Remove default handler
-logger.add("edit.log", rotation="10 MB", level="DEBUG")  # File logging with rotation
-logger.add(sys.stderr, level="INFO")  # Console logging at INFO level
+# Configure logging: console at INFO + file at DEBUG
+setup_default_logging(file_path="edit.log", console_level="INFO")
 
 # Initialize the client
-client = Client(
-    env=".env"
-)
+client = Client(env=".env")
 ```
+
+The toolkit provides convenient logging helpers built on [loguru](https://github.com/Delgan/loguru). The `setup_default_logging()` function configures both console and file logging with sensible defaults. For other logging configurations, see `setup_minimal_logging()`, `setup_quiet_logging()`, or use the lower-level `setup_console_logging()` and `setup_file_logging()` functions.
 
 ---
 
