@@ -22,8 +22,8 @@ from typing import Optional, Union
 
 import matplotlib.pyplot as plt
 import networkx as nx
+from loguru import logger
 
-from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.models.assembly import MatedCS, MateFeatureData
 from onshape_robotics_toolkit.parse import CAD, CHILD, PARENT, PathKey
 from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
@@ -90,7 +90,7 @@ def create_graph(
             parts: Dictionary of all parts in the CAD assembly
             graph: The graph to add nodes to
         """
-        LOGGER.debug(f"Processing {len(part_keys)} involved parts")
+        logger.debug(f"Processing {len(part_keys)} involved parts")
         for part_key in part_keys:
             # Check if instance is suppressed
             # instance = self.cad.instances.get(part_key)
@@ -98,14 +98,14 @@ def create_graph(
             #     # TODO: Should this happen here or within the CAD class?
             #     # Skipping parts here is problematic since the mate registry still
             #     # refers to them, leading to dangling edges.
-            #     LOGGER.debug(f"Skipping suppressed part: {part_key}")
+            #     logger.debug(f"Skipping suppressed part: {part_key}")
             #     skipped_hidden += 1
             #     continue
             graph.add_node(
                 part_key,
             )
 
-        LOGGER.debug(f"Added {len(graph.nodes)} nodes to graph")
+        logger.debug(f"Added {len(graph.nodes)} nodes to graph")
 
     def _add_edges(mates: dict[tuple[PathKey, PathKey], MateFeatureData], graph: nx.Graph) -> None:
         """
@@ -125,11 +125,11 @@ def create_graph(
                     parent_key,
                     child_key,
                 )
-                LOGGER.debug(f"Added edge: {parent_key} -> {child_key}")
+                logger.debug(f"Added edge: {parent_key} -> {child_key}")
             else:
-                LOGGER.debug(f"Skipping edge {parent_key} -> {child_key} (nodes not in graph)")
+                logger.debug(f"Skipping edge {parent_key} -> {child_key} (nodes not in graph)")
 
-        LOGGER.debug(f"Added {len(graph.edges)} edges to graph")
+        logger.debug(f"Added {len(graph.edges)} edges to graph")
 
     graph: nx.Graph = nx.Graph()
     _add_nodes(part_keys, graph)
@@ -141,20 +141,20 @@ def create_graph(
 def _print_graph_tree(graph: nx.Graph) -> None:
     """Print a text-based tree representation of the graph structure."""
     if not graph.nodes:
-        LOGGER.info("  (empty graph)")
+        logger.info("  (empty graph)")
         return
 
     # Show connected components
     components = list(nx.connected_components(graph))
     for i, component in enumerate(components):
-        LOGGER.info(f"  Root {i + 1} ({len(component)} nodes):")
+        logger.info(f"  Root {i + 1} ({len(component)} nodes):")
         for j, node in enumerate(sorted(component)):
             prefix = "    ├── " if j < len(component) - 1 else "    └── "
             neighbors = list(graph.neighbors(node))
             neighbor_info = f" -> {len(neighbors)} connections" if neighbors else ""
-            LOGGER.info(f"{prefix}{node}{neighbor_info}")
+            logger.info(f"{prefix}{node}{neighbor_info}")
         if i < len(components) - 1:
-            LOGGER.info("")
+            logger.info("")
 
 
 def remove_disconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
@@ -169,14 +169,14 @@ def remove_disconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
     """
     # Handle empty graph case (e.g., assemblies with only mate groups)
     if len(graph.nodes) == 0:
-        LOGGER.debug("Graph is empty (no nodes) - this may indicate an assembly with only mate groups")
+        logger.debug("Graph is empty (no nodes) - this may indicate an assembly with only mate groups")
         return graph
 
     if not nx.is_connected(graph):
-        LOGGER.warning("Graph has one or more unconnected subgraphs")
+        logger.warning("Graph has one or more unconnected subgraphs")
 
         # Show tree visualization of original graph
-        LOGGER.info("Original graph structure:")
+        logger.info("Original graph structure:")
         _print_graph_tree(graph)
 
         sub_graphs = list(nx.connected_components(graph))
@@ -184,11 +184,11 @@ def remove_disconnected_subgraphs(graph: nx.Graph) -> nx.Graph:
         main_graph = graph.subgraph(main_graph_nodes).copy()
 
         # Show tree visualization of reduced graph
-        LOGGER.info("Reduced graph structure:")
+        logger.info("Reduced graph structure:")
         _print_graph_tree(main_graph)
 
-        LOGGER.warning(f"Reduced graph nodes from {len(graph.nodes)} to {len(main_graph.nodes)}")
-        LOGGER.warning(f"Reduced graph edges from {len(graph.edges)} to {len(main_graph.edges)}")
+        logger.warning(f"Reduced graph nodes from {len(graph.nodes)} to {len(main_graph.nodes)}")
+        logger.warning(f"Reduced graph edges from {len(graph.edges)} to {len(main_graph.edges)}")
         return main_graph
     return graph
 
@@ -293,10 +293,10 @@ class KinematicGraph(nx.DiGraph):
         self._process_graph(raw_graph, involved_parts, remapped_mates, use_user_defined_root)
 
         if len(self.nodes) == 0:
-            LOGGER.warning("KinematicGraph is empty - no valid parts found in mates")
+            logger.warning("KinematicGraph is empty - no valid parts found in mates")
             return
 
-        LOGGER.info(
+        logger.info(
             f"KinematicGraph processed: {len(self.nodes)} nodes, "
             f"{len(self.edges)} edges with root node: {self.root}"
         )
@@ -319,7 +319,7 @@ class KinematicGraph(nx.DiGraph):
 
         # Handle empty graph case (assemblies with only mate groups and no fixed/rigid parts)
         if len(graph.nodes) == 0:
-            LOGGER.warning(
+            logger.warning(
                 "Graph has no nodes - assembly contains only mate groups with no rigid assemblies or fixed parts. "
                 "Cannot create kinematic graph."
             )
@@ -327,7 +327,7 @@ class KinematicGraph(nx.DiGraph):
 
         # Handle single-node graph case (e.g., single rigid assembly from mate groups)
         if len(graph.nodes) == 1:
-            LOGGER.info("Graph has single node - this is a fully rigid assembly (one link, no joints)")
+            logger.info("Graph has single node - this is a fully rigid assembly (one link, no joints)")
             single_node = next(iter(graph.nodes))
             self.root = single_node
             part = self.cad.parts[single_node]
@@ -409,7 +409,7 @@ class KinematicGraph(nx.DiGraph):
                 mated_part_entity.matedOccurrence = list(r_key.path)
 
                 if part.rigidAssemblyToPartTF is None:
-                    LOGGER.warning(
+                    logger.warning(
                         f"Part {key} belongs to rigid assembly {r_key} but has no rigidAssemblyToPartTF set. \n"
                         "This will result in malformed joints that have refer to parts within rigid assemblies."
                     )
@@ -437,7 +437,7 @@ class KinematicGraph(nx.DiGraph):
 
             remapped_mate_key: tuple[PathKey, PathKey] = tuple(remapped_keys)  # type: ignore[assignment]
             if remapped_mate_key in remapped_mates:
-                LOGGER.warning(
+                logger.warning(
                     "Duplicate mate detected after remapping: %s -> %s. "
                     "This can happen if multiple parts in a rigid assembly are mated to the same part. "
                     "Only the first mate will be kept.",
@@ -469,7 +469,7 @@ class KinematicGraph(nx.DiGraph):
         has_root_mates = len(root_mates) > 0
 
         if not has_root_mates:
-            LOGGER.debug("Root assembly has no regular mates - checking features")
+            logger.debug("Root assembly has no regular mates - checking features")
             # No mates at root level means root is rigid (only mate groups)
             return True
 
@@ -502,7 +502,7 @@ class KinematicGraph(nx.DiGraph):
             root_is_rigid = self._is_root_assembly_rigid()
 
             if root_is_rigid:
-                LOGGER.info(
+                logger.info(
                     "Root assembly is rigid (only mate groups) - entire assembly will be one node. "
                     "All parts and subassemblies merged into single rigid body."
                 )
@@ -512,38 +512,38 @@ class KinematicGraph(nx.DiGraph):
                     occurrence = self.cad.occurrences.get(part_key)
                     if occurrence and occurrence.fixed:
                         involved_parts.add(part_key)
-                        LOGGER.debug(f"Using fixed part as root for rigid assembly: {part_key}")
+                        logger.debug(f"Using fixed part as root for rigid assembly: {part_key}")
                         break
 
                 if len(involved_parts) == 0:
                     for part_key, part in self.cad.parts.items():
                         if part.isRigidAssembly:
                             involved_parts.add(part_key)
-                            LOGGER.debug(f"Using rigid subassembly as root: {part_key}")
+                            logger.debug(f"Using rigid subassembly as root: {part_key}")
                             break
 
                 if len(involved_parts) == 0:
                     for part_key, _ in self.cad.parts.items():
                         if part_key.depth == 0:
                             involved_parts.add(part_key)
-                            LOGGER.debug(f"Using first root part as root: {part_key}")
+                            logger.debug(f"Using first root part as root: {part_key}")
                             break
             else:
-                LOGGER.debug("Root not rigid - adding parts as separate nodes")
+                logger.debug("Root not rigid - adding parts as separate nodes")
                 for part_key, part in self.cad.parts.items():
                     if part.isRigidAssembly:
                         involved_parts.add(part_key)
-                        LOGGER.debug(f"Adding rigid assembly as node: {part_key}")
+                        logger.debug(f"Adding rigid assembly as node: {part_key}")
                     elif part_key.depth == 0:
                         involved_parts.add(part_key)
-                        LOGGER.debug(f"Adding root-level part as node: {part_key}")
+                        logger.debug(f"Adding root-level part as node: {part_key}")
                     else:
                         occurrence = self.cad.occurrences.get(part_key)
                         if occurrence and occurrence.fixed:
                             involved_parts.add(part_key)
-                            LOGGER.debug(f"Adding fixed part as node: {part_key}")
+                            logger.debug(f"Adding fixed part as node: {part_key}")
 
-        LOGGER.debug(f"Found {len(involved_parts)} parts to include in graph")
+        logger.debug(f"Found {len(involved_parts)} parts to include in graph")
         return involved_parts
 
     def _find_root_node(self, graph: nx.Graph, parts: set[PathKey], use_user_defined_root: bool) -> None:
@@ -561,22 +561,22 @@ class KinematicGraph(nx.DiGraph):
             for part_key in parts:
                 occurrence = self.cad.occurrences.get(part_key)
                 if occurrence and occurrence.fixed:
-                    LOGGER.debug(f"Found user-defined root: {part_key}")
+                    logger.debug(f"Found user-defined root: {part_key}")
                     root = part_key
                     self.root = root
                     break
 
             if root is None:
-                LOGGER.warning("No user-defined root part found (marked as fixed in Onshape), auto-detecting root")
+                logger.warning("No user-defined root part found (marked as fixed in Onshape), auto-detecting root")
                 self._find_root_node(graph, parts, use_user_defined_root=False)
         else:
             centrality = nx.closeness_centrality(graph)
             root = max(centrality, key=lambda x: centrality[x])
             if root:
                 self.root = root
-                LOGGER.debug(f"Auto-detected root node: {root}")
+                logger.debug(f"Auto-detected root node: {root}")
             else:
-                LOGGER.warning("Could not determine root node via topological sort")
+                logger.warning("Could not determine root node via topological sort")
 
     def show(self, file_name: Optional[str] = None, graph: Optional[Union[nx.Graph, nx.DiGraph]] = None) -> None:
         """

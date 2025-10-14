@@ -23,9 +23,10 @@ if TYPE_CHECKING:
 
 import random
 
+from loguru import logger
+
 from onshape_robotics_toolkit.connect import Asset, Client
 from onshape_robotics_toolkit.graph import KinematicGraph
-from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.models.assembly import (
     MatedCS,
     MateFeatureData,
@@ -171,7 +172,7 @@ def get_robot_link(
         if part.worldToPartTF is not None:
             _link_pose_wrt_world = part.worldToPartTF.to_tf
         else:
-            LOGGER.warning(f"Part {name} has no worldToPartTF, using identity matrix")
+            logger.warning(f"Part {name} has no worldToPartTF, using identity matrix")
 
     world_to_link_tf = np.linalg.inv(_link_pose_wrt_world)
     _origin = Origin.zero_origin()
@@ -181,7 +182,7 @@ def get_robot_link(
     if part.MassProperty is None:
         # TODO: use downloaded assets + material library to find these values
         # using numpy-stl library
-        LOGGER.warning(f"Part {name} has no mass properties, using default values")
+        logger.warning(f"Part {name} has no mass properties, using default values")
         _mass = 1.0  # Default mass
         _com = (0.0, 0.0, 0.0)  # Default center of mass at origin
         _inertia = np.eye(3)  # Default identity inertia matrix
@@ -192,7 +193,7 @@ def get_robot_link(
         _com = tuple(part.MassProperty.center_of_mass_wrt(world_to_link_matrix))
         _inertia = part.MassProperty.inertia_wrt(world_to_link_matrix[:3, :3])
 
-    LOGGER.info(f"Creating robot link for {name}")
+    logger.info(f"Creating robot link for {name}")
 
     # Determine workspace type and ID for fetching the mesh
     mvwid: str
@@ -207,7 +208,7 @@ def get_robot_link(
         if part.rigidAssemblyWorkspaceId is not None:
             mvwid = part.rigidAssemblyWorkspaceId
         else:
-            LOGGER.error("Rigid part is missing workspace ID")
+            logger.error("Rigid part is missing workspace ID")
     else:
         # Regular part - use its documentMicroversion with microversion type
         wtype = WorkspaceType.M.value
@@ -318,7 +319,7 @@ def get_robot_joint(
     joint_name = make_unique_name(base_name, used_joint_names)
     used_joint_names.add(joint_name)
 
-    LOGGER.info(f"Creating robot joint from {parent_key} to {child_key}")
+    logger.info(f"Creating robot joint from {parent_key} to {child_key}")
 
     if mate.mateType == MateType.REVOLUTE:
         joints[(parent_key, child_key)] = RevoluteJoint(
@@ -437,7 +438,7 @@ def get_robot_joint(
         )
 
     else:
-        LOGGER.warning(f"Unsupported joint type: {mate.mateType}")
+        logger.warning(f"Unsupported joint type: {mate.mateType}")
         joints[(parent_key, child_key)] = DummyJoint(
             name=joint_name, parent=str(parent_key), child=str(child_key), origin=origin
         )
@@ -578,7 +579,7 @@ class Robot(nx.DiGraph):
             raise ValueError("Kinematic graph has no root node")
 
         root_key = kinematic_graph.root
-        LOGGER.info(f"Processing root node: {root_key}")
+        logger.info(f"Processing root node: {root_key}")
 
         root_part = robot.kinematic_graph.nodes[root_key]["data"]
         # NOTE: make sure Pathkey.__str__ produces names without
@@ -592,13 +593,13 @@ class Robot(nx.DiGraph):
         )
 
         robot.add_node(root_key, data=root_link, asset=root_asset, world_to_link_tf=world_to_root_link)
-        LOGGER.info(f"Processing {len(kinematic_graph.edges)} edges in the kinematic graph.")
+        logger.info(f"Processing {len(kinematic_graph.edges)} edges in the kinematic graph.")
 
         used_joint_names: set[str] = set()
 
         # Process edges in topological order
         for parent_key, child_key in robot.kinematic_graph.edges:
-            LOGGER.info(f"Processing edge: {parent_key} -> {child_key}")
+            logger.info(f"Processing edge: {parent_key} -> {child_key}")
 
             # Get parent transform
             world_to_parent_tf = robot.nodes[parent_key]["world_to_link_tf"]
@@ -609,7 +610,7 @@ class Robot(nx.DiGraph):
             # Get mate data from graph edge
             mate_data: MateFeatureData = robot.kinematic_graph.get_edge_data(parent_key, child_key)["data"]
             if mate_data is None:
-                LOGGER.warning(f"No mate data found for edge {parent_key} -> {child_key}. Skipping.")
+                logger.warning(f"No mate data found for edge {parent_key} -> {child_key}. Skipping.")
                 continue
 
             # Check for mate relations (mimic joints)
@@ -641,7 +642,7 @@ class Robot(nx.DiGraph):
                 robot.add_node(child_key, data=link, asset=asset, world_to_link_tf=world_to_link_tf)
             else:
                 # NOTE: possible cause for this: the kinematic graph has a loop
-                LOGGER.warning(f"Link {child_key} already exists in the robot graph. Skipping.")
+                logger.warning(f"Link {child_key} already exists in the robot graph. Skipping.")
 
             if links_dict is not None:
                 for _link_key, _link in links_dict.items():
@@ -653,7 +654,7 @@ class Robot(nx.DiGraph):
                             world_to_link_tf=None,
                         )
                     else:
-                        LOGGER.warning(f"Link {_link_key} already exists in the robot graph. Skipping.")
+                        logger.warning(f"Link {_link_key} already exists in the robot graph. Skipping.")
 
             # Add joints
             for _joint_key, _joint_data in joints_dict.items():
@@ -913,7 +914,7 @@ class Robot(nx.DiGraph):
             if link_data is not None:
                 link_data.to_xml(robot)
             else:
-                LOGGER.warning(f"Link {node} has no data.")
+                logger.warning(f"Link {node} has no data.")
 
         # Add joints
         joint_data_raw: Optional[BaseJoint]
@@ -923,7 +924,7 @@ class Robot(nx.DiGraph):
             if joint_data_typed is not None:
                 joint_data_typed.to_xml(robot)
             else:
-                LOGGER.warning(f"Joint between {parent} and {child} has no data.")
+                logger.warning(f"Joint between {parent} and {child} has no data.")
 
         return ET.tostring(robot, pretty_print=True, encoding="unicode")
 
@@ -982,7 +983,7 @@ class Robot(nx.DiGraph):
             if link_data is not None:
                 body_elements[link_name] = link_data.to_mjcf(root_body)
             else:
-                LOGGER.warning(f"Link {link_name} has no data.")
+                logger.warning(f"Link {link_name} has no data.")
 
         dissolved_transforms: dict[str, tuple[np.ndarray, Rotation]] = {}
 
@@ -1000,7 +1001,7 @@ class Robot(nx.DiGraph):
                 child_body = body_elements.get(child_name)
 
                 if parent_body is not None and child_body is not None:
-                    LOGGER.debug(f"\nProcessing fixed joint from {parent_name} to {child_name}")
+                    logger.debug(f"\nProcessing fixed joint from {parent_name} to {child_name}")
 
                     # Convert joint transform from URDF convention
                     joint_pos = np.array(joint_data_typed.origin.xyz)
@@ -1102,7 +1103,7 @@ class Robot(nx.DiGraph):
                 child_body = body_elements.get(child_name)
 
                 if parent_body is not None and child_body is not None:
-                    LOGGER.debug(f"\nProcessing revolute joint from {parent_name} to {child_name}")
+                    logger.debug(f"\nProcessing revolute joint from {parent_name} to {child_name}")
 
                     # Get dissolved parent transform
                     if parent_name in dissolved_transforms:
@@ -1122,9 +1123,9 @@ class Robot(nx.DiGraph):
                     # Convert to MuJoCo convention while maintaining the joint axis orientation
                     final_euler = final_rot.as_euler(cast(Literal["XYZ"], MJCF_EULER_SEQ), degrees=False)
 
-                    LOGGER.debug(f"Joint {parent_name}->{child_name}:")
-                    LOGGER.debug(f"  Original: pos={joint_data_typed2.origin.xyz}, rpy={joint_data_typed2.origin.rpy}")
-                    LOGGER.debug(f"  Final: pos={final_pos}, euler={final_euler}")
+                    logger.debug(f"Joint {parent_name}->{child_name}:")
+                    logger.debug(f"  Original: pos={joint_data_typed2.origin.xyz}, rpy={joint_data_typed2.origin.rpy}")
+                    logger.debug(f"  Final: pos={final_pos}, euler={final_euler}")
 
                     # Update child body transformation
                     child_body.set("pos", " ".join(format_number(float(v)) for v in final_pos))
@@ -1170,7 +1171,7 @@ class Robot(nx.DiGraph):
                             new_element.append(child_element)
                 else:
                     search_type = "tag" if find_by_tag else "name"
-                    LOGGER.warning(f"Parent element with {search_type} '{parent}' not found in model.")
+                    logger.warning(f"Parent element with {search_type} '{parent}' not found in model.")
 
         for element_name, attributes in self.mutated_elements.items():
             # Search recursively through all descendants, looking for both body and joint elements
@@ -1180,7 +1181,7 @@ class Robot(nx.DiGraph):
                 for key, value in attributes.items():
                     element_to_modify.set(key, str(value))
             else:
-                LOGGER.warning(f"Could not find element with name '{element_name}'")
+                logger.warning(f"Could not find element with name '{element_name}'")
 
         return ET.tostring(model, pretty_print=True, encoding="unicode")
 
@@ -1212,8 +1213,8 @@ class Robot(nx.DiGraph):
             asyncio.run(self._download_assets(resolved_mesh_dir))
 
         if not file_path:
-            LOGGER.warning("No file path provided. Saving to current directory.")
-            LOGGER.warning("Please keep in mind that the path to the assets will not be updated")
+            logger.warning("No file path provided. Saving to current directory.")
+            logger.warning("Please keep in mind that the path to the assets will not be updated")
             file_path = f"{self.name}.{self.type}"
         else:
             # Validate and fix file extension based on robot type
@@ -1226,17 +1227,17 @@ class Robot(nx.DiGraph):
             # If no extension, add the correct one
             if not current_ext:
                 file_path = str(path_obj) + expected_ext
-                LOGGER.info(f"No file extension provided. Using {expected_ext}")
+                logger.info(f"No file extension provided. Using {expected_ext}")
             # If extension doesn't match robot type, fix it
             elif current_ext != expected_ext:
                 file_path = str(path_obj.with_suffix(expected_ext))
-                LOGGER.warning(
+                logger.warning(
                     f"File extension {current_ext} doesn't match robot type {self.type}. Changed to {expected_ext}"
                 )
             # If extension matches but has different case, normalize to lowercase
             elif path_obj.suffix != expected_ext:
                 file_path = str(path_obj.with_suffix(expected_ext))
-                LOGGER.info(f"Normalized extension from {path_obj.suffix} to {expected_ext}")
+                logger.info(f"Normalized extension from {path_obj.suffix} to {expected_ext}")
 
         # Set robot_file_dir on all assets so relative paths in XML are correct
         from pathlib import Path
@@ -1263,6 +1264,9 @@ class Robot(nx.DiGraph):
                 ):
                     link_data.collision.geometry.filename = asset.relative_path
 
+        file_path_obj = Path(file_path)
+        file_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
         xml_declaration = '<?xml version="1.0" ?>\n'
 
         if self.type == RobotType.URDF:
@@ -1275,7 +1279,7 @@ class Robot(nx.DiGraph):
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(mjcf_str)
 
-        LOGGER.info(f"Robot model saved to {os.path.abspath(file_path)}")
+        logger.info(f"Robot model saved to {os.path.abspath(file_path)}")
 
     def show_tree(self) -> None:
         """Display the robot's graph as a tree structure."""
@@ -1307,9 +1311,9 @@ class Robot(nx.DiGraph):
                 tasks.append(asset.download())
         try:
             await asyncio.gather(*tasks)
-            LOGGER.info("All assets downloaded successfully.")
+            logger.info("All assets downloaded successfully.")
         except Exception as e:
-            LOGGER.error(f"Error downloading assets: {e}")
+            logger.error(f"Error downloading assets: {e}")
 
     def add_custom_element(self, parent_name: str, element: ET._Element) -> None:
         """Add a custom XML element to the robot model.
@@ -1331,7 +1335,7 @@ class Robot(nx.DiGraph):
             # Add the custom element under the parent
             parent.append(element)
 
-        LOGGER.info(f"Custom element added to parent '{parent_name}'.")
+        logger.info(f"Custom element added to parent '{parent_name}'.")
 
 
 def load_element(file_name: str) -> ET._Element:

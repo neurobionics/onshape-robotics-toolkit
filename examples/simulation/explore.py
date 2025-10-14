@@ -6,12 +6,9 @@ from scipy.spatial.transform import Rotation
 from transformations import compute_motor_torques
 
 from onshape_robotics_toolkit.connect import Client
-from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.robot import Robot, RobotType
-
-# from onshape_robotics_toolkit.robot import RobotType, get_robot
-from onshape_robotics_toolkit.utilities import save_gif
+from onshape_robotics_toolkit.utilities import save_gif, setup_default_logging
 
 HEIGHT = 480
 WIDTH = 640
@@ -88,8 +85,8 @@ def control(data, roll_sp=0, pitch_sp=0):
 
 
 if __name__ == "__main__":
-    LOGGER.set_file_name("sim.log")
-    LOGGER.set_stream_level(LogLevel.INFO)
+    # Configure logging: console at INFO + file at DEBUG
+    setup_default_logging(file_path="sim.log", console_level="INFO")
 
     client = Client()
     doc = Document.from_url(

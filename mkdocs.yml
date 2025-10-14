@@ -27,7 +27,6 @@ nav:
           - Variable: api/variable.md
       - Connect: api/connect.md
       - Graph: api/graph.md
-      - Log: api/log.md
       - Mesh: api/mesh.md
       - Parse: api/parse.md
       - Robot: api/robot.md

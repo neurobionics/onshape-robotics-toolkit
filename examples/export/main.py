@@ -1,19 +1,20 @@
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.graph import KinematicGraph
-from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.parse import CAD
 from onshape_robotics_toolkit.robot import Robot
+from onshape_robotics_toolkit.utilities import setup_default_logging
 
 MAX_DEPTH = 2
 
 if __name__ == "__main__":
-    LOGGER.set_file_name("quadruped.log")
-    LOGGER.set_stream_level(LogLevel.INFO)
+    # Configure logging: console at INFO + file at DEBUG
+    setup_default_logging(file_path="quadruped.log", console_level="INFO", file_level="DEBUG")
+
     client = Client(env=".env")
 
     doc = Document.from_url(
-        url="https://cad.onshape.com/documents/cf6b852d2c88d661ac2e17e8/w/c842455c29cc878dc48bdc68/e/b5e293d409dd0b88596181ef"
+        url="https://cad.onshape.com/documents/a1c1addf75444f54b504f25c/w/0d17b8ebb2a4c76be9fff3c7/e/d8f8f1d9dbf9634a39aa7f5b"
     )
     assembly = client.get_assembly(doc.did, doc.wtype, doc.wid, doc.eid)
 

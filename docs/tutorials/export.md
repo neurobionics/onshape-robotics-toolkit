@@ -27,15 +27,19 @@ Start by configuring the logger and initializing the Onshape API client:
 
 ```python
 from onshape_robotics_toolkit.connect import Client
-from onshape_robotics_toolkit.log import LOGGER, LogLevel
+from onshape_robotics_toolkit.utilities import setup_default_logging
 
-LOGGER.set_file_name("quadruped.log")
-LOGGER.set_stream_level(LogLevel.INFO)
+# Configure logging: console at INFO + file at DEBUG
+setup_default_logging(file_path="quadruped.log", console_level="INFO")
 
 client = Client(env=".env")
 ```
 
-The logger will save logs to `quadruped.log` and display logs at the `INFO` level in the console.
+The toolkit uses [loguru](https://github.com/Delgan/loguru) for logging. By default, loguru logs to stderr at DEBUG level. The `setup_default_logging()` helper provides a convenient way to configure both console and file logging with automatic rotation and retention. You can also use:
+
+- `setup_minimal_logging()` for console-only output
+- `setup_quiet_logging()` for file-only output
+- `setup_console_logging()` and `setup_file_logging()` for fine-grained control
 
 ---
 

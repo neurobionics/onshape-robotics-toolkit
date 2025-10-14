@@ -1,17 +1,15 @@
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.graph import KinematicGraph
-from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models.document import Document
-from onshape_robotics_toolkit.parse import (
-    CAD,
-)
+from onshape_robotics_toolkit.parse import CAD
 from onshape_robotics_toolkit.robot import Robot
+from onshape_robotics_toolkit.utilities import setup_default_logging
 
 MAX_DEPTH = 2
 
 if __name__ == "__main__":
-    LOGGER.set_file_name("edit.log")
-    LOGGER.set_stream_level(LogLevel.INFO)
+    # Configure logging: console at INFO + file at DEBUG
+    setup_default_logging(file_path="edit.log", console_level="INFO")
 
     client = Client(
         env=".env",
