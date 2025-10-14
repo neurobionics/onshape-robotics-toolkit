@@ -1,6 +1,9 @@
+import sys
+
+from loguru import logger
+
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.graph import KinematicGraph
-from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.parse import (
     CAD,
@@ -10,8 +13,10 @@ from onshape_robotics_toolkit.robot import Robot
 MAX_DEPTH = 2
 
 if __name__ == "__main__":
-    LOGGER.set_file_name("edit.log")
-    LOGGER.set_stream_level(LogLevel.INFO)
+    # Configure loguru for this example
+    logger.remove()  # Remove default handler
+    logger.add("edit.log", rotation="10 MB", level="DEBUG")
+    logger.add(sys.stderr, level="INFO")
 
     client = Client(
         env=".env",

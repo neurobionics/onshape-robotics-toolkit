@@ -22,10 +22,9 @@ import dotenv
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
+from loguru import logger
 from PIL import Image
 from pydantic import BaseModel
-
-from onshape_robotics_toolkit.log import LOGGER
 
 # New unified key system for assembly parsing
 Key = tuple[str, ...]
@@ -403,7 +402,7 @@ def get_random_files(directory: str, file_extension: str, count: int) -> tuple[l
     selected_files = random.sample(_files, count)
     file_paths = [os.path.join(directory, file) for file in selected_files]
 
-    LOGGER.info(f"Selected files: {file_paths}")
+    logger.info(f"Selected files: {file_paths}")
 
     return file_paths, [x.split(".")[0] for x in selected_files]
 
@@ -592,4 +591,4 @@ def save_gif(frames: list[Any], filename: str = "sim.gif", framerate: int = 60) 
 
 
 if __name__ == "__main__":
-    LOGGER.info(get_sanitized_name("Part 3 <1>", remove_onshape_tags=True))
+    logger.info(get_sanitized_name("Part 3 <1>", remove_onshape_tags=True))

@@ -15,9 +15,9 @@ if TYPE_CHECKING:
 import copy
 
 import numpy as np
+from loguru import logger
 
 from onshape_robotics_toolkit.connect import Client
-from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.models.assembly import (
     Assembly,
     AssemblyFeature,
@@ -554,7 +554,7 @@ class CAD:
         # Populate all data using the pre-built PathKeys
         cad._populate_from_assembly(assembly)
 
-        LOGGER.info(f"Created {cad}")
+        logger.info(f"Created {cad}")
 
         return cad
 
@@ -577,7 +577,7 @@ class CAD:
         Returns:
             Tuple of (keys_by_id, keys_by_name) dictionaries
         """
-        LOGGER.debug("Building PathKeys from occurrences...")
+        logger.debug("Building PathKeys from occurrences...")
 
         keys_by_id: dict[tuple[str, ...], PathKey] = {}
         keys_by_name: dict[tuple[str, ...], PathKey] = {}
@@ -592,7 +592,7 @@ class CAD:
             # Index by name path tuple for reverse lookup
             keys_by_name[key.name_path] = key
 
-        LOGGER.debug(f"Built {len(keys_by_id)} PathKeys from {len(occurrences)} occurrences")
+        logger.debug(f"Built {len(keys_by_id)} PathKeys from {len(occurrences)} occurrences")
         return keys_by_id, keys_by_name
 
     @staticmethod
@@ -609,7 +609,7 @@ class CAD:
         Returns:
             Dictionary mapping instance IDs to sanitized names
         """
-        LOGGER.debug("Building instance ID to name mapping...")
+        logger.debug("Building instance ID to name mapping...")
 
         id_to_name: dict[str, str] = {}
 
@@ -633,7 +633,7 @@ class CAD:
                 sanitized = get_sanitized_name(instance.name)
                 id_to_name[instance.id] = sanitized
 
-        LOGGER.debug(f"Mapped {len(id_to_name)} instance IDs to names")
+        logger.debug(f"Mapped {len(id_to_name)} instance IDs to names")
         return id_to_name
 
     def _populate_from_assembly(self, assembly: Assembly) -> None:
@@ -663,7 +663,7 @@ class CAD:
         # Step 5: Populate patterns (root + subassemblies)
         self._populate_patterns(assembly)
 
-        LOGGER.debug(
+        logger.debug(
             f"Populated CAD: {len(self.instances)} instances, "
             f"{len(self.occurrences)} occurrences, {len(self.mates)} mates, "
             f"{len(self.patterns)} patterns, {len(self.parts)} parts"
@@ -695,7 +695,7 @@ class CAD:
                         continue
 
                     scope = "root" if parent_key is None else "nested"
-                    LOGGER.warning(f"No PathKey for {scope} instance {instance.id} ({instance.name})")
+                    logger.warning(f"No PathKey for {scope} instance {instance.id} ({instance.name})")
                     continue
 
                 self.instances[key] = copy.deepcopy(instance)
@@ -703,7 +703,7 @@ class CAD:
                 if isinstance(instance, AssemblyInstance):
                     subassembly = subassembly_lookup.get(instance.uid)
                     if not subassembly:
-                        LOGGER.warning(
+                        logger.warning(
                             f"Missing SubAssembly definition for instance {instance.id} "
                             f"({instance.name}) with uid {instance.uid}"
                         )
@@ -711,7 +711,7 @@ class CAD:
                     _populate_branch(subassembly.instances, key)
 
         _populate_branch(assembly.rootAssembly.instances, None)
-        LOGGER.info(f"Populated {len(self.instances)} instances (including nested)")
+        logger.info(f"Populated {len(self.instances)} instances (including nested)")
 
     def _populate_occurrences(self, assembly: Assembly) -> None:
         """
@@ -726,9 +726,9 @@ class CAD:
             if key:
                 self.occurrences[key] = occurrence
             else:
-                LOGGER.warning(f"No PathKey for occurrence {occurrence.path}")
+                logger.warning(f"No PathKey for occurrence {occurrence.path}")
 
-        LOGGER.info(f"Populated {len(self.occurrences)} occurrences")
+        logger.info(f"Populated {len(self.occurrences)} occurrences")
 
     def _populate_subassemblies(self, assembly: Assembly) -> None:
         """
@@ -751,7 +751,7 @@ class CAD:
         for subassembly in assembly.subAssemblies:
             pathkeys = uid_to_pathkeys.get(subassembly.uid)
             if not pathkeys:
-                LOGGER.warning(
+                logger.warning(
                     "SubAssembly definition uid=%s has no matching AssemblyInstance occurrences", subassembly.uid
                 )
                 continue
@@ -772,14 +772,14 @@ class CAD:
                 if is_rigid_by_mate_groups:
                     subassembly_copy.isRigid = True
                     rigid_by_features += 1
-                    LOGGER.debug(
+                    logger.debug(
                         f"Subassembly {pathkey} marked as rigid (features analysis: "
                         f"{len(subassembly.features)} features, all mate groups)"
                     )
                 elif is_rigid_by_depth_check:
                     subassembly_copy.isRigid = True
                     rigid_by_depth += 1
-                    LOGGER.debug(
+                    logger.debug(
                         f"Subassembly {pathkey} marked as rigid (depth {pathkey.depth} >= max_depth {self.max_depth})"
                     )
 
@@ -791,7 +791,7 @@ class CAD:
                 self.subassemblies[pathkey] = subassembly_copy
                 total_occurrences += 1
 
-        LOGGER.info(
+        logger.info(
             "Populated %d subassembly occurrences from %d definitions "
             "(rigid_by_depth=%d, rigid_by_features=%d, max_depth=%d)",
             total_occurrences,
@@ -883,7 +883,7 @@ class CAD:
                 if isinstance(feature.featureData, MateGroupFeatureData):
                     mate_group_data: MateGroupFeatureData = feature.featureData
                     scope = "root" if assembly_key is None else f"subassembly {assembly_key}"
-                    LOGGER.debug(
+                    logger.debug(
                         f"Found mate group '{mate_group_data.name}' in {scope} with "
                         f"{len(mate_group_data.occurrences)} occurrences (organizational only, no mate edges created)"
                     )
@@ -906,7 +906,7 @@ class CAD:
                 parent_occ = mate_data.matedEntities[PARENT].matedOccurrence
                 child_occ = mate_data.matedEntities[CHILD].matedOccurrence
             except Exception:
-                LOGGER.warning(f"Malformed mate feature {mate_data.name}")
+                logger.warning(f"Malformed mate feature {mate_data.name}")
                 return
 
             parent_path = tuple(parent_occ)
@@ -932,7 +932,7 @@ class CAD:
                 self.mates[(assembly_key, parent_key, child_key)] = mate_data
             else:
                 scope = "root" if assembly_key is None else f"subassembly {assembly_key}"
-                LOGGER.warning(
+                logger.warning(
                     "Missing PathKey for %s mate: %s (parent_found=%s, child_found=%s)",
                     scope,
                     mate_data.name,
@@ -952,7 +952,7 @@ class CAD:
             for feature in subassembly.features:
                 _process_feature(feature=feature, assembly_key=sub_key, path_prefix=sub_key.path)
 
-        LOGGER.debug(f"Populated {len(self.mates)} mates (root + flexible subassemblies)")
+        logger.debug(f"Populated {len(self.mates)} mates (root + flexible subassemblies)")
 
     def _populate_patterns(self, assembly: Assembly) -> None:
         """
@@ -1007,7 +1007,7 @@ class CAD:
 
         self._flatten_patterns()
 
-        LOGGER.debug(f"Populated {len(self.patterns)} patterns")
+        logger.debug(f"Populated {len(self.patterns)} patterns")
 
     def _flatten_patterns(
         self,
@@ -1111,7 +1111,7 @@ class CAD:
         for part in assembly.parts:
             pathkeys = uid_to_pathkeys.get(part.uid)
             if not pathkeys:
-                LOGGER.warning("Part definition uid=%s has no matching PartInstance", part.uid)
+                logger.warning("Part definition uid=%s has no matching PartInstance", part.uid)
                 continue
 
             for pathkey in pathkeys:
@@ -1133,16 +1133,16 @@ class CAD:
                     # does not reflect the pose of the subassembly in world frame, will Onshape potentially fix this?
                     if self.subassemblies[rigid_root].RootOccurrences is None:
                         if self._client is None:
-                            LOGGER.warning(
+                            logger.warning(
                                 f"At max_depth of {self.max_depth}, we require Client to "
                                 "fetch all root occurrences of a subassembly."
                             )
-                            LOGGER.warning("These root occurrences are used to remap parts inside rigid assemblies.")
-                            LOGGER.warning(
+                            logger.warning("These root occurrences are used to remap parts inside rigid assemblies.")
+                            logger.warning(
                                 f"Skipping setting rigidAssemblyToPartTF for part {pathkey} "
                                 f"inside rigid assembly {rigid_root}."
                             )
-                            LOGGER.warning(
+                            logger.warning(
                                 "This will result in malformed joints that have refer to parts within rigid assemblies."
                             )
                             continue
@@ -1152,7 +1152,7 @@ class CAD:
                     part_pose_wrt_rigid_root = self.subassemblies[rigid_root].RootOccurrences[pathkey]  # type: ignore[index]
                     self.parts[pathkey].rigidAssemblyToPartTF = MatedCS.from_tf(tf=part_pose_wrt_rigid_root.tf)
 
-                    LOGGER.debug(f"Set rigidAssemblyToPartTF for {pathkey}, with rigid assembly {rigid_root}")
+                    logger.debug(f"Set rigidAssemblyToPartTF for {pathkey}, with rigid assembly {rigid_root}")
 
         # Create synthetic Part objects for rigid assemblies
         for key, subassembly in self.subassemblies.items():
@@ -1177,13 +1177,13 @@ class CAD:
                     MassProperty=None,  # Populated later via mass property fetch
                 )
 
-        LOGGER.info(f"Populated {len(self.parts)} parts from assembly")
+        logger.info(f"Populated {len(self.parts)} parts from assembly")
 
     async def fetch_mass_properties_for_parts(self, client: Client) -> None:
         async def _fetch_mass_properties(key: PathKey, part: Part, client: Client) -> None:
             try:
                 if part.isRigidAssembly:
-                    LOGGER.debug(f"Fetching mass properties for rigid assembly: {key}")
+                    logger.debug(f"Fetching mass properties for rigid assembly: {key}")
                     part.MassProperty = await asyncio.to_thread(
                         client.get_assembly_mass_properties,
                         did=part.documentId,
@@ -1192,7 +1192,7 @@ class CAD:
                         eid=part.elementId,
                     )
                 else:
-                    LOGGER.debug(f"Fetching mass properties for part: {key}")
+                    logger.debug(f"Fetching mass properties for part: {key}")
                     part.MassProperty = await asyncio.to_thread(
                         client.get_mass_property,
                         did=part.documentId,
@@ -1202,12 +1202,12 @@ class CAD:
                         partID=part.partId,
                     )
             except Exception as e:
-                LOGGER.error(f"Failed to fetch mass properties for part {key}: {e}")
+                logger.error(f"Failed to fetch mass properties for part {key}: {e}")
 
         tasks = []
         for key, part in self.parts.items():
             if part.MassProperty is not None:
-                LOGGER.debug(f"Part {key} already has mass properties, skipping")
+                logger.debug(f"Part {key} already has mass properties, skipping")
                 continue
 
             if part.rigidAssemblyToPartTF is not None:
@@ -1222,7 +1222,7 @@ class CAD:
     async def fetch_occurrences_for_subassemblies(self, client: Client) -> None:
         async def _fetch_rootassembly(key: PathKey, subassembly: SubAssembly, client: Client) -> None:
             try:
-                LOGGER.debug(f"Fetching root assembly for subassembly: {key}")
+                logger.debug(f"Fetching root assembly for subassembly: {key}")
                 _subassembly_data: RootAssembly = await asyncio.to_thread(
                     client.get_root_assembly,
                     did=subassembly.documentId,
@@ -1257,15 +1257,15 @@ class CAD:
                                 break
 
                         if not is_suppressed_parent:
-                            LOGGER.warning(f"No PathKey for subassembly occurrence {occurrence.path} in {key}")
+                            logger.warning(f"No PathKey for subassembly occurrence {occurrence.path} in {key}")
 
             except Exception as e:
-                LOGGER.error(f"Failed to fetch root assembly for subassembly {key}: {e}")
+                logger.error(f"Failed to fetch root assembly for subassembly {key}: {e}")
 
         tasks = []
         for key, subassembly in self.subassemblies.items():
             if subassembly.RootOccurrences is not None:
-                LOGGER.debug(f"Subassembly {key} already has RootOccurrences, skipping")
+                logger.debug(f"Subassembly {key} already has RootOccurrences, skipping")
                 continue
 
             if not subassembly.isRigid:

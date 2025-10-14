@@ -29,8 +29,8 @@ import lxml.etree as ET
 import numpy as np
 import requests
 import stl
+from loguru import logger
 
-from onshape_robotics_toolkit.log import LOGGER
 from onshape_robotics_toolkit.mesh import transform_mesh
 from onshape_robotics_toolkit.models.assembly import Assembly, RootAssembly
 from onshape_robotics_toolkit.models.document import BASE_URL, Document, DocumentMetaData, generate_url
@@ -114,7 +114,7 @@ def make_nonce() -> str:
 
     chars = string.digits + string.ascii_letters
     nonce = "".join(secrets.choice(chars) for i in range(25))
-    LOGGER.debug(f"nonce created: {nonce}")
+    logger.debug(f"nonce created: {nonce}")
 
     return nonce
 
@@ -160,7 +160,7 @@ class Client:
 
         self._url = base_url
         self._access_key, self._secret_key = load_env_variables(env)
-        LOGGER.info(f"Onshape API initialized with env file: {env}")
+        logger.info(f"Onshape API initialized with env file: {env}")
 
     def set_base_url(self, base_url: str) -> None:
         """
@@ -243,11 +243,11 @@ class Client:
         )
 
         if response.status_code == 404:
-            LOGGER.error(f"Elements not found for document: {did}")
+            logger.error(f"Elements not found for document: {did}")
             return {}
 
         elif response.status_code == 403:
-            LOGGER.error(f"Access forbidden for document: {did}")
+            logger.error(f"Access forbidden for document: {did}")
             return {}
 
         return {element["name"]: Element.model_validate(element) for element in response.json()}
@@ -379,7 +379,7 @@ class Client:
             name = get_sanitized_name(name)
 
         except KeyError:
-            LOGGER.warning(f"Assembly name not found for document: {did}")
+            logger.warning(f"Assembly name not found for document: {did}")
 
         return name
 
@@ -448,13 +448,13 @@ class Client:
         )
 
         if res.status_code == 401:
-            LOGGER.warning(f"Unauthorized access to document: {did}")
-            LOGGER.warning("Please check the API keys in your env file.")
+            logger.warning(f"Unauthorized access to document: {did}")
+            logger.warning("Please check the API keys in your env file.")
             exit(1)
 
         if res.status_code == 404:
-            LOGGER.error(f"Assembly not found: {did}")
-            LOGGER.error(
+            logger.error(f"Assembly not found: {did}")
+            logger.error(
                 generate_url(
                     base_url=self._url,
                     did=did,
@@ -552,13 +552,13 @@ class Client:
         )
 
         if res.status_code == 401 or res.status_code == 403:
-            LOGGER.warning(f"Unauthorized access to document: {did}")
-            LOGGER.warning("Please check the API keys in your env file.")
+            logger.warning(f"Unauthorized access to document: {did}")
+            logger.warning("Please check the API keys in your env file.")
             exit(1)
 
         if res.status_code == 404:
-            LOGGER.error(f"Assembly not found: {did}")
-            LOGGER.error(
+            logger.error(f"Assembly not found: {did}")
+            logger.error(
                 generate_url(
                     base_url=self._url,
                     did=did,
@@ -624,24 +624,24 @@ class Client:
             job_info = response.json()
             translation_id = job_info.get("id")
             if not translation_id:
-                LOGGER.error("Translation job ID not found in response.")
+                logger.error("Translation job ID not found in response.")
                 return None
 
             status_path = f"/api/translations/{translation_id}"
             while True:
                 status_response = self.request(HTTP.GET, path=status_path)
                 if status_response.status_code != 200:
-                    LOGGER.error(f"Failed to get translation status: {status_response.text}")
+                    logger.error(f"Failed to get translation status: {status_response.text}")
                     return None
 
                 status_info = status_response.json()
                 request_state = status_info.get("requestState")
-                LOGGER.info(f"Current status: {request_state}")
+                logger.info(f"Current status: {request_state}")
                 if request_state == "DONE":
-                    LOGGER.info("Translation job completed.")
+                    logger.info("Translation job completed.")
                     break
                 elif request_state == "FAILED":
-                    LOGGER.error("Translation job failed.")
+                    logger.error("Translation job failed.")
                     return None
                 time.sleep(1)
 
@@ -656,15 +656,15 @@ class Client:
             )
             if download_response.status_code == 200:
                 buffer.write(download_response.content)
-                LOGGER.info("STL file downloaded successfully.")
+                logger.info("STL file downloaded successfully.")
                 return buffer
             else:
-                LOGGER.error(f"Failed to download STL file: {download_response.text}")
+                logger.error(f"Failed to download STL file: {download_response.text}")
                 return None
 
         else:
-            LOGGER.info(f"Failed to download assembly: {response.status_code} - {response.text}")
-            LOGGER.info(
+            logger.info(f"Failed to download assembly: {response.status_code} - {response.text}")
+            logger.info(
                 generate_url(
                     base_url=self._url,
                     did=did,
@@ -739,8 +739,8 @@ class Client:
                 wid=wid,
                 eid=eid,
             )
-            LOGGER.info(f"{url}")
-            LOGGER.info(f"Failed to download STL file: {response.status_code} - {response.text}")
+            logger.info(f"{url}")
+            logger.info(f"Failed to download STL file: {response.status_code} - {response.text}")
 
         return buffer
 
@@ -896,9 +896,9 @@ class Client:
         req_headers = self._make_headers(method, path, query, headers)
         url = self._build_url(base_url, path, query)
 
-        LOGGER.debug(f"Request body: {body}")
-        LOGGER.debug(f"Request headers: {req_headers}")
-        LOGGER.debug(f"Request URL: {url}")
+        logger.debug(f"Request body: {body}")
+        logger.debug(f"Request headers: {req_headers}")
+        logger.debug(f"Request URL: {url}")
 
         res = self._send_request(method, url, req_headers, body, timeout)
 
@@ -977,7 +977,7 @@ class Client:
         location = urlparse(res.headers["Location"])
         querystring = parse_qs(location.query)
 
-        LOGGER.debug(f"Request redirected to: {location.geturl()}")
+        logger.debug(f"Request redirected to: {location.geturl()}")
 
         new_query = {key: querystring[key][0] for key in querystring}
         new_base_url = location.scheme + "://" + location.netloc
@@ -995,11 +995,11 @@ class Client:
         """
         try:
             if not 200 <= res.status_code <= 206:
-                LOGGER.debug(f"Request failed, details: {res.text}")
+                logger.debug(f"Request failed, details: {res.text}")
             else:
-                LOGGER.debug(f"Request succeeded, details: {res.text}")
+                logger.debug(f"Request succeeded, details: {res.text}")
         except UnicodeEncodeError as e:
-            LOGGER.error(f"UnicodeEncodeError: {e}")
+            logger.error(f"UnicodeEncodeError: {e}")
 
     def _make_auth(
         self,
@@ -1039,7 +1039,7 @@ class Client:
         )
         auth = "On " + self._access_key + ":HmacSHA256:" + signature.decode("utf-8")
 
-        LOGGER.debug(f"query: {query_string}, hmac_str: {hmac_str!r}, signature: {signature!r}, auth: {auth}")
+        logger.debug(f"query: {query_string}, hmac_str: {hmac_str!r}, signature: {signature!r}, auth: {auth}")
 
         return auth
 
@@ -1202,7 +1202,7 @@ class Asset:
             ... )
             >>> await asset.download()
         """
-        LOGGER.info(f"Starting download for {self.file_name}")
+        logger.info(f"Starting download for {self.file_name}")
         if self.client is None:
             raise ValueError("Client is required for downloading meshes")
         try:
@@ -1235,9 +1235,9 @@ class Asset:
                 transformed_mesh = transform_mesh(raw_mesh, self.transform) if self.transform is not None else raw_mesh
                 transformed_mesh.save(self.absolute_path)
 
-                LOGGER.info(f"Mesh file saved: {self.absolute_path}")
+                logger.info(f"Mesh file saved: {self.absolute_path}")
         except Exception as e:
-            LOGGER.error(f"Failed to download {self.file_name}: {e}")
+            logger.error(f"Failed to download {self.file_name}: {e}")
 
     def to_mjcf(self, root: Any) -> None:
         """

@@ -9,6 +9,7 @@ import numpy as np
 import optuna
 import plotly
 from controllers import PIDController
+from loguru import logger
 from mods import modify_ballbot
 from mujoco.usd import exporter
 from scipy.spatial.transform import Rotation
@@ -16,7 +17,6 @@ from transformations import compute_motor_torques
 
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.graph import KinematicGraph
-from onshape_robotics_toolkit.log import LOGGER, LogLevel
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.parse import CAD
 from onshape_robotics_toolkit.robot import Robot
@@ -184,7 +184,7 @@ def apply_perturbation(data, count):
     direction[2] = 0  # Only apply force in the x-y plane
 
     force = direction * count * PERTURBATION_INCREASE
-    LOGGER.info(f"Applying perturbation {count}: {force}")
+    logger.info(f"Applying perturbation {count}: {force}")
     apply_ball_force(data, force)
 
 
@@ -195,7 +195,7 @@ def find_best_pid_params(trial, model, data, viewer, variables, usd_output_dir):
     kd = trial.suggest_float("kd", low=0.0, high=1.0, step=0.01)
     ff = trial.suggest_float("ff", low=0.01, high=1.01, step=0.05)
 
-    LOGGER.info(f"KP: {kp}, KI: {ki}, KD: {kd}, FF: {ff}")
+    logger.info(f"KP: {kp}, KI: {ki}, KD: {kd}, FF: {ff}")
 
     usd_exporter = exporter.USDExporter(
         model=model,
@@ -272,7 +272,7 @@ def find_best_pid_params(trial, model, data, viewer, variables, usd_output_dir):
     average_vibration = cumulative_vibration / steps if steps > 0 else 0.0
     objective_value = time_on_ball - LAMBDA_WEIGHT * average_distance - BETA_WEIGHT * average_vibration
 
-    LOGGER.info(
+    logger.info(
         f"Time on Ball: {time_on_ball}, "
         f"Average Distance: {average_distance}, "
         f"Average Vibration: {average_vibration}, "
@@ -346,13 +346,13 @@ def find_best_design_variables(trial):
     viewer.close()
 
     if pid_study.best_params is None:
-        LOGGER.error("No best trial found")
+        logger.error("No best trial found")
         kp = KP
         ki = KI
         kd = KD
         ff = FF
     else:
-        LOGGER.info(f"Best PID params: {pid_study.best_params}")
+        logger.info(f"Best PID params: {pid_study.best_params}")
         kp = pid_study.best_params["kp"]
         ki = pid_study.best_params["ki"]
         kd = pid_study.best_params["kd"]
@@ -451,7 +451,7 @@ def find_best_design_variables(trial):
 
     objective_value = time_on_ball - LAMBDA_WEIGHT * average_distance - BETA_WEIGHT * average_vibration
 
-    LOGGER.info(
+    logger.info(
         f"Time on Ball: {time_on_ball}, "
         f"Average Distance: {average_distance}, "
         f"Average Vibration: {average_vibration}, "
@@ -467,14 +467,17 @@ def find_best_design_variables(trial):
 
 
 if __name__ == "__main__":
+    import sys
+
     run_name = input("Enter run name: ")
     # Create output directory for this run
     output_dir = run_name
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(os.path.join(output_dir, "scenes"), exist_ok=True)  # Create scenes subdirectory
     # Update log file path
-    LOGGER.set_file_name(os.path.join(output_dir, f"{run_name}.log"))
-    LOGGER.set_stream_level(LogLevel.INFO)
+    logger.remove()
+    logger.add(os.path.join(output_dir, f"{run_name}.log"), rotation="10 MB", level="DEBUG")
+    logger.add(sys.stderr, level="INFO")
 
     client = Client(env=".env")
     doc = Document.from_url(
@@ -487,17 +490,17 @@ if __name__ == "__main__":
     study = optuna.create_study(direction="maximize")
     study.optimize(find_best_design_variables, n_trials=N_DESIGN_TRAILS)
 
-    LOGGER.info("\nOptimization finished!")
-    LOGGER.info("Best trial:")
-    LOGGER.info(f"  Value: {study.best_trial.value}")
-    LOGGER.info("  Params:")
+    logger.info("\nOptimization finished!")
+    logger.info("Best trial:")
+    logger.info(f"  Value: {study.best_trial.value}")
+    logger.info("  Params:")
     for key, value in study.best_trial.params.items():
-        LOGGER.info(f"    {key}: {value}")
-    LOGGER.info("  PID values:")
-    LOGGER.info(f"    kp: {study.best_trial.user_attrs['kp']}")
-    LOGGER.info(f"    ki: {study.best_trial.user_attrs['ki']}")
-    LOGGER.info(f"    kd: {study.best_trial.user_attrs['kd']}")
-    LOGGER.info(f"    ff: {study.best_trial.user_attrs['ff']}")
+        logger.info(f"    {key}: {value}")
+    logger.info("  PID values:")
+    logger.info(f"    kp: {study.best_trial.user_attrs['kp']}")
+    logger.info(f"    ki: {study.best_trial.user_attrs['ki']}")
+    logger.info(f"    kd: {study.best_trial.user_attrs['kd']}")
+    logger.info(f"    ff: {study.best_trial.user_attrs['ff']}")
 
     # Save outputs in the run directory
     with open(os.path.join(output_dir, "best_params.json"), "w") as f:
