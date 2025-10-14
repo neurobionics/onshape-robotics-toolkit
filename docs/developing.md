@@ -186,7 +186,6 @@ Edges carry `data=<BaseJoint>` instances.
 
 ## Debugging Tips
 
-- Enable verbose logging by configuring `onshape_robotics_toolkit.log.LOGGER`.
 - Inspect `CAD` state quickly with `repr(cad)`; it prints counts for every registry.
 - Use `cad.mates.items()` to confirm mate orientation and provenance before the graph stage.
 - Call `graph.show()` or `robot.show_graph()` when debugging connectivity issues.
