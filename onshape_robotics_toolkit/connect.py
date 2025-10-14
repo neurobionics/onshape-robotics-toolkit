@@ -12,6 +12,7 @@ Enum:
 """
 
 import asyncio
+import atexit
 import base64
 import datetime
 import hashlib
@@ -127,6 +128,9 @@ class Client:
         env (str, default='./.env'): Path to the environment file containing the access and secret keys
         base_url (str, default='https://cad.onshape.com'): Base URL for the Onshape API
 
+    Attributes:
+        api_call_count (int): Number of successful API calls made (read-only property)
+
     Methods:
         get_document_metadata: Get details for a specified document.
         get_elements: Get list of elements in a document.
@@ -136,12 +140,20 @@ class Client:
         download_part_stl: Download an STL file from a part studio.
         get_mass_property: Get mass properties for a part in a part studio.
         request: Issue a request to the Onshape API.
+        reset_api_call_count: Reset the API call counter to zero.
+
+    Note:
+        The client automatically tracks API calls and logs a summary when the program
+        exits (using atexit). This works reliably even when scripts crash or encounter
+        network errors.
 
     Examples:
         >>> client = Client(
         ...     env=".env",
         ... )
         >>> document_meta_data = client.get_document_metadata("document_id")
+        >>> print(f"API calls made: {client.api_call_count}")
+        API calls made: 1
     """
 
     def __init__(self, env: Union[str, None] = None, base_url: str = BASE_URL):
@@ -160,7 +172,22 @@ class Client:
 
         self._url = base_url
         self._access_key, self._secret_key = load_env_variables(env)
+        self._api_call_count = 0
         logger.info(f"Onshape API initialized with env file: {env}")
+
+        # Register cleanup function to log API usage on exit
+        atexit.register(self._log_final_api_count)
+
+    def _log_final_api_count(self) -> None:
+        """
+        Log the final API call count when the program exits.
+
+        This method is registered with atexit and will be called on normal program
+        termination. It provides visibility into API usage even when scripts error
+        out or network issues cause early termination.
+        """
+        if self._api_call_count > 0:
+            logger.info(f"Client session ended → Total API calls made: {self._api_call_count}")
 
     def set_base_url(self, base_url: str) -> None:
         """
@@ -173,6 +200,32 @@ class Client:
             >>> client.set_base_url("https://cad.onshape.com")
         """
         self._url = base_url
+
+    @property
+    def api_call_count(self) -> int:
+        """
+        Get the current API call count.
+
+        Returns:
+            The number of successful API calls made by this client
+
+        Examples:
+            >>> client.api_call_count
+            42
+        """
+        return self._api_call_count
+
+    def reset_api_call_count(self) -> None:
+        """
+        Reset the API call counter to zero.
+
+        Examples:
+            >>> client.reset_api_call_count()
+            >>> client.api_call_count
+            0
+        """
+        self._api_call_count = 0
+        logger.info("API call counter reset to 0")
 
     def get_document_metadata(self, did: str) -> DocumentMetaData:
         """
@@ -907,6 +960,12 @@ class Client:
         else:
             if log_response:
                 self._log_response(res)
+
+        # Increment API call counter for successful responses (2xx status codes)
+        if 200 <= res.status_code < 300:
+            self._api_call_count += 1
+            if self._api_call_count % 10 == 0:
+                logger.info(f"API calls made: {self._api_call_count}")
 
         return res
 
