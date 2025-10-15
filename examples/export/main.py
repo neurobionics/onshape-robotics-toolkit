@@ -16,7 +16,7 @@ DOCUMENT_URL = (
 MAX_DEPTH = 2
 EXPORT_PATH = Path("output/robot")
 MESH_DIR = "custom_meshes"
-CONFIG_OUTPUT = Path("output/session.yaml")
+CONFIG_OUTPUT = Path("ORT.yaml")
 
 
 def main() -> None:

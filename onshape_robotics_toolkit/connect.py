@@ -39,7 +39,7 @@ from onshape_robotics_toolkit.config import (
     record_variable_update,
 )
 from onshape_robotics_toolkit.mesh import transform_mesh
-from onshape_robotics_toolkit.models.assembly import Assembly, RootAssembly
+from onshape_robotics_toolkit.models.assembly import Assembly, Features, RootAssembly
 from onshape_robotics_toolkit.models.document import BASE_URL, Document, DocumentMetaData, generate_url
 from onshape_robotics_toolkit.models.element import Element
 from onshape_robotics_toolkit.models.mass import MassProperties
@@ -391,6 +391,26 @@ class Client:
         record_variable_update(element_id=eid, expressions=variables)
 
         return response
+
+    def get_features(
+        self,
+        did: str,
+        wtype: str,
+        wid: str,
+        eid: str,
+    ) -> Features:
+        """
+        Get all assembly features
+
+        Args:
+            did: The unique identifier of the document.
+            wtype: The type of workspace.
+            wid: The unique identifier of the workspace.
+            eid: The unique identifier of the assembly.
+        """
+        request_path = f"/api/assemblies/d/{did}/{wtype}/{wid}/e/{eid}/features"
+        response_json = self.request(HTTP.GET, request_path, log_response=True).json()
+        return Features.model_validate(response_json)
 
     def get_assembly_name(
         self,
@@ -991,8 +1011,6 @@ class Client:
         # Increment API call counter for successful responses (2xx status codes)
         if 200 <= res.status_code < 300:
             self._api_call_count += 1
-            if self._api_call_count % 10 == 0:
-                logger.info(f"API calls made: {self._api_call_count}")
 
         return res
 

@@ -47,7 +47,7 @@ Enum:
 """
 
 from enum import Enum
-from typing import Any, Union
+from typing import Any, Literal, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -1041,6 +1041,8 @@ class MateFeatureData(BaseModel):
 
     Custom Attributes:
         id (str): The unique identifier of the feature.
+        limits (dict[str, float] | None): Joint limits for the mate {'min': lower_limit, 'max': upper_limit}.
+            Fetched from Onshape features API if available.
 
     Examples:
         >>> MateFeatureData(
@@ -1063,6 +1065,9 @@ class MateFeatureData(BaseModel):
     name: str = Field(..., description="The name of the mate feature.")
 
     id: str = Field(..., description="The unique identifier of the feature.")
+    limits: Union[dict[str, float], None] = Field(
+        None, description="Joint limits for the mate {'min': lower_limit, 'max': upper_limit}."
+    )
 
 
 class AssemblyFeature(BaseModel):
@@ -1430,6 +1435,112 @@ class Assembly(BaseModel):
 
     document: Union[Document, None] = Field(None, description="The document associated with the assembly.")
     name: Union[str, None] = Field(None, description="The name of the assembly.")
+
+
+class FeatureType(str, Enum):
+    MATE = "mate"
+    MATE_RELATION = "mateRelation"
+    RELATION = "replicate"
+    EMPTY = ""
+
+
+class InferenceType(str, Enum):
+    CENTROID = "CENTROID"
+
+
+class ParameterMessage(BaseModel):
+    parameterId: str
+    hasUserCode: bool
+    nodeId: str
+
+
+Parameter = Any
+
+
+class MateConnectorMessage(BaseModel):
+    isHidden: bool
+    implicit: bool
+    isAuxiliaryTreeMateConnector: bool
+    version: int
+    featureType: str
+    featureId: str
+    name: str
+
+
+class MateConnector(BaseModel):
+    type: int
+    typeName: str
+    message: MateConnectorMessage
+
+
+class SubFeature(BaseModel):
+    pass
+
+
+class SuppressionState(BaseModel):
+    type: int
+
+
+class FeatureMessage(BaseModel):
+    version: int
+    featureType: FeatureType
+    featureId: str
+    name: str
+    parameters: list[Parameter]
+    suppressed: bool
+    namespace: str
+    subFeatures: list[SubFeature]
+    returnAfterSubfeatures: bool
+    suppressionState: SuppressionState
+    hasUserCode: bool
+    nodeId: str
+    mateConnectors: list[MateConnector] | None = None
+
+    def parameter_dict(self) -> dict[str, dict]:
+        return {param["message"]["parameterId"]: param for param in self.parameters}
+
+
+class Feature(BaseModel):
+    type: int
+    typeName: str
+    message: FeatureMessage
+
+
+class FeatureStatus(str, Enum):
+    OK = "OK"
+    ERROR = "ERROR"
+
+
+class FeatureStateMessage(BaseModel):
+    featureStatus: FeatureStatus
+    inactive: bool
+
+
+class FeatureStateValue(BaseModel):
+    type: Literal[1688]
+    typeName: Literal["BTFeatureState"]
+    message: FeatureStateMessage
+
+
+class FeatureState(BaseModel):
+    key: str
+    value: FeatureStateValue
+
+
+class Features(BaseModel):
+    """
+    Represents list of features within an assembly, such as a mate or relation. These are
+    fetched separately from the main assembly call.
+    """
+
+    features: list[Feature] = Field(..., description="A list of features in the assembly.")
+    featureStates: list[FeatureState] = Field(..., description="A list of feature states in the assembly.")
+    isComplete: bool = Field(..., description="Indicates if the feature list is complete.")
+    serializationVersion: str = Field(..., description="The serialization version of the feature list.")
+    sourceMicroversion: str = Field(..., description="The source microversion of the feature list.")
+    rejectMicroversionSkew: bool = Field(..., description="Indicates if microversion skew is rejected.")
+    microversionSkew: bool = Field(..., description="Indicates if microversion skew is allowed.")
+    libraryVersion: int = Field(..., description="The library version of the feature list.")
 
 
 if __name__ == "__main__":

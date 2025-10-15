@@ -7,7 +7,7 @@ subassemblies, instances, and mates, and generate a hierarchical representation 
 import asyncio
 from collections import deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
     pass
@@ -17,7 +17,12 @@ import copy
 import numpy as np
 from loguru import logger
 
-from onshape_robotics_toolkit.config import record_cad_config, record_mate_name, record_part_name
+from onshape_robotics_toolkit.config import (
+    record_cad_config,
+    record_mate_name,
+    record_part_name,
+    update_mate_limits,
+)
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.models.assembly import (
     Assembly,
@@ -27,6 +32,7 @@ from onshape_robotics_toolkit.models.assembly import (
     MatedCS,
     MateFeatureData,
     MateGroupFeatureData,
+    MateType,
     Occurrence,
     Part,
     PartInstance,
@@ -35,7 +41,7 @@ from onshape_robotics_toolkit.models.assembly import (
     SubAssembly,
 )
 from onshape_robotics_toolkit.models.document import Document, WorkspaceType, parse_url
-from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name
+from onshape_robotics_toolkit.utilities.helpers import get_sanitized_name, parse_onshape_expression
 
 # Path and entity constants
 ROOT_PATH_NAME = "root"
@@ -500,6 +506,7 @@ class CAD:
     def estimate_api_calls(
         self,
         fetch_mass_properties: bool = True,
+        fetch_mate_properties: bool = True,
         download_meshes: bool = True,
     ) -> dict[str, int]:
         """
@@ -544,15 +551,20 @@ class CAD:
         if fetch_mass_properties:
             mass_property_calls = num_kinematic_parts + num_rigid_subassemblies
 
+        mate_property_calls = 0
+        if fetch_mate_properties:
+            mate_property_calls = 1 + len(self.subassemblies) - num_rigid_subassemblies
+
         mesh_download_calls = 0
         if download_meshes:
             mesh_download_calls = num_kinematic_parts + num_rigid_subassemblies
 
-        total_calls = subassembly_calls + mass_property_calls + mesh_download_calls
+        total_calls = subassembly_calls + mass_property_calls + mesh_download_calls + mate_property_calls
 
         return {
             "subassemblies": subassembly_calls,
             "mass_properties": mass_property_calls,
+            "mate_properties": mate_property_calls,
             "meshes": mesh_download_calls,
             "total": total_calls,
         }
@@ -578,6 +590,8 @@ class CAD:
         assembly: Assembly,
         max_depth: int = 0,
         client: Optional[Client] = None,
+        fetch_mass_properties: bool = True,
+        fetch_mate_properties: bool = True,
     ) -> "CAD":
         """
         Create a CAD from an Onshape Assembly.
@@ -615,15 +629,23 @@ class CAD:
         # Populate all data using the pre-built PathKeys
         cad._populate_from_assembly(assembly)
 
+        if fetch_mate_properties:
+            cad.fetch_mate_limits(client)
+
         logger.info(f"Created {cad}")
         record_cad_config(max_depth=max_depth)
 
         if client is not None:
-            estimation = cad.estimate_api_calls(fetch_mass_properties=True, download_meshes=True)
+            estimation = cad.estimate_api_calls(
+                fetch_mass_properties=fetch_mass_properties,
+                fetch_mate_properties=fetch_mate_properties,
+                download_meshes=True,
+            )
             logger.info(
                 f"Estimated API calls for CAD to Robot conversion → Total: {estimation['total']} "
                 f"(subassemblies: {estimation['subassemblies']}, "
                 f"mass_properties: {estimation['mass_properties']}, "
+                f"mate_properties: {estimation['mate_properties']}, "
                 f"meshes: {estimation['meshes']})"
             )
 
@@ -1027,7 +1049,7 @@ class CAD:
             ]
 
             sanitized_mate_name = get_sanitized_name(mate_data.name)
-            record_mate_name(sanitized_mate_name, mate_data.name)
+            record_mate_name(sanitized_mate_name, mate_data.name, mate_data.limits)
 
             if parent_key and child_key:
                 self.mates[(assembly_key, parent_key, child_key)] = mate_data
@@ -1377,3 +1399,123 @@ class CAD:
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    def fetch_mate_limits(self, client: Optional[Client]) -> None:
+        """
+        Fetch joint limits from Onshape features and populate mate data.
+
+        This method fetches features for the root assembly and all flexible subassemblies,
+        extracts joint limit parameters from mate features, and stores them in the
+        corresponding MateFeatureData objects.
+
+        Args:
+            client: Onshape API client for fetching features
+
+        Note:
+            - Only processes mates with limitsEnabled=true
+            - Parses limit expressions (e.g., "90 deg", "0.5 m") to numerical values
+            - Stores limits as {'min': float, 'max': float} dict in MateFeatureData.limits
+            - For revolute joints: uses axial Z limits
+            - For prismatic/slider joints: uses Z limits
+        """
+        if client is None:
+            logger.warning("No client provided for fetching mate limits, skipping")
+            return
+
+        logger.info("Fetching mate limits from assembly features")
+
+        # Build list of assemblies to fetch features from (root + flexible subassemblies)
+        assemblies_to_fetch: list[tuple[Optional[PathKey], str, str, str, str]] = []
+        assemblies_to_fetch.append((None, self.document_id, self.wtype, self.workspace_id, self.element_id))
+
+        # Add flexible subassemblies
+        for sub_key, subassembly in self.subassemblies.items():
+            if not subassembly.isRigid:
+                assemblies_to_fetch.append((
+                    sub_key,
+                    subassembly.documentId,
+                    WorkspaceType.M.value,
+                    subassembly.documentMicroversion,
+                    subassembly.elementId,
+                ))
+
+        # Fetch features for each assembly
+        limits_found_count = 0
+        for assembly_key, did, wtype, wid, eid in assemblies_to_fetch:
+            try:
+                logger.debug(f"Fetching features for assembly: {assembly_key or 'root'}")
+                features = client.get_features(did=did, wtype=wtype, wid=wid, eid=eid)
+
+                # Process each feature to extract limits
+                for feature in features.features:
+                    if feature.message.featureType != "mate":
+                        continue
+
+                    feature_id = feature.message.featureId
+
+                    # Find the corresponding mate in our mates dict
+                    mate_data: Optional[MateFeatureData] = None
+                    for _, mate in self.mates.items():
+                        if mate.id == feature_id:
+                            mate_data = mate
+                            break
+
+                    if mate_data is None:
+                        logger.debug(f"Could not find mate data for feature {feature_id}")
+                        continue
+
+                    # Check if limits are enabled
+                    params = feature.message.parameter_dict()
+                    limits_enabled = params.get("limitsEnabled")
+                    if limits_enabled is None or not limits_enabled.get("message", {}).get("value", False):
+                        continue
+
+                    # Determine which limit parameters to use based on mate type
+                    is_axial = mate_data.mateType in (MateType.REVOLUTE, MateType.CYLINDRICAL)
+
+                    # Extract limit expressions
+                    if is_axial:
+                        min_param_name = "limitAxialZMin"
+                        max_param_name = "limitAxialZMax"
+                    else:
+                        min_param_name = "limitZMin"
+                        max_param_name = "limitZMax"
+
+                    # Extract parameter expressions
+                    def get_param_expression(param_dict: dict[str, Any], param_name: str) -> str | None:
+                        param = param_dict.get(param_name)
+                        if not isinstance(param, dict):
+                            return None
+                        # Handle BTMParameterNullableQuantity type
+                        if param.get("typeName") == "BTMParameterNullableQuantity":
+                            message = param.get("message", {})
+                            if not isinstance(message, dict) or message.get("isNull", True):
+                                return None
+                            expression = message.get("expression")
+                            return expression if isinstance(expression, str) else None
+                        return None
+
+                    min_expression = get_param_expression(params, min_param_name)
+                    max_expression = get_param_expression(params, max_param_name)
+
+                    # Parse expressions to numerical values
+                    min_value = parse_onshape_expression(min_expression)
+                    max_value = parse_onshape_expression(max_expression)
+
+                    # Only store if we got valid values
+                    if min_value is not None and max_value is not None:
+                        limits = {"min": min_value, "max": max_value}
+                        mate_data.limits = limits
+                        sanitized_mate_name = get_sanitized_name(mate_data.name)
+                        update_mate_limits(sanitized_mate_name, limits)
+                        limits_found_count += 1
+                        logger.debug(
+                            f"Set limits for mate '{mate_data.name}' ({mate_data.mateType}): "
+                            f"min={min_value:.4f}, max={max_value:.4f}"
+                        )
+
+            except Exception as e:
+                logger.warning(f"Failed to fetch features for assembly {assembly_key or 'root'}: {e}")
+                continue
+
+        logger.info(f"Fetched limits for {limits_found_count} mates out of {len(self.mates)} total mates")

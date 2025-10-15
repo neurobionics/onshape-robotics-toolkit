@@ -243,11 +243,14 @@ def test_client_reset_api_call_count() -> None:
 
 def test_cad_estimate_api_calls(cad_doc: CAD) -> None:
     """Test CAD instance method for API call estimation."""
-    estimation = cad_doc.estimate_api_calls(fetch_mass_properties=True, download_meshes=True)
+    estimation = cad_doc.estimate_api_calls(
+        fetch_mass_properties=True, fetch_mate_properties=True, download_meshes=True
+    )
 
     # Verify structure of returned dictionary (no 'base' anymore)
     assert "subassemblies" in estimation
     assert "mass_properties" in estimation
+    assert "mate_properties" in estimation
     assert "meshes" in estimation
     assert "total" in estimation
 
@@ -257,12 +260,19 @@ def test_cad_estimate_api_calls(cad_doc: CAD) -> None:
         assert value >= 0
 
     # Total should be sum of components
-    assert estimation["total"] == (estimation["subassemblies"] + estimation["mass_properties"] + estimation["meshes"])
+    assert estimation["total"] == (
+        estimation["subassemblies"]
+        + estimation["mass_properties"]
+        + estimation["mate_properties"]
+        + estimation["meshes"]
+    )
 
 
 def test_cad_estimate_api_calls_with_rigid_subassemblies(cad_doc_depth_1: CAD) -> None:
     """Test API call estimation with rigid subassemblies at max_depth=1."""
-    estimation = cad_doc_depth_1.estimate_api_calls(fetch_mass_properties=True, download_meshes=True)
+    estimation = cad_doc_depth_1.estimate_api_calls(
+        fetch_mass_properties=True, fetch_mate_properties=True, download_meshes=True
+    )
 
     # At depth 1, there should be rigid subassemblies
     assert estimation["subassemblies"] > 0, "Expected some rigid subassemblies at max_depth=1"
