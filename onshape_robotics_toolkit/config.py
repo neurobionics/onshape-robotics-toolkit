@@ -464,7 +464,7 @@ def record_kinematics_config(use_user_defined_root: bool) -> None:
     _update_session("kinematics", KinematicsConfig(use_user_defined_root=use_user_defined_root))
 
 
-def record_robot_config(name: str, robot_type: Literal["urdf", "xml"], fetch_mass_properties: bool) -> None:
+def record_robot_config(name: str, fetch_mass_properties: bool, robot_type: Literal["urdf", "xml"] = "urdf") -> None:
     _update_session(
         "robot",
         RobotBuildConfig(

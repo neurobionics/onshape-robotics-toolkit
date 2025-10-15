@@ -6,8 +6,11 @@ from scipy.spatial.transform import Rotation
 from transformations import compute_motor_torques
 
 from onshape_robotics_toolkit.connect import Client
+from onshape_robotics_toolkit.formats import MJCFSerializer
+from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.models.document import Document
-from onshape_robotics_toolkit.robot import Robot, RobotType
+from onshape_robotics_toolkit.parse import CAD
+from onshape_robotics_toolkit.robot import Robot
 from onshape_robotics_toolkit.utilities import save_gif, setup_default_logging
 
 HEIGHT = 480
@@ -101,21 +104,21 @@ if __name__ == "__main__":
 
     client.set_variables(doc.did, doc.wid, elements["variables"].id, variables)
 
-    ballbot: Robot = Robot.from_url(
-        url=doc.url,
-        client=client,
-        max_depth=1,
-        name="ballbot",
-        robot_type=RobotType.MJCF,
-    )
-
-    # ballbot: Robot = Robot.from_urdf(
-    #     file_name="ballbot.urdf",
-    #     robot_type=RobotType.MJCF,
-    # )
-    ballbot.set_robot_position(pos=(0, 0, 0.35))
+    # Create robot from URL
+    cad = CAD.from_url(doc.url, client=client, max_depth=1)
+    graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+    ballbot: Robot = Robot.from_graph(kinematic_graph=graph, client=client, name="ballbot")
     ballbot = modify_ballbot(ballbot)
-    ballbot.save("ballbot.xml")
+
+    # Export using MJCF serializer - no need to import MJCFConfig!
+    serializer = MJCFSerializer()
+    serializer.save(
+        ballbot,
+        "ballbot.xml",
+        download_assets=True,
+        position=(0, 0, 0.35),
+        add_ground_plane=True,
+    )
 
     model = mujoco.MjModel.from_xml_path(filename="ballbot.xml")
     data = mujoco.MjData(model)
@@ -144,16 +147,21 @@ if __name__ == "__main__":
                 variables["alpha"].expression = f"{random_alpha:.1f} deg"
                 client.set_variables(doc.did, doc.wid, elements["variables"].id, variables)
 
-                ballbot: Robot = Robot.from_url(
-                    url=doc.url,
-                    client=client,
-                    max_depth=1,
-                    name="ballbot",
-                    robot_type=RobotType.MJCF,
-                )
-                ballbot.set_robot_position(pos=(0, 0, 0.35))
+                # Recreate robot with new parameters
+                cad = CAD.from_url(doc.url, client=client, max_depth=1)
+                graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+                ballbot: Robot = Robot.from_graph(kinematic_graph=graph, client=client, name="ballbot")
                 ballbot = modify_ballbot(ballbot)
-                ballbot.save("ballbot.xml")
+
+                # Re-export using MJCF serializer
+                serializer = MJCFSerializer()
+                serializer.save(
+                    ballbot,
+                    "ballbot.xml",
+                    download_assets=True,
+                    position=(0, 0, 0.35),
+                    add_ground_plane=True,
+                )
                 # Close the current viewer
                 viewer.close()
 

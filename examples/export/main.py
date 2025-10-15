@@ -2,6 +2,7 @@ from pathlib import Path
 
 from onshape_robotics_toolkit.config import ORTConfig
 from onshape_robotics_toolkit.connect import Client
+from onshape_robotics_toolkit.formats import MJCFSerializer
 from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.parse import CAD
 from onshape_robotics_toolkit.robot import Robot
@@ -14,7 +15,7 @@ DOCUMENT_URL = (
     "w/0d17b8ebb2a4c76be9fff3c7/e/d8f8f1d9dbf9634a39aa7f5b"
 )
 MAX_DEPTH = 2
-EXPORT_PATH = Path("output/robot")
+EXPORT_PATH = Path("output/robot.xml")
 MESH_DIR = "custom_meshes"
 CONFIG_OUTPUT = Path("ORT.yaml")
 
@@ -37,7 +38,17 @@ def main() -> None:
     cad = CAD.from_url(DOCUMENT_URL, client=client, max_depth=max_depth)
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=use_root)
     robot = Robot.from_graph(kinematic_graph=graph, client=client, name=robot_name)
-    robot.save(file_path=export_path, download_assets=download_assets, mesh_dir=mesh_dir)
+
+    # Export using MJCF serializer - no need to import MJCFConfig!
+    serializer = MJCFSerializer()
+    serializer.save(
+        robot,
+        export_path,
+        download_assets=download_assets,
+        mesh_dir=mesh_dir,
+        position=(0, 0, 0),
+        add_ground_plane=True,
+    )
 
 
 if __name__ == "__main__":

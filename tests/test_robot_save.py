@@ -1,14 +1,14 @@
-"""Tests for Robot.save() file extension handling and path logic."""
+"""Tests for serializer file extension handling and path logic."""
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock, Mock
 
 import pytest
 
+from onshape_robotics_toolkit.formats import MJCFSerializer, URDFSerializer
 from onshape_robotics_toolkit.graph import KinematicGraph
-from onshape_robotics_toolkit.robot import Robot, RobotType
+from onshape_robotics_toolkit.robot import Robot
 
 
 @pytest.fixture
@@ -22,125 +22,76 @@ def mock_kinematic_graph():
 
 
 @pytest.fixture
-def mock_robot_urdf(mock_kinematic_graph):
-    """Create a mock URDF robot for testing."""
-    robot = Robot(kinematic_graph=mock_kinematic_graph, name="test_robot", robot_type=RobotType.URDF)
-    # Mock the nodes method to return empty iterator
+def mock_robot(mock_kinematic_graph):
+    """Create a mock robot for testing."""
+    robot = Robot(kinematic_graph=mock_kinematic_graph, name="test_robot")
+    # Mock the nodes method to return empty iterator for serialization
     robot.nodes = MagicMock(return_value=[])
-    # Mock the XML generation methods
-    robot.to_urdf = MagicMock(return_value="<robot></robot>")
-    robot.to_mjcf = MagicMock(return_value="<mujoco></mujoco>")
+    robot.edges = []
     return robot
 
 
-@pytest.fixture
-def mock_robot_mjcf(mock_kinematic_graph):
-    """Create a mock MJCF robot for testing."""
-    robot = Robot(kinematic_graph=mock_kinematic_graph, name="test_robot", robot_type=RobotType.MJCF)
-    # Mock the nodes method to return empty iterator
-    robot.nodes = MagicMock(return_value=[])
-    # Mock the XML generation methods
-    robot.to_urdf = MagicMock(return_value="<robot></robot>")
-    robot.to_mjcf = MagicMock(return_value="<mujoco></mujoco>")
-    return robot
-
-
-def test_save_urdf_no_extension_adds_urdf(tmp_path, mock_robot_urdf):
-    """When saving URDF robot without extension, .urdf should be added."""
-    file_path = str(tmp_path / "robot")
-    mock_robot_urdf.save(file_path=file_path, download_assets=False)
-
-    # Check that .urdf extension was added
-    expected_path = tmp_path / "robot.urdf"
-    assert expected_path.exists()
-
-
-def test_save_mjcf_no_extension_adds_xml(tmp_path, mock_robot_mjcf):
-    """When saving MJCF robot without extension, .xml should be added."""
-    file_path = str(tmp_path / "robot")
-    mock_robot_mjcf.save(file_path=file_path, download_assets=False)
-
-    # Check that .xml extension was added
-    expected_path = tmp_path / "robot.xml"
-    assert expected_path.exists()
-
-
-def test_save_urdf_wrong_extension_fixes_it(tmp_path, mock_robot_urdf):
-    """When saving URDF robot with wrong extension, it should be corrected."""
-    file_path = str(tmp_path / "robot.xml")
-    mock_robot_urdf.save(file_path=file_path, download_assets=False)
-
-    # Check that extension was changed to .urdf
-    expected_path = tmp_path / "robot.urdf"
-    assert expected_path.exists()
-    # Original .xml file should not exist
-    assert not (tmp_path / "robot.xml").exists()
-
-
-def test_save_mjcf_wrong_extension_fixes_it(tmp_path, mock_robot_mjcf):
-    """When saving MJCF robot with wrong extension, it should be corrected."""
+def test_urdf_serializer_saves_file(tmp_path, mock_robot):
+    """URDFSerializer should save robot to .urdf file."""
     file_path = str(tmp_path / "robot.urdf")
-    mock_robot_mjcf.save(file_path=file_path, download_assets=False)
+    serializer = URDFSerializer()
+    serializer.save(mock_robot, file_path, download_assets=False)
 
-    # Check that extension was changed to .xml
-    expected_path = tmp_path / "robot.xml"
-    assert expected_path.exists()
-    # Original .urdf file should not exist
-    assert not (tmp_path / "robot.urdf").exists()
-
-
-def test_save_urdf_correct_extension_unchanged(tmp_path, mock_robot_urdf):
-    """When saving URDF robot with correct extension, it should remain unchanged."""
-    file_path = str(tmp_path / "robot.urdf")
-    mock_robot_urdf.save(file_path=file_path, download_assets=False)
-
-    # Check that file was saved with correct extension
+    # Check that file was created
     expected_path = tmp_path / "robot.urdf"
     assert expected_path.exists()
 
 
-def test_save_mjcf_correct_extension_unchanged(tmp_path, mock_robot_mjcf):
-    """When saving MJCF robot with correct extension, it should remain unchanged."""
+def test_mjcf_serializer_saves_file(tmp_path, mock_robot):
+    """MJCFSerializer should save robot to .xml file."""
     file_path = str(tmp_path / "robot.xml")
-    mock_robot_mjcf.save(file_path=file_path, download_assets=False)
+    serializer = MJCFSerializer()
+    serializer.save(mock_robot, file_path, download_assets=False)
 
-    # Check that file was saved with correct extension
+    # Check that file was created
     expected_path = tmp_path / "robot.xml"
     assert expected_path.exists()
 
 
-def test_save_no_file_path_uses_default(tmp_path, mock_robot_urdf):
-    """When saving without file_path, should use robot name with correct extension."""
-    # Change to tmp directory
-    original_dir = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        mock_robot_urdf.save(file_path=None, download_assets=False)
+def test_urdf_serializer_creates_nested_directories(tmp_path, mock_robot):
+    """URDFSerializer should create parent directories if they don't exist."""
+    nested_path = tmp_path / "output" / "robots" / "robot.urdf"
+    serializer = URDFSerializer()
+    serializer.save(mock_robot, str(nested_path), download_assets=False)
 
-        # Check that default file was created
-        expected_path = tmp_path / "test_robot.urdf"
-        assert expected_path.exists()
-    finally:
-        os.chdir(original_dir)
+    # Check that file was saved in nested directory
+    assert nested_path.exists()
 
 
-def test_save_case_insensitive_extension_check(tmp_path, mock_robot_urdf):
-    """Extension check should be case-insensitive."""
-    file_path = str(tmp_path / "robot.URDF")
-    mock_robot_urdf.save(file_path=file_path, download_assets=False)
+def test_mjcf_serializer_creates_nested_directories(tmp_path, mock_robot):
+    """MJCFSerializer should create parent directories if they don't exist."""
+    nested_path = tmp_path / "output" / "robots" / "robot.xml"
+    serializer = MJCFSerializer()
+    serializer.save(mock_robot, str(nested_path), download_assets=False)
 
-    # .URDF should be treated same as .urdf (correct extension)
+    # Check that file was saved in nested directory
+    assert nested_path.exists()
+
+
+def test_urdf_serializer_with_custom_mesh_dir(tmp_path, mock_robot):
+    """URDFSerializer should accept custom mesh directory."""
+    file_path = str(tmp_path / "robot.urdf")
+    mesh_dir = str(tmp_path / "custom_meshes")
+    serializer = URDFSerializer()
+    serializer.save(mock_robot, file_path, download_assets=False, mesh_dir=mesh_dir)
+
+    # Check that file was created
     expected_path = tmp_path / "robot.urdf"
     assert expected_path.exists()
 
 
-def test_save_nested_directory_creates_parent(tmp_path, mock_robot_urdf):
-    """Saving to nested directory should work correctly."""
-    nested_path = tmp_path / "output" / "robots" / "robot"
-    nested_path.parent.mkdir(parents=True, exist_ok=True)
+def test_mjcf_serializer_with_custom_mesh_dir(tmp_path, mock_robot):
+    """MJCFSerializer should accept custom mesh directory."""
+    file_path = str(tmp_path / "robot.xml")
+    mesh_dir = str(tmp_path / "custom_meshes")
+    serializer = MJCFSerializer()
+    serializer.save(mock_robot, file_path, download_assets=False, mesh_dir=mesh_dir)
 
-    mock_robot_urdf.save(file_path=str(nested_path), download_assets=False)
-
-    # Check that file was saved with .urdf extension
-    expected_path = tmp_path / "output" / "robots" / "robot.urdf"
+    # Check that file was created
+    expected_path = tmp_path / "robot.xml"
     assert expected_path.exists()
