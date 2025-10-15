@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from onshape_robotics_toolkit.formats import URDFSerializer
 from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.models.assembly import Assembly
 from onshape_robotics_toolkit.parse import CAD
@@ -44,8 +45,9 @@ def test_urdf_generation_matches_expected_output(test_data_dir: Path) -> None:
         fetch_mass_properties=False,
     )
 
-    # Generate URDF
-    urdf_output = robot.to_urdf()
+    # Generate URDF using serializer
+    serializer = URDFSerializer()
+    urdf_output = serializer.serialize(robot)
 
     # Add XML declaration
     full_urdf = '<?xml version="1.0" ?>\n' + urdf_output
@@ -86,7 +88,8 @@ def test_urdf_has_correct_structure(cad_doc: CAD) -> None:
         fetch_mass_properties=False,
     )
 
-    urdf_str = robot.to_urdf()
+    serializer = URDFSerializer()
+    urdf_str = serializer.serialize(robot)
 
     # Count links and joints in URDF
     link_count = urdf_str.count("<link name=")
@@ -110,7 +113,8 @@ def test_urdf_all_links_have_required_elements(cad_doc: CAD) -> None:
         fetch_mass_properties=False,
     )
 
-    urdf_str = robot.to_urdf()
+    serializer = URDFSerializer()
+    urdf_str = serializer.serialize(robot)
     root = ET.fromstring(urdf_str)  # noqa: S320
 
     links = root.findall("link")
@@ -156,7 +160,8 @@ def test_urdf_all_joints_have_required_elements(cad_doc: CAD) -> None:
         fetch_mass_properties=False,
     )
 
-    urdf_str = robot.to_urdf()
+    serializer = URDFSerializer()
+    urdf_str = serializer.serialize(robot)
     root = ET.fromstring(urdf_str)  # noqa: S320
 
     joints = root.findall("joint")
@@ -206,7 +211,8 @@ def test_urdf_joint_parent_child_references_valid(cad_doc: CAD) -> None:
         fetch_mass_properties=False,
     )
 
-    urdf_str = robot.to_urdf()
+    serializer = URDFSerializer()
+    urdf_str = serializer.serialize(robot)
     root = ET.fromstring(urdf_str)  # noqa: S320
 
     # Get all link names
