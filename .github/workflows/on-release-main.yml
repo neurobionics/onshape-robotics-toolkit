@@ -20,14 +20,13 @@ jobs:
           make build-and-publish PYPI_TOKEN=${{ secrets.PYPI_TOKEN }}
 
   deploy-docs:
-    needs: publish
     runs-on: ubuntu-latest
+    needs: publish
     steps:
-      - name: Check out
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up the environment
         uses: ./.github/actions/setup-uv-env
 
       - name: Deploy documentation
-        run: uv run mkdocs gh-deploy --force
+        run: make docs-deploy

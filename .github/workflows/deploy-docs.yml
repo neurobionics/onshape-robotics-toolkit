@@ -1,0 +1,17 @@
+name: deploy-docs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-uv-env
+
+      - name: Deploy documentation
+        run: make docs-deploy
