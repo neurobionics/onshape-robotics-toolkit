@@ -3,8 +3,53 @@
 from __future__ import annotations
 
 from onshape_robotics_toolkit.connect import Client
-from onshape_robotics_toolkit.models.assembly import AssemblyInstance, MateFeatureData, PartInstance
+from onshape_robotics_toolkit.models.assembly import Assembly, AssemblyInstance, MateFeatureData, PartInstance
 from onshape_robotics_toolkit.parse import CAD, PathKey
+
+
+def test_cad_from_url(assembly: Assembly) -> None:
+    test_url = (
+        "https://cad.onshape.com/documents/a1c1addf75444f54b504f25c/"
+        "w/0d17b8ebb2a4c76be9fff3c7/e/d8f8f1d9dbf9634a39aa7f5b"
+    )
+
+    called: dict[str, object] = {}
+
+    class FakeClient:
+        def get_assembly(
+            self,
+            did: str,
+            wtype: str,
+            wid: str,
+            eid: str,
+            configuration: str = "default",
+            log_response: bool = True,
+            with_meta_data: bool = True,
+        ) -> Assembly:
+            called["args"] = (did, wtype, wid, eid, configuration, log_response, with_meta_data)
+            return assembly
+
+    client = FakeClient()
+
+    cad = CAD.from_url(
+        test_url,
+        client=client,  # type: ignore[arg-type]
+        max_depth=2,
+        configuration="custom",
+        log_response=False,
+        with_meta_data=False,
+    )
+
+    assert isinstance(cad, CAD)
+    assert called["args"] == (
+        "a1c1addf75444f54b504f25c",
+        "w",
+        "0d17b8ebb2a4c76be9fff3c7",
+        "d8f8f1d9dbf9634a39aa7f5b",
+        "custom",
+        False,
+        False,
+    )
 
 
 def test_cad_metadata_and_registry_counts(cad_doc: CAD) -> None:

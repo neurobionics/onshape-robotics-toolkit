@@ -203,6 +203,7 @@ tests/**/*.json
 !tests/data/*.json
 !tests/test.env
 examples/**/*.xml
+examples/**/*.yaml
 
 playground
 

@@ -25,6 +25,12 @@ import random
 
 from loguru import logger
 
+from onshape_robotics_toolkit.config import (
+    record_export_config,
+    record_robot_config,
+    resolve_mate_name,
+    resolve_part_name,
+)
 from onshape_robotics_toolkit.connect import Asset, Client
 from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.models.assembly import (
@@ -316,16 +322,20 @@ def get_robot_joint(
 
     origin = Origin.from_matrix(world_to_joint_tf)
     base_name = get_sanitized_name(mate.name)
-    joint_name = make_unique_name(base_name, used_joint_names)
+    resolved_name = resolve_mate_name(base_name)
+    joint_name = make_unique_name(resolved_name, used_joint_names)
     used_joint_names.add(joint_name)
 
     logger.info(f"Creating robot joint from {parent_key} to {child_key}")
 
+    parent_link_name = resolve_part_name(str(parent_key))
+    child_link_name = resolve_part_name(str(child_key))
+
     if mate.mateType == MateType.REVOLUTE:
         joints[(parent_key, child_key)] = RevoluteJoint(
             name=joint_name,
-            parent=str(parent_key),
-            child=str(child_key),
+            parent=parent_link_name,
+            child=child_link_name,
             origin=origin,
             limits=JointLimits(
                 effort=1.0,
@@ -341,14 +351,14 @@ def get_robot_joint(
 
     elif mate.mateType == MateType.FASTENED:
         joints[(parent_key, child_key)] = FixedJoint(
-            name=joint_name, parent=str(parent_key), child=str(child_key), origin=origin
+            name=joint_name, parent=parent_link_name, child=child_link_name, origin=origin
         )
 
     elif mate.mateType == MateType.SLIDER or mate.mateType == MateType.CYLINDRICAL:
         joints[(parent_key, child_key)] = PrismaticJoint(
             name=joint_name,
-            parent=str(parent_key),
-            child=str(child_key),
+            parent=parent_link_name,
+            child=child_link_name,
             origin=origin,
             limits=JointLimits(
                 effort=1.0,
@@ -393,7 +403,7 @@ def get_robot_joint(
 
         joints[(parent_key, dummy_x_key)] = RevoluteJoint(
             name=joint_name + "_x",
-            parent=str(parent_key),
+            parent=parent_link_name,
             child=str(dummy_x_key),
             origin=origin,
             limits=JointLimits(
@@ -424,7 +434,7 @@ def get_robot_joint(
         joints[(dummy_y_key, child_key)] = RevoluteJoint(
             name=joint_name + "_z",
             parent=str(dummy_y_key),
-            child=str(child_key),
+            child=child_link_name,
             origin=Origin.zero_origin(),
             limits=JointLimits(
                 effort=1.0,
@@ -440,7 +450,7 @@ def get_robot_joint(
     else:
         logger.warning(f"Unsupported joint type: {mate.mateType}")
         joints[(parent_key, child_key)] = DummyJoint(
-            name=joint_name, parent=str(parent_key), child=str(child_key), origin=origin
+            name=joint_name, parent=parent_link_name, child=child_link_name, origin=origin
         )
 
     return joints, links
@@ -573,6 +583,11 @@ class Robot(nx.DiGraph):
             name=name,
             robot_type=robot_type,
         )
+        record_robot_config(
+            name=name,
+            robot_type=robot_type.value if isinstance(robot_type, RobotType) else str(robot_type),
+            fetch_mass_properties=fetch_mass_properties,
+        )
 
         # Get root node from kinematic graph
         if kinematic_graph.root is None:
@@ -584,7 +599,8 @@ class Robot(nx.DiGraph):
         root_part = robot.kinematic_graph.nodes[root_key]["data"]
         # NOTE: make sure Pathkey.__str__ produces names without
         # special characters that are invalid in URDF/MJCF
-        root_name = str(root_key)
+        root_default_name = str(root_key)
+        root_name = resolve_part_name(root_default_name)
         root_link, world_to_root_link, root_asset = get_robot_link(
             name=root_name,
             part=root_part,
@@ -630,8 +646,11 @@ class Robot(nx.DiGraph):
             )
 
             # Create child link
+            child_default_name = str(child_key)
+            child_name = resolve_part_name(child_default_name)
+
             link, world_to_link_tf, asset = get_robot_link(
-                name=str(child_key),
+                name=child_name,
                 part=child_part,
                 client=client,
                 mate=mate_data,
@@ -1238,6 +1257,8 @@ class Robot(nx.DiGraph):
             elif path_obj.suffix != expected_ext:
                 file_path = str(path_obj.with_suffix(expected_ext))
                 logger.info(f"Normalized extension from {path_obj.suffix} to {expected_ext}")
+
+        record_export_config(file_path=file_path, download_assets=download_assets, mesh_dir=mesh_dir)
 
         # Set robot_file_dir on all assets so relative paths in XML are correct
         from pathlib import Path
