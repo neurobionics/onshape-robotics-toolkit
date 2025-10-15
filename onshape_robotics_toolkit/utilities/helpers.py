@@ -589,6 +589,93 @@ def clean_name_for_urdf(name: str) -> str:
     return name
 
 
+def parse_onshape_expression(expr: str | None) -> float | None:
+    """
+    Parse an Onshape expression string to a float value.
+
+    Handles common units for angles and lengths. Returns None if the expression
+    is None, empty, or cannot be parsed.
+
+    Args:
+        expr: Onshape expression string (e.g., "90 deg", "0.5 m", "100 mm")
+
+    Returns:
+        Parsed float value with appropriate unit conversion, or None if invalid
+
+    Unit Conversions:
+        - Angles: "deg" or "°" → radians, "rad" → as-is
+        - Length: "m" → as-is, "mm" → /1000, "cm" → /100, "in" → *0.0254
+        - No unit: return float as-is
+
+    Examples:
+        >>> parse_onshape_expression("90 deg")
+        1.5707963267948966
+        >>> parse_onshape_expression("0.5 m")
+        0.5
+        >>> parse_onshape_expression("100 mm")
+        0.1
+        >>> parse_onshape_expression("3.14159")
+        3.14159
+        >>> parse_onshape_expression(None)
+        None
+        >>> parse_onshape_expression("")
+        None
+    """
+    if expr is None or expr.strip() == "":
+        return None
+
+    # Clean the expression
+    expr = expr.strip()
+
+    # Try to parse as plain float first (no units)
+    try:
+        return float(expr)
+    except ValueError:
+        pass
+
+    # Pattern to match number and optional unit
+    # Matches: number (int or float), optional whitespace, optional unit
+    pattern = r"^([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*([a-zA-Z°]+)?$"
+    match = re.match(pattern, expr)
+
+    if not match:
+        logger.warning(f"Could not parse Onshape expression: '{expr}'")
+        return None
+
+    value_str, unit = match.groups()
+
+    try:
+        value = float(value_str)
+    except ValueError:
+        logger.warning(f"Could not convert value to float: '{value_str}' from expression '{expr}'")
+        return None
+
+    # No unit provided
+    if unit is None or unit == "":
+        return value
+
+    # Convert based on unit (case-insensitive)
+    unit_lower = unit.lower()
+
+    # Angle conversions
+    if unit_lower in ("deg", "degree", "degrees", "°"):
+        return float(np.deg2rad(value))
+    elif unit_lower in ("rad", "radian", "radians") or unit_lower in ("m", "meter", "meters"):
+        return value
+    elif unit_lower in ("mm", "millimeter", "millimeters"):
+        return value / 1000.0
+    elif unit_lower in ("cm", "centimeter", "centimeters"):
+        return value / 100.0
+    elif unit_lower in ("in", "inch", "inches"):
+        return value * 0.0254
+    elif unit_lower in ("ft", "foot", "feet"):
+        return value * 0.3048
+
+    else:
+        logger.warning(f"Unknown unit '{unit}' in expression '{expr}', returning raw value")
+        return value
+
+
 def show_video(frames: list[Any], framerate: int = 60) -> None:
     fig, ax = plt.subplots()
     ax.axis("off")

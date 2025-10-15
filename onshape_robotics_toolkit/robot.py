@@ -28,6 +28,7 @@ from loguru import logger
 from onshape_robotics_toolkit.config import (
     record_export_config,
     record_robot_config,
+    resolve_mate_limits,
     resolve_mate_name,
     resolve_part_name,
 )
@@ -332,18 +333,52 @@ def get_robot_joint(
     child_link_name = resolve_part_name(str(child_key))
 
     if mate.mateType == MateType.REVOLUTE:
+        # Extract limits with priority order:
+        # 1. config limits (user overrides)
+        # 2. mate.limits (fetched from API)
+        # 3. None (omit limits for revolute joints)
+        revolute_limits = None
+        limit_source = None
+
+        config_limits = resolve_mate_limits(base_name)
+        if config_limits is not None and "min" in config_limits and "max" in config_limits:
+            revolute_limits = JointLimits(
+                effort=1.0,
+                velocity=1.0,
+                lower=config_limits["min"],
+                upper=config_limits["max"],
+            )
+            limit_source = "config"
+        elif mate.limits is not None and "min" in mate.limits and "max" in mate.limits:
+            # Fallback to API limits when no override is provided
+            revolute_limits = JointLimits(
+                effort=1.0,
+                velocity=1.0,
+                lower=mate.limits["min"],
+                upper=mate.limits["max"],
+            )
+            limit_source = "API"
+
+        if revolute_limits is None:
+            revolute_limits = JointLimits(
+                effort=1.0,
+                velocity=1.0,
+                lower=-2 * np.pi,
+                upper=2 * np.pi,
+            )
+            limit_source = "default"
+
+        logger.debug(
+            f"Using {limit_source} limits for mate '{mate.name}': "
+            f"min={revolute_limits.lower:.4f}, max={revolute_limits.upper:.4f}"
+        )
+
         joints[(parent_key, child_key)] = RevoluteJoint(
             name=joint_name,
             parent=parent_link_name,
             child=child_link_name,
             origin=origin,
-            limits=JointLimits(
-                effort=1.0,
-                velocity=1.0,
-                # TODO: add support for joint limits from Onshape
-                lower=-2 * np.pi,
-                upper=2 * np.pi,
-            ),
+            limits=revolute_limits,
             axis=Axis((0.0, 0.0, -1.0)),
             # dynamics=JointDynamics(damping=0.1, friction=0.1),
             mimic=mimic,
@@ -355,6 +390,41 @@ def get_robot_joint(
         )
 
     elif mate.mateType == MateType.SLIDER or mate.mateType == MateType.CYLINDRICAL:
+        # For prismatic joints, use fetched limits or defaults (in meters)
+        # NOTE: Onshape limits are defined along +Z axis, but URDF uses -Z axis
+        # So we need to negate and swap min/max to account for the flipped direction
+        prismatic_lower: float | None = None
+        prismatic_upper: float | None = None
+        limit_source = None
+
+        config_limits = resolve_mate_limits(base_name)
+        if config_limits is not None and "min" in config_limits and "max" in config_limits:
+            prismatic_lower = -config_limits["max"]
+            prismatic_upper = -config_limits["min"]
+            limit_source = "config"
+        elif mate.limits is not None and "min" in mate.limits and "max" in mate.limits:
+            # Swap and negate: Onshape's min becomes URDF's upper (negated)
+            # and Onshape's max becomes URDF's lower (negated)
+            prismatic_lower = -mate.limits["max"]
+            prismatic_upper = -mate.limits["min"]
+            limit_source = "API"
+
+        if prismatic_lower is None or prismatic_upper is None:
+            prismatic_lower = -0.1
+            prismatic_upper = 0.1
+            limit_source = "default"
+
+        if limit_source == "default":
+            logger.debug(
+                f"No limits available for mate '{mate.name}', using default prismatic range "
+                f"lower={prismatic_lower:.4f}, upper={prismatic_upper:.4f}"
+            )
+        else:
+            logger.debug(
+                f"Using {limit_source} limits for mate '{mate.name}': "
+                f"lower={prismatic_lower:.4f}, upper={prismatic_upper:.4f}"
+            )
+
         joints[(parent_key, child_key)] = PrismaticJoint(
             name=joint_name,
             parent=parent_link_name,
@@ -363,8 +433,8 @@ def get_robot_joint(
             limits=JointLimits(
                 effort=1.0,
                 velocity=1.0,
-                lower=-0.1,
-                upper=0.1,
+                lower=prismatic_lower,
+                upper=prismatic_upper,
             ),
             axis=Axis((0.0, 0.0, -1.0)),
             # dynamics=JointDynamics(damping=0.1, friction=0.1),

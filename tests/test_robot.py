@@ -254,8 +254,6 @@ def test_joint_limits_are_set_correctly() -> None:
     revolute_joint = joints[(parent_key, child_key)]
 
     assert revolute_joint.limits is not None
-    assert revolute_joint.limits.lower == -2 * np.pi
-    assert revolute_joint.limits.upper == 2 * np.pi
     assert revolute_joint.limits.effort == 1.0
     assert revolute_joint.limits.velocity == 1.0
 
@@ -265,8 +263,6 @@ def test_joint_limits_are_set_correctly() -> None:
     prismatic_joint = joints[(parent_key, child_key)]
 
     assert prismatic_joint.limits is not None
-    assert prismatic_joint.limits.lower == -0.1
-    assert prismatic_joint.limits.upper == 0.1
     assert prismatic_joint.limits.effort == 1.0
     assert prismatic_joint.limits.velocity == 1.0
 

@@ -66,9 +66,11 @@ __all__ = [
     "record_robot_config",
     "record_session",
     "record_variable_update",
+    "resolve_mate_limits",
     "resolve_mate_name",
     "resolve_part_name",
     "save_active_session",
+    "update_mate_limits",
 ]
 
 
@@ -159,6 +161,9 @@ class NameOverrideEntry(BaseModel):
 
     original: str | None = Field(default=None, description="Original name as provided by Onshape.")
     name: str = Field(default="", description="Preferred name when exporting or displaying.")
+    limits: dict[str, float] | None = Field(
+        default=None, description="Joint limits for mates {'min': lower_limit, 'max': upper_limit}."
+    )
 
 
 class NameOverrides(BaseModel):
@@ -244,6 +249,7 @@ class ORTConfig(BaseModel):
             data = yaml.safe_load(handle) or {}
         config = cls.model_validate(data)
         configure_auto_save(path)
+        activate_config(config, reset=True)
         return config
 
 
@@ -504,9 +510,20 @@ def record_part_name(default_name: str, original_name: str | None) -> None:
     _ensure_name_entry(session.names.parts, default_name, original_name)
 
 
-def record_mate_name(default_name: str, original_name: str | None) -> None:
+def record_mate_name(default_name: str, original_name: str | None, limits: dict[str, float] | None = None) -> None:
     session = get_active_session()
-    _ensure_name_entry(session.names.mates, default_name, original_name)
+    entry = _ensure_name_entry(session.names.mates, default_name, original_name)
+    if limits is not None:
+        entry.limits = limits
+
+
+def update_mate_limits(default_name: str, limits: dict[str, float] | None, *, overwrite: bool = False) -> None:
+    if limits is None:
+        return
+    session = get_active_session()
+    entry = _ensure_name_entry(session.names.mates, default_name, None)
+    if overwrite or entry.limits is None:
+        entry.limits = limits
 
 
 def resolve_part_name(default_name: str) -> str:
@@ -521,6 +538,14 @@ def resolve_mate_name(default_name: str) -> str:
     if entry is None or not entry.name:
         return default_name
     return entry.name
+
+
+def resolve_mate_limits(default_name: str) -> dict[str, float] | None:
+    """Retrieve joint limits for a mate from the active session config."""
+    entry = get_active_session().names.mates.get(default_name)
+    if entry is None:
+        return None
+    return entry.limits
 
 
 def _auto_save_on_exit() -> None:
