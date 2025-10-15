@@ -345,7 +345,7 @@ class MJCFSerializer(RobotSerializer):
         ET.SubElement(root_body, "freejoint", name=f"{robot.name}_freejoint")
 
         # Build body elements from robot links
-        body_elements: dict[PathKey, ET._Element] = {robot.name: root_body}  # type: ignore[PGH003]
+        body_elements: dict[PathKey, ET._Element] = {}
         for link_key, node_data in robot.nodes(data=True):
             link_data = node_data.get("data")
             if link_data is not None:
@@ -513,7 +513,7 @@ class MJCFSerializer(RobotSerializer):
             combined_euler /= combined_mass
 
         # Update parent body's inertial element
-        parent_body = body_elements.get(next(iter(body_elements.keys())))  # Get first body
+        parent_body = next(iter(body_elements.values()), None)
         if parent_body is not None:
             parent_inertial = parent_body.find("inertial")
             if parent_inertial is not None:
