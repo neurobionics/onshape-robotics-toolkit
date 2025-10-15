@@ -3,7 +3,6 @@
 [![License](https://img.shields.io/github/license/neurobionics/onshape-robotics-toolkit)](https://github.com/neurobionics/onshape-robotics-toolkit/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/neurobionics/onshape-robotics-toolkit/branch/main/graph/badge.svg)](https://codecov.io/gh/neurobionics/onshape-robotics-toolkit)
 [![DOI](https://zenodo.org/badge/865051944.svg)](https://doi.org/10.5281/zenodo.14617407)
-[![Pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/neurobionics/onshape-robotics-toolkit/blob/main/.pre-commit-config.yaml)
 [![Docs](https://img.shields.io/badge/docs-mkdocs-blue)](https://neurobionics.github.io/onshape-robotics-toolkit/)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/onshape-robotics-toolkit?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/onshape-robotics-toolkit)
 
