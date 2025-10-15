@@ -1,6 +1,5 @@
 # onshape-robotics-toolkit
 
-[![Python Version](https://img.shields.io/pypi/pyversions/onshape-robotics-toolkit)](https://pypi.org/project/onshape-robotics-toolkit/)
 [![License](https://img.shields.io/github/license/neurobionics/onshape-robotics-toolkit)](https://github.com/neurobionics/onshape-robotics-toolkit/blob/main/LICENSE)
 [![codecov](https://codecov.io/gh/neurobionics/onshape-robotics-toolkit/branch/main/graph/badge.svg)](https://codecov.io/gh/neurobionics/onshape-robotics-toolkit)
 [![DOI](https://zenodo.org/badge/865051944.svg)](https://doi.org/10.5281/zenodo.14617407)
