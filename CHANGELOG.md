@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/neurobionics/onshape-robotics-toolkit/compare/onshape-robotics-toolkit-v0.3.0...onshape-robotics-toolkit-v0.4.0) (2025-10-15)
+
+
+### Features
+
+* create formats for saving MJCF/URDF and handling conversions ([731f645](https://github.com/neurobionics/onshape-robotics-toolkit/commit/731f64505913fe83fe8455883e0715bff1d70e3d))
+* create formats for saving MJCF/URDF and handling conversions ([047159b](https://github.com/neurobionics/onshape-robotics-toolkit/commit/047159b4bccfc2f57afd9d3b3479515d5cf7c2af))
+
 ## [0.3.0](https://github.com/neurobionics/onshape-robotics-toolkit/compare/onshape-robotics-toolkit-v0.2.1...onshape-robotics-toolkit-v0.3.0) (2025-10-15)
 
 
