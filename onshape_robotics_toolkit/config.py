@@ -46,10 +46,10 @@ __all__ = [
     "ExportConfig",
     "KinematicsConfig",
     "LoggingConfig",
+    "ORTConfig",
+    "ORTSession",
     "PreprocessingConfig",
     "RobotBuildConfig",
-    "ToolkitConfig",
-    "ToolkitSession",
     "VariableUpdateConfig",
     "activate_config",
     "configure_auto_save",
@@ -70,11 +70,6 @@ __all__ = [
     "resolve_part_name",
     "save_active_session",
 ]
-
-
-# --------------------------------------------------------------------------- #
-# Configuration data models
-# --------------------------------------------------------------------------- #
 
 
 class LoggingConfig(BaseModel):
@@ -223,7 +218,7 @@ class ExportConfig(BaseModel):
     mesh_dir: str | None = Field(default=None)
 
 
-class ToolkitConfig(BaseModel):
+class ORTConfig(BaseModel):
     """Aggregated configuration covering the entire workflow."""
 
     logging: LoggingConfig | None = None
@@ -244,7 +239,7 @@ class ToolkitConfig(BaseModel):
             yaml.safe_dump(self.model_dump(mode="json", exclude_none=True), handle, sort_keys=False)
 
     @classmethod
-    def load(cls, path: Path | str) -> ToolkitConfig:
+    def load(cls, path: Path | str) -> ORTConfig:
         with Path(path).open("r", encoding="utf-8") as handle:
             data = yaml.safe_load(handle) or {}
         config = cls.model_validate(data)
@@ -252,12 +247,7 @@ class ToolkitConfig(BaseModel):
         return config
 
 
-# --------------------------------------------------------------------------- #
-# Runtime session capture
-# --------------------------------------------------------------------------- #
-
-
-class ToolkitSession:
+class ORTSession:
     """Accumulates configuration data during a run."""
 
     def __init__(self) -> None:
@@ -273,8 +263,8 @@ class ToolkitSession:
         self.names: NameOverrides = NameOverrides()
         self.auto_save_path: Path | None = None
 
-    def to_config(self) -> ToolkitConfig:
-        return ToolkitConfig(
+    def to_config(self) -> ORTConfig:
+        return ORTConfig(
             logging=self.logging,
             client=self.client,
             document=self.document,
@@ -288,6 +278,7 @@ class ToolkitSession:
         )
 
     def save(self, path: Path | str) -> None:
+        logger.info(f"Saving session configuration to {path}")
         self.to_config().save(path)
 
     def reset(self) -> None:
@@ -303,7 +294,7 @@ class ToolkitSession:
         self.names = NameOverrides()
         self.auto_save_path = None
 
-    def merge_from(self, other: ToolkitSession) -> None:
+    def merge_from(self, other: ORTSession) -> None:
         for field in (
             "logging",
             "client",
@@ -324,11 +315,11 @@ class ToolkitSession:
             self.auto_save_path = other.auto_save_path
 
 
-_GLOBAL_SESSION = ToolkitSession()
-_ACTIVE_SESSION: ContextVar[ToolkitSession] = ContextVar("_ACTIVE_SESSION", default=_GLOBAL_SESSION)
+_GLOBAL_SESSION = ORTSession()
+_ACTIVE_SESSION: ContextVar[ORTSession] = ContextVar("_ACTIVE_SESSION", default=_GLOBAL_SESSION)
 
 
-def get_active_session() -> ToolkitSession:
+def get_active_session() -> ORTSession:
     """Return the currently active session recorder."""
     return _ACTIVE_SESSION.get()
 
@@ -349,7 +340,7 @@ def configure_auto_save(path: Path | str) -> None:
 
 
 @contextmanager
-def record_session(*, save_path: Path | str | None = None) -> Generator[ToolkitSession, None, None]:
+def record_session(*, save_path: Path | str | None = None) -> Generator[ORTSession, None, None]:
     """
     Context manager that captures configuration data produced during execution.
 
@@ -357,7 +348,7 @@ def record_session(*, save_path: Path | str | None = None) -> Generator[ToolkitS
         save_path: Optional path to write the resulting YAML when the context exits.
     """
     parent_session = get_active_session()
-    session = ToolkitSession()
+    session = ORTSession()
     session.names = parent_session.names.copy()
     session.auto_save_path = parent_session.auto_save_path
     token = _ACTIVE_SESSION.set(session)
@@ -371,7 +362,7 @@ def record_session(*, save_path: Path | str | None = None) -> Generator[ToolkitS
         _ACTIVE_SESSION.reset(token)
 
 
-def activate_config(config: ToolkitConfig, *, reset: bool = False) -> None:
+def activate_config(config: ORTConfig, *, reset: bool = False) -> None:
     """Apply persisted configuration (currently name overrides) to the active session."""
 
     session = get_active_session()
@@ -380,11 +371,6 @@ def activate_config(config: ToolkitConfig, *, reset: bool = False) -> None:
         session.reset()
         session.auto_save_path = previous_auto_path
     session.names = config.names.copy()
-
-
-# --------------------------------------------------------------------------- #
-# Recording helpers invoked by various modules
-# --------------------------------------------------------------------------- #
 
 
 def _update_session(field: str, value: Any) -> None:
@@ -541,7 +527,7 @@ def _auto_save_on_exit() -> None:
     session = _GLOBAL_SESSION
 
     if session.auto_save_path is None:
-        configure_auto_save("ORTK.yaml")
+        configure_auto_save("ORT.yaml")
 
     path = session.auto_save_path
 

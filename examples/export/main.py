@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from onshape_robotics_toolkit.config import ToolkitConfig
+from onshape_robotics_toolkit.config import ORTConfig
 from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.parse import CAD
@@ -22,7 +22,7 @@ CONFIG_OUTPUT = Path("output/session.yaml")
 def main() -> None:
     setup_default_logging(console_level="INFO", file_level="DEBUG", file_path="export.log")
 
-    config = ToolkitConfig.load(CONFIG_OUTPUT) if CONFIG_OUTPUT.exists() else None
+    config = ORTConfig.load(CONFIG_OUTPUT) if CONFIG_OUTPUT.exists() else None
 
     env_path = config.client.env if config and config.client and config.client.env is not None else ENV_PATH
     base_url = config.client.base_url if config and config.client else None

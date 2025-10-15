@@ -819,7 +819,7 @@ def setup_quiet_logging(file_path: str = "onshape_toolkit.log", level: str = "DE
 setup_default_logging(
     console_level="INFO",
     file_level="DEBUG",
-    file_path="ORTK.log",
+    file_path="ORT.log",
     clear_existing_handlers=True,
     delay_file_creation=True,
 )

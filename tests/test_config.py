@@ -12,9 +12,9 @@ from onshape_robotics_toolkit.config import (
     LoggingConfig,
     NameOverrideEntry,
     NameOverrides,
+    ORTConfig,
     PreprocessingConfig,
     RobotBuildConfig,
-    ToolkitConfig,
     activate_config,
     get_active_session,
     record_assembly_config,
@@ -37,7 +37,7 @@ from onshape_robotics_toolkit.config import (
 def test_toolkit_config_round_trip(tmp_path: Path) -> None:
     get_active_session().reset()
 
-    config = ToolkitConfig(
+    config = ORTConfig(
         logging=LoggingConfig(
             mode="default",
             console_level="INFO",
@@ -63,7 +63,7 @@ def test_toolkit_config_round_trip(tmp_path: Path) -> None:
     config_path = tmp_path / "session.yaml"
     config.save(config_path)
 
-    loaded = ToolkitConfig.load(config_path)
+    loaded = ORTConfig.load(config_path)
     assert loaded == config
 
     activate_config(loaded, reset=True)
@@ -124,7 +124,7 @@ def test_record_session_accumulates_configuration(tmp_path: Path) -> None:
     assert data.names.parts["body_1"].original == "Body 1 <1>"
     assert data.names.parts["body_1"].name == "body_1"
 
-    loaded = ToolkitConfig.load(save_path)
+    loaded = ORTConfig.load(save_path)
     assert loaded.document and loaded.document.name == "Example Assembly"
     assert loaded.preprocessing
     assert loaded.preprocessing.variable_updates[0].expressions["wheelDiameter"] == "180 mm"
@@ -151,7 +151,7 @@ def test_global_session_records_without_context(tmp_path: Path) -> None:
     save_path = tmp_path / "global.yaml"
     save_active_session(save_path)
 
-    loaded = ToolkitConfig.load(save_path)
+    loaded = ORTConfig.load(save_path)
     assert loaded.client and loaded.client.env == ".env"
     assert loaded.cad and loaded.cad.max_depth == 1
     assert resolve_part_name("body_1") == "body_1"

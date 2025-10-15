@@ -41,7 +41,7 @@ def get_version() -> str:
 __version__: str = get_version()
 
 from onshape_robotics_toolkit.config import (  # noqa: F401 E402
-    ToolkitConfig,
+    ORTConfig,
     activate_config,
     record_session,
     save_active_session,

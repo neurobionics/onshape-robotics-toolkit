@@ -1288,7 +1288,7 @@ class Asset:
             ... )
             >>> await asset.download()
         """
-        logger.info(f"Starting download for {self.file_name}")
+        logger.info(f"Downloading {self.file_name}")
         if self.client is None:
             raise ValueError("Client is required for downloading meshes")
         try:
@@ -1321,7 +1321,7 @@ class Asset:
                 transformed_mesh = transform_mesh(raw_mesh, self.transform) if self.transform is not None else raw_mesh
                 transformed_mesh.save(self.absolute_path)
 
-                logger.info(f"Mesh file saved: {self.absolute_path}")
+                logger.debug(f"Mesh file saved: {self.absolute_path}")
         except Exception as e:
             logger.error(f"Failed to download {self.file_name}: {e}")
 

@@ -621,7 +621,7 @@ class CAD:
         if client is not None:
             estimation = cad.estimate_api_calls(fetch_mass_properties=True, download_meshes=True)
             logger.info(
-                f"Estimated API calls → Total: {estimation['total']} "
+                f"Estimated API calls for CAD to Robot conversion → Total: {estimation['total']} "
                 f"(subassemblies: {estimation['subassemblies']}, "
                 f"mass_properties: {estimation['mass_properties']}, "
                 f"meshes: {estimation['meshes']})"
