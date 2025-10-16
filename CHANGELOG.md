@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/neurobionics/onshape-robotics-toolkit/compare/onshape-robotics-toolkit-v0.4.0...onshape-robotics-toolkit-v0.5.0) (2025-10-16)
+
+
+### Features
+
+* add support for composite parts ([1b317c1](https://github.com/neurobionics/onshape-robotics-toolkit/commit/1b317c184227d3a85fb58abd89ea3f75fc53df72))
+
 ## [0.4.0](https://github.com/neurobionics/onshape-robotics-toolkit/compare/onshape-robotics-toolkit-v0.3.0...onshape-robotics-toolkit-v0.4.0) (2025-10-15)
 
 
