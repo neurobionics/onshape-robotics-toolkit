@@ -29,6 +29,7 @@ from onshape_robotics_toolkit.models.assembly import (
     AssemblyFeature,
     AssemblyFeatureType,
     AssemblyInstance,
+    BodyType,
     MatedCS,
     MateFeatureData,
     MateGroupFeatureData,
@@ -539,10 +540,17 @@ class CAD:
             Estimated remaining API calls: 24
         """
         num_kinematic_parts = sum(
-            1 for key, part in self.parts.items() if part.rigidAssemblyToPartTF is None and not part.isRigidAssembly
+            1
+            for key, part in self.parts.items()
+            if part.rigidAssemblyToPartTF is None and not part.isRigidAssembly and not self.instances[key].suppressed
         )
 
-        num_rigid_subassemblies = sum(1 for key, sub in self.subassemblies.items() if sub.isRigid)
+        num_rigid_subassemblies = sum(
+            1 for key, sub in self.subassemblies.items() if sub.isRigid and not self.instances[key].suppressed
+        )
+        num_flexible_subassemblies = sum(
+            1 for key, sub in self.subassemblies.items() if not self.instances[key].suppressed
+        )
 
         # Each rigid subassembly needs get_root_assembly to fetch occurrence data
         subassembly_calls = num_rigid_subassemblies
@@ -553,7 +561,7 @@ class CAD:
 
         mate_property_calls = 0
         if fetch_mate_properties:
-            mate_property_calls = 1 + len(self.subassemblies) - num_rigid_subassemblies
+            mate_property_calls = 1 + num_flexible_subassemblies - num_rigid_subassemblies
 
         mesh_download_calls = 0
         if download_meshes:
@@ -1285,7 +1293,7 @@ class CAD:
                 self.parts[key] = Part(
                     isStandardContent=False,
                     partId=subassembly_instance.elementId,  # Use element ID as part ID
-                    bodyType="assembly",
+                    bodyType=BodyType.SOLID,
                     documentId=subassembly_instance.documentId,
                     elementId=subassembly_instance.elementId,
                     documentMicroversion=subassembly_instance.documentMicroversion,
@@ -1329,6 +1337,12 @@ class CAD:
 
         tasks = []
         for key, part in self.parts.items():
+            if part.bodyType == BodyType.SHEET.value:
+                continue  # skip surface bodies
+
+            if self.instances[key].suppressed:
+                continue
+
             if part.MassProperty is not None:
                 logger.debug(f"Part {key} already has mass properties, skipping")
                 continue
@@ -1387,6 +1401,9 @@ class CAD:
 
         tasks = []
         for key, subassembly in self.subassemblies.items():
+            if self.instances[key].suppressed:
+                continue
+
             if subassembly.RootOccurrences is not None:
                 logger.debug(f"Subassembly {key} already has RootOccurrences, skipping")
                 continue
@@ -1430,6 +1447,9 @@ class CAD:
 
         # Add flexible subassemblies
         for sub_key, subassembly in self.subassemblies.items():
+            if self.instances[sub_key].suppressed:
+                continue
+
             if not subassembly.isRigid:
                 assemblies_to_fetch.append((
                     sub_key,

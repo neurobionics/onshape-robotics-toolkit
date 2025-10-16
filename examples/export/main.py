@@ -2,7 +2,7 @@ from pathlib import Path
 
 from onshape_robotics_toolkit.config import ORTConfig
 from onshape_robotics_toolkit.connect import Client
-from onshape_robotics_toolkit.formats import MJCFSerializer
+from onshape_robotics_toolkit.formats.urdf import URDFSerializer
 from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.parse import CAD
 from onshape_robotics_toolkit.robot import Robot
@@ -11,11 +11,10 @@ from onshape_robotics_toolkit.utilities import setup_default_logging
 # Basic parameters a user would normally hard-code or source from their own scripts.
 ENV_PATH = ".env"
 DOCUMENT_URL = (
-    "https://cad.onshape.com/documents/a1c1addf75444f54b504f25c/"
-    "w/0d17b8ebb2a4c76be9fff3c7/e/d8f8f1d9dbf9634a39aa7f5b"
+    "https://cad.onshape.com/documents/1291b9c12b545eeed2d7b739/w/97037c8205b8249da5568aaf/e/c7cf82667c856bf201b3cbde"
 )
 MAX_DEPTH = 2
-EXPORT_PATH = Path("output/robot.xml")
+EXPORT_PATH = Path("output/robot.urdf")
 MESH_DIR = "custom_meshes"
 CONFIG_OUTPUT = Path("ORT.yaml")
 
@@ -39,8 +38,8 @@ def main() -> None:
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=use_root)
     robot = Robot.from_graph(kinematic_graph=graph, client=client, name=robot_name)
 
-    # Export using MJCF serializer - no need to import MJCFConfig!
-    serializer = MJCFSerializer()
+    # Export using URDF serializer - no need to import URDFConfig!
+    serializer = URDFSerializer()
     serializer.save(
         robot,
         export_path,
