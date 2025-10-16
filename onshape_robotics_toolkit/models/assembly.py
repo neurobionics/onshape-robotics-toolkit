@@ -357,6 +357,12 @@ class PartMateConnector(BaseModel):
     featureId: str = Field(..., description="The unique identifier of the mate connector feature.")
 
 
+class BodyType(str, Enum):
+    SOLID = "solid"
+    SHEET = "sheet"
+    COMPOSITE = "composite"
+
+
 class Part(IDBase):
     """
     Represents a part within an assembly, including its properties and configuration.
@@ -378,7 +384,7 @@ class Part(IDBase):
     Attributes:
         isStandardContent (bool): Indicates if the part is standard content.
         partId (str): The unique identifier of the part.
-        bodyType (str): The type of the body (e.g., solid, surface).
+        bodyType (BodyType): The type of the body (e.g., solid, surface).
 
     Custom Attributes:
         MassProperty (Union[MassProperties, None]): The mass properties of the part, if available.
@@ -400,7 +406,7 @@ class Part(IDBase):
 
     isStandardContent: bool = Field(..., description="Indicates if the part is standard content.")
     partId: str = Field(..., description="The unique identifier of the part.")
-    bodyType: str = Field(..., description="The type of the body (e.g., solid, surface).")
+    bodyType: BodyType = Field(..., description="The type of the body (e.g., solid, surface).")
     mateConnectors: list[Union[PartMateConnector, None]] = Field(
         default_factory=list,
         description="The mate connectors that belong to the part.",

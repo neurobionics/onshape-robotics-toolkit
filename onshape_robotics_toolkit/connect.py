@@ -629,7 +629,7 @@ class Client:
             query={
                 "includeMateFeatures": "true",
                 "includeMateConnectors": "true",
-                "includeNonSolids": "false",
+                "includeNonSolids": "true",
                 "configuration": configuration,
             },
             log_response=log_response,
