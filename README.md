@@ -26,8 +26,9 @@ The `onshape-robotics-toolkit` library is designed for users seeking a scalable,
 | **Workflow Flexibility**             | ✅ Open-ended and customizable       | ❌ Predefined and rigid                 |
 | **Design-Time Considerations**       | ✅ None                              | ❌ Requires specific naming conventions |
 | **Custom URDF Workflow**             | ✅ Supports any assembly             | ❌ Limited by design rules              |
-| **Variable Studio Editing**          | ✅ Yes                               | ❌ No                                   |
-| **Ease of Setup**                    | ❌ Moderate (requires python coding) | ✅ Easy (no coding required)            |
+| **Variable Studio Editing**          | ✅ Yes (API + CLI)                   | ❌ No                                   |
+| **Ease of Setup**                    | ✅ Easy (CLI) or flexible (Python)   | ✅ Easy (no coding required)            |
+| **Command-Line Interface**           | ✅ Full-featured CLI                 | ✅ Basic CLI                            |
 | **Headless Integration**             | ✅ Yes (e.g., optimization)          | ❌ No out-of-the-box support            |
 | **Access to Full Onshape API**       | ✅ Yes                               | ❌ Limited                              |
 | **Graph Visualization and Analysis** | ✅ Supports graph generation         | ❌ Not supported                        |
@@ -54,6 +55,88 @@ If you want to install from source, you'll need to install [`uv`](https://docs.a
 git clone https://github.com/neurobionics/onshape-robotics-toolkit.git
 cd onshape-robotics-toolkit
 uv sync
+```
+
+## Quick Start with CLI
+
+The toolkit provides a powerful command-line interface (`ort`) for common workflows. After installation, you can export Onshape assemblies to URDF or MJCF formats with just a few commands:
+
+### 1. Set up your credentials
+
+Create a `.env` file with your Onshape API keys:
+
+```bash
+ONSHAPE_ACCESS_KEY=your_access_key
+ONSHAPE_SECRET_KEY=your_secret_key
+```
+
+Or use the interactive setup:
+
+```bash
+ort config init
+```
+
+### 2. Export an assembly to URDF
+
+```bash
+ort export "https://cad.onshape.com/documents/..." robot.urdf
+```
+
+### 3. Export to MJCF (MuJoCo)
+
+```bash
+ort export "https://cad.onshape.com/documents/..." robot.xml \
+  --format mjcf \
+  --ground-plane \
+  --position 0 0 0.5
+```
+
+### Additional CLI Features
+
+**Update variables before export:**
+```bash
+ort var export "https://cad.onshape.com/documents/..." robot.urdf \
+  --set wheelDiameter="180 mm" \
+  --set forkAngle="20 deg"
+```
+
+**Inspect assembly structure:**
+```bash
+ort assembly info "https://cad.onshape.com/documents/..."
+ort graph show "https://cad.onshape.com/documents/..."
+```
+
+**Get help:**
+```bash
+ort --help           # Show all commands
+ort export --help    # Show export options
+```
+
+For complete CLI documentation, see [CLI Reference](https://neurobionics.github.io/onshape-robotics-toolkit/cli-reference/).
+
+## Python API
+
+For advanced use cases, the toolkit provides a comprehensive Python API:
+
+```python
+from onshape_robotics_toolkit.connect import Client
+from onshape_robotics_toolkit.parse import CAD
+from onshape_robotics_toolkit.graph import KinematicGraph
+from onshape_robotics_toolkit.robot import Robot
+from onshape_robotics_toolkit.formats import URDFSerializer
+
+# Connect to Onshape
+client = Client(env=".env")
+
+# Process assembly
+assembly = client.get_assembly(did, wtype, wid, eid)
+cad = CAD.from_assembly(assembly, max_depth=1, client=client)
+graph = KinematicGraph.from_cad(cad)
+robot = Robot.from_graph(graph, client=client, name="my_robot")
+
+# Export to URDF
+serializer = URDFSerializer()
+serializer.save(robot, "robot.urdf", download_assets=True)
 ```
 
 ## Documentation
