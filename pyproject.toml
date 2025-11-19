@@ -25,6 +25,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+simulation = [
+    "mujoco>=3.3.7",
+    "optuna>=4.6.0",
+    "plotly>=6.5.0",
+    "usd-core>=25.11",
+]
 docs = [
     "mkdocs>=1.4.2",
     "mkdocs-material>=9.2.7",

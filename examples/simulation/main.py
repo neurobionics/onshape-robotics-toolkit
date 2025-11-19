@@ -10,12 +10,13 @@ import optuna
 import plotly
 from controllers import PIDController
 from loguru import logger
-from mods import modify_ballbot
+from mods import create_ballbot_config
 from mujoco.usd import exporter
 from scipy.spatial.transform import Rotation
 from transformations import compute_motor_torques
 
 from onshape_robotics_toolkit.connect import Client
+from onshape_robotics_toolkit.formats import MJCFSerializer
 from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.parse import CAD
@@ -315,9 +316,10 @@ def find_best_design_variables(trial):
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
     ballbot = Robot.from_graph(kinematic_graph=graph, client=client, name="ballbot")
 
-    ballbot.set_robot_position(pos=(0, 0, 0.35))
-    ballbot = modify_ballbot(ballbot)
-    ballbot.save("ballbot.xml")
+    # Create config with simulation settings and save
+    config = create_ballbot_config(position=(0, 0, 0.35))
+    serializer = MJCFSerializer(config)
+    serializer.save(ballbot, "ballbot.xml")
 
     model = mujoco.MjModel.from_xml_path(filename="ballbot.xml")
     data = mujoco.MjData(model)

@@ -16,8 +16,27 @@ from typing_extensions import Literal
 
 from onshape_robotics_toolkit.formats.base import RobotDeserializer, RobotSerializer
 from onshape_robotics_toolkit.models.joint import BaseJoint
-from onshape_robotics_toolkit.models.mjcf import Actuator, Light, Sensor
+from onshape_robotics_toolkit.models.mjcf import Actuator, Encoder, ForceSensor, Light, Sensor
 from onshape_robotics_toolkit.utilities.helpers import format_number
+
+
+def load_element(file_name: str) -> ET._Element:
+    """
+    Load an XML element from a file.
+
+    Args:
+        file_name: The path to the XML file.
+
+    Returns:
+        The root element of the XML file.
+
+    Examples:
+        >>> element = load_element("ball.xml")
+        >>> config.add_custom_element_by_tag("ball", "worldbody", element)
+    """
+    tree: ET._ElementTree = ET.parse(file_name)  # noqa: S320
+    root: ET._Element = tree.getroot()
+    return root
 
 if TYPE_CHECKING:
     from onshape_robotics_toolkit.parse import PathKey
@@ -180,13 +199,16 @@ class MJCFConfig:
         self,
         element_name: str,
         attributes: dict[str, str],
-    ) -> None:
+    ) -> "MJCFConfig":
         """
         Register attribute modifications for an existing XML element.
 
         Args:
             element_name: The name of the element to modify
             attributes: Dictionary of attribute key-value pairs to set/update
+
+        Returns:
+            Self for method chaining
 
         Examples:
             >>> config = MJCFConfig()
@@ -196,6 +218,128 @@ class MJCFConfig:
             ... )
         """
         self.mutated_elements[element_name] = attributes
+        return self
+
+    def add_light(
+        self,
+        name: str,
+        directional: bool,
+        diffuse: tuple[float, float, float],
+        specular: tuple[float, float, float],
+        pos: tuple[float, float, float],
+        direction: tuple[float, float, float],
+        castshadow: bool,
+    ) -> "MJCFConfig":
+        """
+        Add a light source to the scene.
+
+        Args:
+            name: The name of the light
+            directional: Whether the light is directional
+            diffuse: The diffuse color (r, g, b)
+            specular: The specular color (r, g, b)
+            pos: The position (x, y, z)
+            direction: The direction (x, y, z)
+            castshadow: Whether the light casts shadows
+
+        Returns:
+            Self for method chaining
+
+        Examples:
+            >>> config = MJCFConfig()
+            >>> config.add_light(
+            ...     name="sun",
+            ...     directional=True,
+            ...     diffuse=(0.8, 0.8, 0.8),
+            ...     specular=(0.2, 0.2, 0.2),
+            ...     pos=(0, 0, 10),
+            ...     direction=(0, 0, -1),
+            ...     castshadow=True
+            ... )
+        """
+        self.lights[name] = Light(
+            directional=directional,
+            diffuse=diffuse,
+            specular=specular,
+            pos=pos,
+            direction=direction,
+            castshadow=castshadow,
+        )
+        return self
+
+    def add_actuator(
+        self,
+        actuator_name: str,
+        joint_name: str,
+        ctrl_limited: bool = False,
+        ctrl_range: tuple[float, float] = (0, 0),
+        gear: float = 1.0,
+        add_encoder: bool = False,
+        add_force_sensor: bool = False,
+    ) -> "MJCFConfig":
+        """
+        Add an actuator to the model.
+
+        Args:
+            actuator_name: The name of the actuator
+            joint_name: The name of the joint to actuate
+            ctrl_limited: Whether the actuator has control limits
+            ctrl_range: The control range (min, max)
+            gear: The gear ratio
+            add_encoder: Whether to add an encoder sensor
+            add_force_sensor: Whether to add a force sensor
+
+        Returns:
+            Self for method chaining
+
+        Examples:
+            >>> config = MJCFConfig()
+            >>> config.add_actuator(
+            ...     actuator_name="motor1",
+            ...     joint_name="joint1",
+            ...     ctrl_limited=True,
+            ...     ctrl_range=(-10, 10),
+            ...     add_encoder=True,
+            ...     add_force_sensor=True
+            ... )
+        """
+        self.actuators[actuator_name] = Actuator(
+            name=actuator_name,
+            joint=joint_name,
+            ctrllimited=ctrl_limited,
+            ctrlrange=ctrl_range,
+            gear=gear,
+        )
+
+        if add_encoder:
+            encoder_name = f"{actuator_name}-enc"
+            self.sensors[encoder_name] = Encoder(encoder_name, actuator_name)
+
+        if add_force_sensor:
+            force_name = f"{actuator_name}-frc"
+            self.sensors[force_name] = ForceSensor(force_name, actuator_name)
+
+        return self
+
+    def add_sensor(self, name: str, sensor: Sensor) -> "MJCFConfig":
+        """
+        Add a sensor to the model.
+
+        Args:
+            name: The name of the sensor
+            sensor: The sensor object (IMU, Gyro, Encoder, ForceSensor)
+
+        Returns:
+            Self for method chaining
+
+        Examples:
+            >>> from onshape_robotics_toolkit.models.mjcf import IMU, Gyro
+            >>> config = MJCFConfig()
+            >>> config.add_sensor("imu", IMU(name="imu", objtype="site", objname="imu"))
+            >>> config.add_sensor("gyro", Gyro(name="gyro", site="imu"))
+        """
+        self.sensors[name] = sensor
+        return self
 
 
 class MJCFSerializer(RobotSerializer):

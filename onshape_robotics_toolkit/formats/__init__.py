@@ -27,7 +27,7 @@ file formats like URDF and MJCF (MuJoCo).
 """
 
 from onshape_robotics_toolkit.formats.base import RobotDeserializer, RobotSerializer
-from onshape_robotics_toolkit.formats.mjcf import MJCFConfig, MJCFSerializer
+from onshape_robotics_toolkit.formats.mjcf import MJCFConfig, MJCFSerializer, load_element
 from onshape_robotics_toolkit.formats.urdf import URDFSerializer
 
 __all__ = [
@@ -36,4 +36,5 @@ __all__ = [
     "RobotDeserializer",
     "RobotSerializer",
     "URDFSerializer",
+    "load_element",
 ]
