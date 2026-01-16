@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/neurobionics/onshape-robotics-toolkit/compare/onshape-robotics-toolkit-v0.4.0...onshape-robotics-toolkit-v0.5.0) (2026-01-16)
+
+
+### Features
+
+* add support for composite parts ([1b317c1](https://github.com/neurobionics/onshape-robotics-toolkit/commit/1b317c184227d3a85fb58abd89ea3f75fc53df72))
+
+
+### Bug Fixes
+
+* add MJCF robot methods to config and update examples ([19329ad](https://github.com/neurobionics/onshape-robotics-toolkit/commit/19329ad787943cfcbfc4b9bacb334941c5cb477c))
+* revert set variable method and validate variables argument before building payload ([25f0883](https://github.com/neurobionics/onshape-robotics-toolkit/commit/25f08839e92e57c3cbbe2a190d244c32a9087dd9))
+* update variables config to accomodate the set_variables fix ([c5d35f4](https://github.com/neurobionics/onshape-robotics-toolkit/commit/c5d35f492b89aeb97bbf17e32b69de555a566863))
+
 ## [0.4.0](https://github.com/neurobionics/onshape-robotics-toolkit/compare/onshape-robotics-toolkit-v0.3.0...onshape-robotics-toolkit-v0.4.0) (2025-10-15)
 
 
