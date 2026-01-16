@@ -391,7 +391,9 @@ class Client:
             body=payload,
         )
 
-        record_variable_update(element_id=eid, expressions=variables)
+        # Extract expressions from Variable objects for session recording
+        expressions = {name: var.expression for name, var in variables.items() if var.expression is not None}
+        record_variable_update(element_id=eid, expressions=expressions)
 
         return response
 

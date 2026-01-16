@@ -1,3 +1,10 @@
+"""
+Ballbot Design and Control Optimization Example
+
+This example requires additional simulation dependencies.
+Install them with: pip install onshape-robotics-toolkit[simulation]
+"""
+
 import json
 import os
 from functools import partial
@@ -302,14 +309,7 @@ def find_best_design_variables(trial):
     variables["spacer_height"].expression = f"{spacer_height:.1f} mm"
     variables["plate_thickness"].expression = f"{plate_thickness:.1f} mm"
 
-    variables_to_set = {
-        "wheel_diameter": variables["wheel_diameter"].expression,
-        "alpha": variables["alpha"].expression,
-        "spacer_height": variables["spacer_height"].expression,
-        "plate_thickness": variables["plate_thickness"].expression,
-    }
-
-    client.set_variables(doc.did, doc.wid, elements["variables"].id, variables_to_set)
+    client.set_variables(doc.did, doc.wid, elements["variables"].id, variables=variables)
     assembly = client.get_assembly(doc.did, doc.wtype, doc.wid, doc.eid)
 
     cad = CAD.from_assembly(assembly, max_depth=1, client=client)

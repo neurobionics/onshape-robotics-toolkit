@@ -38,6 +38,7 @@ def load_element(file_name: str) -> ET._Element:
     root: ET._Element = tree.getroot()
     return root
 
+
 if TYPE_CHECKING:
     from onshape_robotics_toolkit.parse import PathKey
     from onshape_robotics_toolkit.robot import Robot
