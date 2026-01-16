@@ -40,6 +40,8 @@ Before you begin, ensure you have the following:
 - <a href="https://www.onshape.com/en/" target="_blank">An Onshape account</a> if you don't already have one.
 - <a href="https://onshape-public.github.io/docs/auth/apikeys/" target="_blank">Onshape API keys (access key and secret key)</a>
 
+> **Note:** Before using this tool (including making API calls or using it for research), ensure you have read and comply with [Onshape's Terms of Use](https://onshape-public.github.io/docs/auth/limits/#terms-of-use) and be aware of [Onshape's API limits and usage policies](https://onshape-public.github.io/docs/auth/limits/) to avoid exceeding rate limits.
+
 ## Installation
 
 You can install `onshape-robotics-toolkit` using `pip`, which is the easiest way to install it and is the recommended method for most users.
