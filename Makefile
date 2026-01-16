@@ -48,7 +48,7 @@ docs: ## Build and serve the documentation
 
 .PHONY: docs-deploy
 docs-deploy: ## Deploy the documentation to GitHub pages
-	@uv run mkdocs gh-deploy
+	@uv run mkdocs gh-deploy --force
 
 .PHONY: help
 help:
