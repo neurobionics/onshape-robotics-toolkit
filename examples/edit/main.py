@@ -1,4 +1,5 @@
 from onshape_robotics_toolkit.connect import Client
+from onshape_robotics_toolkit.formats.urdf import URDFSerializer
 from onshape_robotics_toolkit.graph import KinematicGraph
 from onshape_robotics_toolkit.models.document import Document
 from onshape_robotics_toolkit.parse import CAD
@@ -23,17 +24,14 @@ if __name__ == "__main__":
     variables["wheelThickness"].expression = "71 mm"
     variables["forkAngle"].expression = "20 deg"
 
-    # Create dictionary with variable names and their new expressions
-    variables_to_set = {
-        "wheelDiameter": variables["wheelDiameter"].expression,
-        "wheelThickness": variables["wheelThickness"].expression,
-        "forkAngle": variables["forkAngle"].expression,
-    }
-
-    client.set_variables(document.did, document.wid, elements["variables"].id, variables_to_set)
+    client.set_variables(document.did, document.wid, elements["variables"].id, variables=variables)
     assembly = client.get_assembly(document.did, document.wtype, document.wid, elements["assembly"].id)
 
     cad = CAD.from_assembly(assembly, max_depth=MAX_DEPTH, client=client)
     graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
     robot = Robot.from_graph(kinematic_graph=graph, client=client, name=f"edit_{MAX_DEPTH}")
-    robot.save()
+
+    urdf_serializer = URDFSerializer()
+    urdf_serializer.save(
+        robot=robot, file_path="output/edited_robot.urdf", download_assets=True, mesh_dir="output/meshes"
+    )

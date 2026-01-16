@@ -350,7 +350,7 @@ class Client:
 
         return {variable["name"]: Variable.model_validate(variable) for variable in _variables_json[0]["variables"]}
 
-    def set_variables(self, did: str, wid: str, eid: str, variables: dict[str, str]) -> requests.Response:
+    def set_variables(self, did: str, wid: str, eid: str, variables: dict[str, Variable]) -> requests.Response:
         """
         Set values for variables of a variable studio in a document.
 
@@ -358,7 +358,7 @@ class Client:
             did: The unique identifier of the document.
             wid: The unique identifier of the workspace.
             eid: The unique identifier of the variable studio.
-            variables: A dictionary of variable name and expression pairs.
+            variables: A dictionary of variable name and Variable pairs
 
         Returns:
             requests.Response: Response from Onshape API after setting the variables.
@@ -376,8 +376,11 @@ class Client:
             ... )
             <Response [200]>
         """
+        for var_name, variable in variables.items():
+            if not isinstance(variable, Variable):
+                raise TypeError(f"Variable '{var_name}' is not a valid Variable object.")
 
-        payload = [{"name": name, "expression": expression} for name, expression in variables.items()]
+        payload = [variable.model_dump() for variable in variables.values()]
 
         # api/v9/variables/d/a1c1addf75444f54b504f25c/w/0d17b8ebb2a4c76be9fff3c7/e/cba5e3ca026547f34f8d9f0f/variables
         request_path = "/api/variables/d/" + did + "/w/" + wid + "/e/" + eid + "/variables"
@@ -388,7 +391,9 @@ class Client:
             body=payload,
         )
 
-        record_variable_update(element_id=eid, expressions=variables)
+        # Extract expressions from Variable objects for session recording
+        expressions = {name: var.expression for name, var in variables.items() if var.expression is not None}
+        record_variable_update(element_id=eid, expressions=expressions)
 
         return response
 

@@ -1357,15 +1357,12 @@ dependencies = [
     { name = "loguru" },
     { name = "lxml" },
     { name = "matplotlib" },
-    { name = "mujoco" },
     { name = "networkx", version = "3.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "networkx", version = "3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "numpy-stl" },
-    { name = "optuna" },
     { name = "pillow" },
-    { name = "plotly" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -1374,7 +1371,6 @@ dependencies = [
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.16.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "typing-extensions" },
-    { name = "usd-core" },
 ]
 
 [package.optional-dependencies]
@@ -1383,6 +1379,12 @@ docs = [
     { name = "mkdocs-material" },
     { name = "mkdocstrings", extra = ["python"] },
     { name = "pymdown-extensions" },
+]
+simulation = [
+    { name = "mujoco" },
+    { name = "optuna" },
+    { name = "plotly" },
+    { name = "usd-core" },
 ]
 
 [package.dev-dependencies]
@@ -1411,13 +1413,13 @@ requires-dist = [
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.4.2" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.2.7" },
     { name = "mkdocstrings", extras = ["python"], marker = "extra == 'docs'", specifier = ">=0.26.1" },
-    { name = "mujoco", specifier = ">=3.3.7" },
+    { name = "mujoco", marker = "extra == 'simulation'", specifier = ">=3.3.7" },
     { name = "networkx", specifier = ">=3.4.2" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "numpy-stl", specifier = ">=3.1.2" },
-    { name = "optuna", specifier = ">=4.6.0" },
+    { name = "optuna", marker = "extra == 'simulation'", specifier = ">=4.6.0" },
     { name = "pillow", specifier = ">=10.0.0" },
-    { name = "plotly", specifier = ">=6.5.0" },
+    { name = "plotly", marker = "extra == 'simulation'", specifier = ">=6.5.0" },
     { name = "pydantic", specifier = ">=2.9.2" },
     { name = "pymdown-extensions", marker = "extra == 'docs'", specifier = ">=10.12" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
@@ -1426,9 +1428,9 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.3" },
     { name = "scipy", specifier = ">=1.14.1" },
     { name = "typing-extensions", specifier = ">=4.12.0" },
-    { name = "usd-core", specifier = ">=25.11" },
+    { name = "usd-core", marker = "extra == 'simulation'", specifier = ">=25.11" },
 ]
-provides-extras = ["docs"]
+provides-extras = ["simulation", "docs"]
 
 [package.metadata.requires-dev]
 dev = [
