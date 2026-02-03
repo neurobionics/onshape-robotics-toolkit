@@ -31,6 +31,7 @@ from onshape_robotics_toolkit.models.assembly import (
     AssemblyInstance,
     BodyType,
     MatedCS,
+    MateConnectorFeatureData,
     MateFeatureData,
     MateGroupFeatureData,
     MateType,
@@ -273,6 +274,7 @@ class CAD:
     mates: dict[tuple[Optional[PathKey], PathKey, PathKey], MateFeatureData]  # (assembly, parent, child)
     patterns: dict[str, Pattern]
     parts: dict[PathKey, Part]  # Populated eagerly from assembly.parts
+    mate_connectors: list[MateConnectorFeatureData]
 
     def __init__(
         self,
@@ -314,6 +316,7 @@ class CAD:
         self.patterns = {}
         self.parts = {}
         self.subassemblies = {}
+        self.mate_connectors = []
 
         self._client = client
 
@@ -1017,9 +1020,35 @@ class CAD:
                     )
                 return
 
-            # Handle mate connectors (not yet implemented)
+            # Handle mate connectors
             if feature.featureType == AssemblyFeatureType.MATECONNECTOR:
-                # TODO: add support for mate connectors
+                if not isinstance(feature.featureData, MateConnectorFeatureData):
+                    return
+
+                mc_data: MateConnectorFeatureData = copy.deepcopy(feature.featureData)
+                try:
+                    occurrence = mc_data.occurrence
+                except Exception:
+                    logger.warning(f"Malformed mate connector feature {mc_data.name}")
+                    return
+
+                occurrence_path = tuple(occurrence)
+                if path_prefix:
+                    occurrence_path = path_prefix + occurrence_path
+                    # Update the data object to have the absolute path
+                    mc_data.occurrence = list(occurrence_path)
+
+                occurrence_key = self.keys_by_id.get(occurrence_path)
+
+                if occurrence_key:
+                    self.mate_connectors.append(mc_data)
+                else:
+                    scope = "root" if assembly_key is None else f"subassembly {assembly_key}"
+                    logger.warning(
+                        "Missing PathKey for %s mate connector: %s",
+                        scope,
+                        mc_data.name,
+                    )
                 return
 
             # Handle regular mates (create kinematic relationships)
