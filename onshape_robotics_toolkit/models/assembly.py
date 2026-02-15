@@ -1448,6 +1448,8 @@ class FeatureType(str, Enum):
     MATE_RELATION = "mateRelation"
     RELATION = "replicate"
     EMPTY = ""
+    MATE_CONNECTOR = "mateConnector"
+    MATE_GROUP = "mateGroup"
 
 
 class InferenceType(str, Enum):
