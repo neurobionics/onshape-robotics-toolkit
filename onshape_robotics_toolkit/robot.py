@@ -501,20 +501,17 @@ class Robot(nx.DiGraph):
     It stores the robot structure as a NetworkX directed graph where nodes are links
     and edges are joints, along with associated STL assets.
 
-    **Recommended Creation Methods:**
-    - `Robot.from_graph()`: Create from pre-built CAD + KinematicGraph (most efficient)
-    - `Robot.from_url()`: Create directly from Onshape URL (most convenient)
+    **Creation:**
+    Use `Robot.from_graph()` after building a `CAD` and `KinematicGraph`:
+
+        >>> cad = CAD.from_url(url, client=client, max_depth=1)
+        >>> graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
+        >>> robot = Robot.from_graph(graph, client, "my_robot")
 
     **Attributes:**
         name (str): The name of the robot
         kinematic_graph (KinematicGraph): The kinematic graph used to create the robot
         graph (nx.DiGraph): Graph structure holding links (nodes) and joints (edges)
-
-    **Key Methods:**
-        show_tree: Display the robot's graph as a tree structure
-        show_graph: Display the robot's graph as a directed graph
-        from_graph: Create robot from KinematicGraph (recommended)
-        from_url: Create robot from Onshape URL
 
     **Serialization:**
     To export the robot to URDF or MJCF formats, use the format-specific serializers
@@ -529,27 +526,6 @@ class Robot(nx.DiGraph):
         >>> mjcf_config = MJCFConfig(position=(0, 0, 1), add_ground_plane=True)
         >>> mjcf_serializer = MJCFSerializer(mjcf_config)
         >>> mjcf_serializer.save(robot, "robot.xml", download_assets=True)
-
-    **Example:**
-        >>> from onshape_robotics_toolkit.connect import Client
-        >>> from onshape_robotics_toolkit.graph import KinematicGraph
-        >>> from onshape_robotics_toolkit.formats import URDFSerializer
-        >>>
-        >>> # Option 1: From URL (convenient)
-        >>> robot = Robot.from_url(
-        ...     name="my_robot",
-        ...     url="https://cad.onshape.com/documents/...",
-        ...     client=Client(),
-        ...     max_depth=1
-        ... )
-        >>>
-        >>> # Option 2: From KinematicGraph (efficient, more control)
-        >>> graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
-        >>> robot = Robot.from_graph(graph, Client(), "my_robot")
-        >>>
-        >>> # Save to file using format serializers
-        >>> serializer = URDFSerializer()
-        >>> serializer.save(robot, "robot.urdf", download_assets=True)
     """
 
     def __init__(self, kinematic_graph: KinematicGraph, name: str):

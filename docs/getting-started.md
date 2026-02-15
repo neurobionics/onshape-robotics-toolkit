@@ -84,9 +84,7 @@ from onshape_robotics_toolkit.connect import Client
 from onshape_robotics_toolkit.models.document import Document
 
 # Initialize the client
-client = osa.Client(
-    env="./.env"
-)
+client = Client(env=".env")
 
 # Create a Document object from a URL
 doc = Document.from_url(

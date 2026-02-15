@@ -35,7 +35,7 @@ The `onshape-robotics-toolkit` library is designed for users seeking a scalable,
 
 Before you begin, ensure you have the following:
 
-- <a href="https://www.python.org/downloads/release/python-3100/" target="_blank">Python 3.10</a> or higher installed on your machine.
+- <a href="https://www.python.org/downloads/" target="_blank">Python 3.10–3.13</a> installed on your machine.
 - <a href="https://www.onshape.com/en/" target="_blank">An Onshape account</a> if you don't already have one.
 - <a href="https://onshape-public.github.io/docs/auth/apikeys/" target="_blank">Onshape API keys (access key and secret key)</a>
 

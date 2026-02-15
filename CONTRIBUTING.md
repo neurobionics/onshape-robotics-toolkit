@@ -3,8 +3,6 @@
 Contributions are welcome, and they are greatly appreciated!
 Every little bit helps, and credit will always be given.
 
-You can contribute in many ways:
-
 # Types of Contributions
 
 ## Report Bugs
@@ -29,7 +27,7 @@ Anything tagged with "enhancement" and "help wanted" is open to whoever wants to
 
 ## Write Documentation
 
-Cookiecutter PyPackage could always use more documentation, whether as part of the official docs, in docstrings, or even on the web in blog posts, articles, and such.
+`onshape-robotics-toolkit` could always use more documentation, whether as part of the official docs, in docstrings, or even on the web in blog posts, articles, and such.
 
 ## Submit Feedback
 
@@ -39,8 +37,7 @@ If you are proposing a new feature:
 
 - Explain in detail how it would work.
 - Keep the scope as narrow as possible, to make it easier to implement.
-- Remember that this is a volunteer-driven project, and that contributions
-  are welcome :)
+- Remember that this is a volunteer-driven project, and that contributions are welcome :)
 
 # Get Started!
 
@@ -54,30 +51,41 @@ Please note this documentation assumes you already have `uv` and `Git` installed
 ```bash
 cd <directory_in_which_repo_should_be_created>
 git clone git@github.com:YOUR_NAME/onshape-robotics-toolkit.git
-```
-
-3. Now we need to install the environment. Navigate into the directory
-
-```bash
 cd onshape-robotics-toolkit
 ```
 
-If you are using `pyenv`, select a version to use locally. (See installed versions with `pyenv versions`)
+3. Install the environment and pre-commit hooks:
 
-```bash
-pyenv local <x.y.z>
-```
+**If you are on Windows and do not have GNU Make installed:**
 
-Then, install and activate the environment with:
+Run the following commands directly in your terminal:
 
-```bash
+```powershell
 uv sync --dev --extra docs
+uv run pre-commit install
 ```
 
-4. Install pre-commit to run linters/formatters at commit time:
+If you also need the simulation extras (MuJoCo, Optuna, etc.), run:
+
+```powershell
+uv sync --dev --extra docs --extra simulation
+```
+
+**If you have GNU Make installed:**
+
+You can use the shortcut:
 
 ```bash
-uv run pre-commit install
+make install
+```
+
+This runs the same commands for you automatically.
+
+4. Set up your Onshape API credentials. Create a `.env` file in the project root:
+
+```
+ONSHAPE_ACCESS_KEY=...
+ONSHAPE_SECRET_KEY=...
 ```
 
 5. Create a branch for local development:
@@ -90,29 +98,19 @@ Now you can make your changes locally.
 
 6. Don't forget to add test cases for your added functionality to the `tests` directory.
 
-7. When you're done making changes, check that your changes pass the formatting tests.
+7. When you're done making changes, check that your changes pass all quality checks (linting, type checking, dependency checks):
 
 ```bash
 make check
 ```
 
-Now, validate that all unit tests are passing:
+8. Validate that all unit tests are passing:
 
 ```bash
 make test
 ```
 
-9. Before raising a pull request you should also run tox.
-   This will run the tests across different versions of Python:
-
-```bash
-tox
-```
-
-This requires you to have multiple versions of python installed.
-This step is also triggered in the CI/CD pipeline, so you could also choose to skip this step locally.
-
-10. Commit your changes and push your branch to GitHub:
+9. Commit your changes and push your branch to GitHub:
 
 ```bash
 git add .
@@ -120,7 +118,9 @@ git commit -m "Your detailed description of your changes."
 git push origin name-of-your-bugfix-or-feature
 ```
 
-11. Submit a pull request through the GitHub website.
+10. Submit a pull request through the GitHub website.
+
+> **Note:** The CI/CD pipeline runs tests across multiple Python versions (3.10–3.12) automatically on every pull request. You can also run this locally with `tox` if you have multiple Python versions installed, but this is not required before opening a PR.
 
 # Pull Request Guidelines
 

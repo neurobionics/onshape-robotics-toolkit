@@ -33,7 +33,9 @@ assembly = client.get_assembly(url)
 cad = CAD.from_assembly(assembly, max_depth=1, client=client)
 graph = KinematicGraph.from_cad(cad, use_user_defined_root=True)
 robot = Robot.from_graph(graph, client=client, name="demo_bot")
-robot.save("demo_bot.urdf", download_assets=True)
+
+from onshape_robotics_toolkit.formats.urdf import URDFSerializer
+URDFSerializer().save(robot, "demo_bot.urdf", download_assets=True)
 ```
 
 Passing a `Client` into `CAD.from_assembly` is optional in general, but required when `max_depth` forces subassemblies to become rigid—rigid assemblies need extra API calls to recover their internal transforms and mass properties.
@@ -174,9 +176,8 @@ Edges carry `data=<BaseJoint>` instances.
 
 ### Export and utilities
 
-- `save(path, download_assets=True)` writes URDF/MJCF XML and optionally downloads STL assets through the `Asset` objects.
-- `to_urdf` and `to_mjcf` generate XML trees.
-- `show_tree` and `show_graph` visualize the resulting robot structure for debugging.
+- Export using `URDFSerializer().save(robot, path, download_assets=True)` or `MJCFSerializer().save(...)` from `onshape_robotics_toolkit.formats`.
+- `show_tree()` on `Robot` prints the tree structure to the console for quick debugging.
 
 ## Working With the Onshape API
 
@@ -188,7 +189,7 @@ Edges carry `data=<BaseJoint>` instances.
 
 - Inspect `CAD` state quickly with `repr(cad)`; it prints counts for every registry.
 - Use `cad.mates.items()` to confirm mate orientation and provenance before the graph stage.
-- Call `graph.show()` or `robot.show_graph()` when debugging connectivity issues.
+- Call `graph.show()` when debugging connectivity issues — it plots the kinematic graph with sanitized part names.
 - When rigid assemblies behave oddly, confirm `rigidAssemblyToPartTF` is set. If not, ensure `CAD.from_assembly` received a `Client` so it can fetch `RootOccurrences`.
 
 ## Testing
@@ -210,16 +211,16 @@ Tests are organized by functionality in the `tests/` directory:
 
 ```bash
 # Run all tests
-pytest tests/ -v
+uv run pytest tests/ -v
 
 # Run specific test module
-pytest tests/test_transforms.py -v
+uv run pytest tests/test_transforms.py -v
 
 # Run with coverage report
-pytest --cov --cov-report=term-missing
+uv run pytest --cov --cov-report=term-missing
 
 # Run single test
-pytest tests/test_transforms.py::TestMatedCSTransformations::test_identity_transform -v
+uv run pytest tests/test_transforms.py::TestMatedCSTransformations::test_identity_transform -v
 ```
 
 ### Testing Approach
@@ -364,8 +365,8 @@ Areas needing more coverage:
   - Golden file updates for URDF/MJCF changes.
 - Run the full test suite before committing:
   ```bash
-  pytest tests/ -v
-  make check  # Runs linting, type checking, and tests
+  uv run pytest tests/ -v
+  make check  # Runs linting, type checking, and dependency checks
   ```
 - Document new behavior here and keep inline comments concise. If you introduce a new pipeline stage or helper, summarize it in this handbook so future contributors know where to look.
 
