@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/neurobionics/onshape-robotics-toolkit/compare/onshape-robotics-toolkit-v0.6.0...onshape-robotics-toolkit-v0.6.1) (2026-02-15)
+
+
+### Documentation
+
+* fix deploy-docs issue ([f4cedbd](https://github.com/neurobionics/onshape-robotics-toolkit/commit/f4cedbda68ef80092b03e3953bc2fba4790f8cd2))
+
 ## [0.6.0](https://github.com/neurobionics/onshape-robotics-toolkit/compare/onshape-robotics-toolkit-v0.5.0...onshape-robotics-toolkit-v0.6.0) (2026-02-15)
 
 
