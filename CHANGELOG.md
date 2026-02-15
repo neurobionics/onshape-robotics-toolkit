@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.0](https://github.com/neurobionics/onshape-robotics-toolkit/compare/onshape-robotics-toolkit-v0.5.0...onshape-robotics-toolkit-v0.6.0) (2026-02-15)
+
+
+### Features
+
+* Add mate connector support to CAD parser ([891230b](https://github.com/neurobionics/onshape-robotics-toolkit/commit/891230b3fdd681626e4513c80242dceca09cecde))
+* support fetching mate connector ([f043f16](https://github.com/neurobionics/onshape-robotics-toolkit/commit/f043f164c30fe48fe42f2ad38452356cd5e993ef))
+
+
+### Bug Fixes
+
+* Add MATE_CONNECTOR and MATE_GROUP to FeatureType enum ([c3f3136](https://github.com/neurobionics/onshape-robotics-toolkit/commit/c3f31367778a5e0a5bd2ed902652bb52e1f71f77))
+* linting and formatting issues in tests/test_mate_connectors.py ([12a554c](https://github.com/neurobionics/onshape-robotics-toolkit/commit/12a554cbac1af803dc794ff679886baef447896f))
+
+
+### Documentation
+
+* update examples and getting started docs. Remove support for 3.14 to avoid lxml installation problems ([4a9d1dd](https://github.com/neurobionics/onshape-robotics-toolkit/commit/4a9d1dda29557156841920a29fa0dcc66b64718b))
+
 ## [0.5.0](https://github.com/neurobionics/onshape-robotics-toolkit/compare/onshape-robotics-toolkit-v0.4.0...onshape-robotics-toolkit-v0.5.0) (2026-01-16)
 
 
