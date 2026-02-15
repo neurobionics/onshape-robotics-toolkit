@@ -18,17 +18,3 @@ jobs:
         run: |
           source .venv/bin/activate
           make build-and-publish PYPI_TOKEN=${{ secrets.PYPI_TOKEN }}
-
-  deploy-docs:
-    runs-on: ubuntu-latest
-    needs: publish
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up the environment
-        uses: ./.github/actions/setup-uv-env
-
-      - name: Deploy documentation
-        run: make docs-deploy
